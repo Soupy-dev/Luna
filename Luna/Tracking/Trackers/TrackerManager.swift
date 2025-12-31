@@ -95,19 +95,32 @@ final class TrackerManager: NSObject, ObservableObject {
                     self.authError = error.localizedDescription
                     self.isAuthenticating = false
                 }
+                Logger.shared.log("AniList auth error: \(error.localizedDescription)", type: "Error")
                 return
             }
 
-            guard let callbackURL = callbackURL,
-                  let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: true),
-                  let code = components.queryItems?.first(where: { $0.name == "code" })?.value else {
+            guard let callbackURL = callbackURL else {
+                Logger.shared.log("AniList callback URL is nil", type: "Error")
                 DispatchQueue.main.async {
-                    self.authError = "Invalid AniList callback"
+                    self.authError = "AniList callback URL is nil"
                     self.isAuthenticating = false
                 }
                 return
             }
-
+            
+            Logger.shared.log("AniList callback URL: \(callbackURL.absoluteString)", type: "Tracker")
+            
+            guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: true),
+                  let code = components.queryItems?.first(where: { $0.name == "code" })?.value else {
+                Logger.shared.log("Failed to extract code from AniList callback. URL: \(callbackURL.absoluteString)", type: "Error")
+                DispatchQueue.main.async {
+                    self.authError = "Invalid AniList callback - failed to extract code"
+                    self.isAuthenticating = false
+                }
+                return
+            }
+            
+            Logger.shared.log("AniList code extracted successfully", type: "Tracker")
             self.handleAniListCallback(code: code)
         }
 
@@ -268,19 +281,32 @@ final class TrackerManager: NSObject, ObservableObject {
                     self.authError = error.localizedDescription
                     self.isAuthenticating = false
                 }
+                Logger.shared.log("Trakt auth error: \(error.localizedDescription)", type: "Error")
                 return
             }
 
-            guard let callbackURL = callbackURL,
-                  let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: true),
-                  let code = components.queryItems?.first(where: { $0.name == "code" })?.value else {
+            guard let callbackURL = callbackURL else {
+                Logger.shared.log("Trakt callback URL is nil", type: "Error")
                 DispatchQueue.main.async {
-                    self.authError = "Invalid Trakt callback"
+                    self.authError = "Trakt callback URL is nil"
                     self.isAuthenticating = false
                 }
                 return
             }
-
+            
+            Logger.shared.log("Trakt callback URL: \(callbackURL.absoluteString)", type: "Tracker")
+            
+            guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: true),
+                  let code = components.queryItems?.first(where: { $0.name == "code" })?.value else {
+                Logger.shared.log("Failed to extract code from Trakt callback. URL: \(callbackURL.absoluteString)", type: "Error")
+                DispatchQueue.main.async {
+                    self.authError = "Invalid Trakt callback - failed to extract code"
+                    self.isAuthenticating = false
+                }
+                return
+            }
+            
+            Logger.shared.log("Trakt code extracted successfully", type: "Tracker")
             self.handleTraktCallback(code: code)
         }
 
@@ -369,7 +395,7 @@ final class TrackerManager: NSObject, ObservableObject {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 201 else {
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw NSError(domain: "TraktAuth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to authenticate with Trakt"])
         }
         
