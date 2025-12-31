@@ -63,6 +63,19 @@ struct EpisodeCell: View {
                         .frame(width: 240, height: 135)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
+                    
+                        if isWatched {
+                            HStack {
+                                Spacer()
+                                VStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.blue)
+                                        .shadow(radius: 2)
+                                    Spacer()
+                                }
+                            }
+                            .padding(6)
+                        }
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -166,6 +179,19 @@ struct EpisodeCell: View {
                         .frame(width: 120, height: 68)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
+                    
+                        if isWatched {
+                            HStack {
+                                Spacer()
+                                VStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.blue)
+                                        .shadow(radius: 2)
+                                    Spacer()
+                                }
+                            }
+                            .padding(6)
+                        }
                 }
                 
                 VStack(alignment: .leading, spacing: 6) {

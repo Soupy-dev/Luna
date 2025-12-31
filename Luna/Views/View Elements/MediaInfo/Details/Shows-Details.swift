@@ -13,6 +13,7 @@ struct TVShowSeasonsSection: View {
     @Binding var selectedSeason: TMDBSeason?
     @Binding var seasonDetail: TMDBSeasonDetail?
     @Binding var selectedEpisodeForSearch: TMDBEpisode?
+    @Binding var pendingEpisodeSelection: (Int, Int)?
     let tmdbService: TMDBService
     
     @State private var isLoadingSeason = false
@@ -338,6 +339,8 @@ struct TVShowSeasonsSection: View {
     
     private func loadSeasonDetails(tvShowId: Int, season: TMDBSeason) {
         isLoadingSeason = true
+        seasonDetail = nil
+        selectedEpisodeForSearch = nil
         
         Task {
             do {
@@ -345,6 +348,15 @@ struct TVShowSeasonsSection: View {
                 await MainActor.run {
                     self.seasonDetail = detail
                     self.isLoadingSeason = false
+
+                    if let pending = pendingEpisodeSelection,
+                       pending.0 == season.seasonNumber,
+                       let match = detail.episodes.first(where: { $0.episodeNumber == pending.1 }) {
+                        self.selectedEpisodeForSearch = match
+                        self.pendingEpisodeSelection = nil
+                    } else if let firstEpisode = detail.episodes.first {
+                        self.selectedEpisodeForSearch = firstEpisode
+                    }
                 }
             } catch {
                 await MainActor.run {

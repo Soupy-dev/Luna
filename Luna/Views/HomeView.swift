@@ -8,6 +8,12 @@
 import SwiftUI
 import Kingfisher
 
+struct DetailLaunch: Identifiable {
+    let id = UUID()
+    let searchResult: TMDBSearchResult
+    let resumeHint: EpisodeResumeHint?
+}
+
 struct HomeView: View {
     @State private var showingSettings = false
     @State private var trendingContent: [TMDBSearchResult] = []
@@ -43,7 +49,7 @@ struct HomeView: View {
     @StateObject private var tmdbService = TMDBService.shared
     @StateObject private var contentFilter = TMDBContentFilter.shared
     @StateObject private var continueVM = ContinueWatchingViewModel()
-    @State private var continueDetailToShow: TMDBSearchResult? = nil
+    @State private var continueDetailToShow: DetailLaunch? = nil
     
     private var heroHeight: CGFloat {
 #if os(tvOS)
@@ -93,11 +99,15 @@ struct HomeView: View {
                 if isMovie {
                     let title = userInfo["title"] as? String
                     let sr = TMDBSearchResult(id: tmdbId, mediaType: "movie", title: title, name: nil, overview: nil, posterPath: nil, backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
-                    continueDetailToShow = sr
+                    continueDetailToShow = DetailLaunch(searchResult: sr, resumeHint: nil)
                 } else {
                     let title = userInfo["title"] as? String
                     let sr = TMDBSearchResult(id: tmdbId, mediaType: "tv", title: nil, name: title, overview: nil, posterPath: nil, backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
-                    continueDetailToShow = sr
+                    var hint: EpisodeResumeHint? = nil
+                    if let season = userInfo["seasonNumber"] as? Int, let episode = userInfo["episodeNumber"] as? Int {
+                        hint = EpisodeResumeHint(showId: tmdbId, season: season, episode: episode)
+                    }
+                    continueDetailToShow = DetailLaunch(searchResult: sr, resumeHint: hint)
                 }
             }
         }
@@ -109,8 +119,8 @@ struct HomeView: View {
         .sheet(isPresented: $showingSettings) {
             SettingsView()
         }
-        .sheet(item: $continueDetailToShow) { sr in
-            MediaDetailView(searchResult: sr)
+        .sheet(item: $continueDetailToShow) { launch in
+            MediaDetailView(searchResult: launch.searchResult, resumeHint: launch.resumeHint)
         }
     }
     

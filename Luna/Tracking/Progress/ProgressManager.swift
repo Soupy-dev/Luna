@@ -81,6 +81,15 @@ struct EpisodeProgressEntry: Codable, Identifiable {
     }
 }
 
+// Helper for episode resume context
+struct EpisodeProgressSnapshot {
+    let showId: Int
+    let seasonNumber: Int
+    let episodeNumber: Int
+    let progress: Double
+    let lastUpdated: Date
+}
+
 // MARK: - ProgressManager
 
 final class ProgressManager: ObservableObject {
@@ -326,6 +335,24 @@ final class ProgressManager: ObservableObject {
             result = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber)?.currentTime ?? 0.0
         }
         return result
+    }
+
+    /// Returns the most recently updated episode progress for a given show (if any).
+    func latestEpisodeProgress(for showId: Int) -> EpisodeProgressSnapshot? {
+        var snapshot: EpisodeProgressSnapshot? = nil
+        accessQueue.sync {
+            let entries = self.progressData.episodeProgress.filter { $0.showId == showId }
+            if let latest = entries.max(by: { $0.lastUpdated < $1.lastUpdated }) {
+                snapshot = EpisodeProgressSnapshot(
+                    showId: latest.showId,
+                    seasonNumber: latest.seasonNumber,
+                    episodeNumber: latest.episodeNumber,
+                    progress: latest.progress,
+                    lastUpdated: latest.lastUpdated
+                )
+            }
+        }
+        return snapshot
     }
     
     func isEpisodeWatched(showId: Int, seasonNumber: Int, episodeNumber: Int) -> Bool {

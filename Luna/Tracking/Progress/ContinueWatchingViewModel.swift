@@ -229,6 +229,8 @@ final class ContinueWatchingViewModel: ObservableObject {
                                     userInfo["tmdbId"] = showId
                                     userInfo["isMovie"] = false
                                     userInfo["title"] = entry.title
+                                    userInfo["seasonNumber"] = entry.seasonNumber
+                                    userInfo["episodeNumber"] = entry.episodeNumber
                                 }
                             }
                             NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: userInfo)
@@ -255,7 +257,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                 ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: season, episodeNumber: ep, currentTime: entry.currentTime, totalDuration: entry.totalDuration)
                     // Open MediaDetailView for this show
                     DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": showId, "isMovie": false, "title": entry.title])
+                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": showId, "isMovie": false, "title": entry.title, "seasonNumber": season, "episodeNumber": ep])
                     }
             }
         }

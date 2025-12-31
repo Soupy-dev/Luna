@@ -8,8 +8,15 @@
 import SwiftUI
 import Kingfisher
 
+struct EpisodeResumeHint {
+    let showId: Int
+    let season: Int
+    let episode: Int
+}
+
 struct MediaDetailView: View {
     let searchResult: TMDBSearchResult
+    let resumeHint: EpisodeResumeHint?
     
     @StateObject private var tmdbService = TMDBService.shared
     @State private var movieDetail: TMDBMovieDetail?
@@ -35,6 +42,12 @@ struct MediaDetailView: View {
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @AppStorage("useSolidBackgroundBehindHero") private var useSolidBackgroundBehindHero = false
+    @State private var pendingEpisodeSelection: (Int, Int)? = nil
+
+    init(searchResult: TMDBSearchResult, resumeHint: EpisodeResumeHint? = nil) {
+        self.searchResult = searchResult
+        self.resumeHint = resumeHint
+    }
 
     private var headerHeight: CGFloat {
 #if os(tvOS)
@@ -62,9 +75,16 @@ struct MediaDetailView: View {
             return "Play"
         } else if let selectedEpisode = selectedEpisodeForSearch {
             return "Play S\(selectedEpisode.seasonNumber)E\(selectedEpisode.episodeNumber)"
+        } else if let hint = resumeHint {
+            return "Play S\(hint.season)E\(hint.episode)"
         } else {
             return "Play"
         }
+    }
+
+    private var hasResumeHint: Bool {
+        if let hint = resumeHint { return hint.showId == searchResult.id }
+        return false
     }
     
     var body: some View {
@@ -358,6 +378,7 @@ struct MediaDetailView: View {
                 selectedSeason: $selectedSeason,
                 seasonDetail: $seasonDetail,
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
+                pendingEpisodeSelection: $pendingEpisodeSelection,
                 tmdbService: tmdbService
             )
         }
@@ -380,6 +401,11 @@ struct MediaDetailView: View {
         
         if !searchResult.isMovie {
             if selectedEpisodeForSearch != nil {
+                // already set
+            } else if let pending = pendingEpisodeSelection,
+                      let seasonDetail = seasonDetail,
+                      let match = seasonDetail.episodes.first(where: { $0.episodeNumber == pending.1 }) {
+                selectedEpisodeForSearch = match
             } else if let seasonDetail = seasonDetail, !seasonDetail.episodes.isEmpty {
                 selectedEpisodeForSearch = seasonDetail.episodes.first
             } else {
@@ -410,13 +436,31 @@ struct MediaDetailView: View {
                 } else {
                     let detail = try await tmdbService.getTVShowWithSeasons(id: searchResult.id)
                     let romaji = await tmdbService.getRomajiTitle(for: "tv", id: searchResult.id)
+
+                    // Prefer the last in-progress episode if we have one for this show
+                    let resume = ProgressManager.shared.latestEpisodeProgress(for: detail.id)
+
                     await MainActor.run {
                         self.tvShowDetail = detail
                         self.synopsis = detail.overview ?? ""
                         self.romajiTitle = romaji
-                        if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
+
+                        if let resume = resume {
+                            // pick the season matching resume, else first season >0
+                            if let matchedSeason = detail.seasons.first(where: { $0.seasonNumber == resume.seasonNumber }) {
+                                self.selectedSeason = matchedSeason
+                            } else if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
+                                self.selectedSeason = firstSeason
+                            }
+                            self.pendingEpisodeSelection = (resume.seasonNumber, resume.episodeNumber)
+                        } else if let hint = resumeHint, hint.showId == detail.id,
+                                  let matchedSeason = detail.seasons.first(where: { $0.seasonNumber == hint.season }) {
+                            self.selectedSeason = matchedSeason
+                            self.pendingEpisodeSelection = (hint.season, hint.episode)
+                        } else if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
                             self.selectedSeason = firstSeason
                         }
+
                         self.selectedEpisodeForSearch = nil
                         self.isLoading = false
                     }
