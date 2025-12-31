@@ -114,7 +114,7 @@ class AniListService {
                 
                 let seasonEpisodes: [AniListEpisode] = (0..<episodeCount).map { offset in
                     let epNum = currentEpisodeNumber + offset
-                    AniListEpisode(
+                    return AniListEpisode(
                         number: epNum,
                         title: "Episode \(epNum)",
                         description: nil,
