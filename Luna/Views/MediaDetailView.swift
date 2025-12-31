@@ -497,6 +497,14 @@ struct MediaDetailView: View {
                         let aniDetails = try? await AniListService.shared.fetchAnimeDetailsWithEpisodes(title: detail.name, token: nil)
 
                         await MainActor.run {
+                            Logger.shared.log("Anime detected for: \(detail.name)", type: "Anime")
+                            Logger.shared.log("AniList returned \(aniDetails?.seasons.count ?? 0) seasons", type: "Anime")
+                            if let seasons = aniDetails?.seasons {
+                                for season in seasons {
+                                    Logger.shared.log("Season \(season.seasonNumber): \(season.episodes.count) episodes", type: "Anime")
+                                }
+                            }
+                            
                             // Build AniList seasons array
                             let aniSeasons = aniDetails?.seasons.map { aniSeason in
                                 TMDBSeason(
@@ -509,6 +517,8 @@ struct MediaDetailView: View {
                                     airDate: nil
                                 )
                             } ?? []
+                            
+                            Logger.shared.log("Built \(aniSeasons.count) TMDBSeason objects", type: "Anime")
                             
                             // Create a new tvShowDetail with AniList seasons
                             let detailWithAniSeasons = TMDBTVShowWithSeasons(

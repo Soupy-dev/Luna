@@ -27,6 +27,7 @@ final class TrackerManager: NSObject, ObservableObject {
     
     // OAuth config (redirects can be overridden via Info.plist keys AniListRedirectUri / TraktRedirectUri)
     private let anilistClientId = "33908"
+    private let anilistClientSecret = "1TeOfbdHy3Uk88UQdE8HKoJDtdl5ARHp4sDCi5Jh"
     private var anilistRedirectUri: String {
         Bundle.main.object(forInfoDictionaryKey: "AniListRedirectUri") as? String ?? "luna://anilist-callback"
     }
@@ -201,6 +202,7 @@ final class TrackerManager: NSObject, ObservableObject {
         var body: [String: Any] = [
             "grant_type": "authorization_code",
             "client_id": anilistClientId,
+            "client_secret": anilistClientSecret,
             "redirect_uri": anilistRedirectUri,
             "code": code
         ]

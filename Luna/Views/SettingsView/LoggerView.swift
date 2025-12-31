@@ -302,18 +302,6 @@ class LoggerManager: ObservableObject {
     }
 }
 
-struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-    
-    #if !os(tvOS)
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-    
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-    #endif
-}
-
 #if !os(tvOS)
 struct LogDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.plainText] }
