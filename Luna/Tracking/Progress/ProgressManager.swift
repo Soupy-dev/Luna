@@ -7,6 +7,7 @@
 
 import Foundation
 import AVFoundation
+import Combine
 
 // MARK: - Data Models
 
@@ -46,6 +47,8 @@ struct MovieProgressEntry: Codable, Identifiable {
     var totalDuration: Double = 0
     var isWatched: Bool = false
     var lastUpdated: Date = Date()
+    var lastServiceId: UUID? = nil
+    var lastHref: String? = nil
     
     var progress: Double {
         guard totalDuration > 0 else { return 0 }
@@ -62,6 +65,8 @@ struct EpisodeProgressEntry: Codable, Identifiable {
     var totalDuration: Double = 0
     var isWatched: Bool = false
     var lastUpdated: Date = Date()
+    var lastServiceId: UUID? = nil
+    var lastHref: String? = nil
     
     var progress: Double {
         guard totalDuration > 0 else { return 0 }
@@ -78,7 +83,7 @@ struct EpisodeProgressEntry: Codable, Identifiable {
 
 // MARK: - ProgressManager
 
-final class ProgressManager {
+final class ProgressManager: ObservableObject {
     static let shared = ProgressManager()
     
     private let fileManager = FileManager.default
@@ -89,12 +94,28 @@ final class ProgressManager {
     private let accessQueue = DispatchQueue(label: "com.luna.progress-manager", attributes: .concurrent)
     
     private static let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    
+    @Published private(set) var movieProgressList: [MovieProgressEntry] = []
+    @Published private(set) var episodeProgressList: [EpisodeProgressEntry] = []
+
     private init() {
         self.progressFileURL = Self.documentsDirectory.appendingPathComponent("ProgressData.json")
         loadProgressData()
+
     }
-    
+    private func publishCurrentData() {
+        accessQueue.async { [weak self] in
+        guard let self = self else { return }
+        let movies = self.progressData.movieProgress
+        let episodes = self.progressData.episodeProgress
+        DispatchQueue.main.async {
+        self.movieProgressList = movies
+        self.episodeProgressList = episodes
+}
+}
+}
+
+
+
     // MARK: - Data Persistence
     
     private func loadProgressData() {
@@ -108,6 +129,7 @@ final class ProgressManager {
             let decoded = try JSONDecoder().decode(ProgressData.self, from: data)
             accessQueue.async(flags: .barrier) { [weak self] in
                 self?.progressData = decoded
+                self?.publishCurrentData()
             }
             Logger.shared.log("Progress data loaded successfully (\(decoded.movieProgress.count) movies, \(decoded.episodeProgress.count) episodes)", type: "Progress")
         } catch {
@@ -158,6 +180,7 @@ final class ProgressManager {
             }
             
             self.progressData.updateMovie(entry)
+            self.publishCurrentData()
         }
         debouncedSave()
     }
@@ -196,6 +219,7 @@ final class ProgressManager {
                 entry.currentTime = entry.totalDuration
                 entry.lastUpdated = Date()
                 self.progressData.updateMovie(entry)
+                self.publishCurrentData()
                 Logger.shared.log("Marked movie as watched: \(title)", type: "Progress")
             }
         }
@@ -210,7 +234,52 @@ final class ProgressManager {
                 entry.isWatched = false
                 entry.lastUpdated = Date()
                 self.progressData.updateMovie(entry)
+                self.publishCurrentData()
                 Logger.shared.log("Reset movie progress: \(title)", type: "Progress")
+            }
+        }
+        saveProgressData()
+    }
+
+    // MARK: - Record last service/href used for playback
+
+    func recordMovieServiceInfo(movieId: Int, serviceId: UUID?, href: String?) {
+        accessQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            if var entry = self.progressData.findMovie(id: movieId) {
+                entry.lastServiceId = serviceId
+                entry.lastHref = href
+                entry.lastUpdated = Date()
+                self.progressData.updateMovie(entry)
+                self.publishCurrentData()
+            } else {
+                var newEntry = MovieProgressEntry(id: movieId, title: "")
+                newEntry.lastServiceId = serviceId
+                newEntry.lastHref = href
+                newEntry.lastUpdated = Date()
+                self.progressData.updateMovie(newEntry)
+                self.publishCurrentData()
+            }
+        }
+        saveProgressData()
+    }
+
+    func recordEpisodeServiceInfo(showId: Int, seasonNumber: Int, episodeNumber: Int, serviceId: UUID?, href: String?) {
+        accessQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            if var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber) {
+                entry.lastServiceId = serviceId
+                entry.lastHref = href
+                entry.lastUpdated = Date()
+                self.progressData.updateEpisode(entry)
+                self.publishCurrentData()
+            } else {
+                var newEntry = EpisodeProgressEntry(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
+                newEntry.lastServiceId = serviceId
+                newEntry.lastHref = href
+                newEntry.lastUpdated = Date()
+                self.progressData.updateEpisode(newEntry)
+                self.publishCurrentData()
             }
         }
         saveProgressData()
@@ -238,6 +307,7 @@ final class ProgressManager {
             }
             
             self.progressData.updateEpisode(entry)
+            self.publishCurrentData()
         }
         debouncedSave()
     }
@@ -275,7 +345,8 @@ final class ProgressManager {
                 entry.isWatched = true
                 entry.currentTime = entry.totalDuration
                 entry.lastUpdated = Date()
-                self.progressData.updateEpisode(entry)
+                    self.progressData.updateEpisode(entry)
+                    self.publishCurrentData()
                 Logger.shared.log("Marked episode as watched: S\(seasonNumber)E\(episodeNumber)", type: "Progress")
             }
         }
@@ -290,6 +361,7 @@ final class ProgressManager {
                 entry.isWatched = false
                 entry.lastUpdated = Date()
                 self.progressData.updateEpisode(entry)
+                self.publishCurrentData()
                 Logger.shared.log("Reset episode progress: S\(seasonNumber)E\(episodeNumber)", type: "Progress")
             }
         }
@@ -309,6 +381,7 @@ final class ProgressManager {
                     self.progressData.updateEpisode(entry)
                 }
             }
+            self.publishCurrentData()
             Logger.shared.log("Marked previous episodes as watched for S\(seasonNumber) up to E\(episodeNumber - 1)", type: "Progress")
         }
         saveProgressData()

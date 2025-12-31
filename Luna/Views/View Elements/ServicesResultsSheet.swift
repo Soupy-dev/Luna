@@ -799,6 +799,8 @@ struct ModulesSearchResultsSheet: View {
                     targetHref = episodes.first?.href ?? result.href
                     Logger.shared.log("Movie - Using href: \(targetHref)", type: "Stream")
                     self.streamFetchProgress = "Preparing movie stream..."
+                    // Record the service/href so progress resume can reuse the same module
+                    ProgressManager.shared.recordMovieServiceInfo(movieId: tmdbId, serviceId: service.id, href: targetHref)
                 } else {
                     guard let selectedEpisode = self.selectedEpisode else {
                         Logger.shared.log("No episode selected for TV show", type: "Error")
@@ -881,6 +883,7 @@ struct ModulesSearchResultsSheet: View {
                             targetHref = episode.href
                             Logger.shared.log("TV Show - Auto-selected E\(targetEpisodeNumber) - Using href: \(targetHref)", type: "Stream")
                             self.streamFetchProgress = "Found episode, fetching stream..."
+                            ProgressManager.shared.recordEpisodeServiceInfo(showId: tmdbId, seasonNumber: selectedEpisode.seasonNumber, episodeNumber: selectedEpisode.episodeNumber, serviceId: service.id, href: targetHref)
                         } else {
                             if seasons.count > 1 {
                                 self.availableSeasons = seasons

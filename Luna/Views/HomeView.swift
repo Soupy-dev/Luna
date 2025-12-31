@@ -42,6 +42,8 @@ struct HomeView: View {
     
     @StateObject private var tmdbService = TMDBService.shared
     @StateObject private var contentFilter = TMDBContentFilter.shared
+    @StateObject private var continueVM = ContinueWatchingViewModel()
+    @State private var continueDetailToShow: TMDBSearchResult? = nil
     
     private var heroHeight: CGFloat {
 #if os(tvOS)
@@ -85,6 +87,20 @@ struct HomeView: View {
                 loadContent()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ContinueWatchingOpenDetail"))) { note in
+            guard let userInfo = note.userInfo else { return }
+            if let tmdbId = userInfo["tmdbId"] as? Int, let isMovie = userInfo["isMovie"] as? Bool {
+                if isMovie {
+                    let title = userInfo["title"] as? String
+                    let sr = TMDBSearchResult(id: tmdbId, mediaType: "movie", title: title, name: nil, overview: nil, posterPath: nil, backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
+                    continueDetailToShow = sr
+                } else {
+                    let title = userInfo["title"] as? String
+                    let sr = TMDBSearchResult(id: tmdbId, mediaType: "tv", title: nil, name: title, overview: nil, posterPath: nil, backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
+                    continueDetailToShow = sr
+                }
+            }
+        }
         .onChangeComp(of: contentFilter.filterHorror) { _, _ in
             if hasLoadedContent {
                 loadContent()
@@ -92,6 +108,9 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
+        }
+        .sheet(item: $continueDetailToShow) { sr in
+            MediaDetailView(searchResult: sr)
         }
     }
     
@@ -304,6 +323,34 @@ struct HomeView: View {
     @ViewBuilder
     private var contentSections: some View {
         VStack(spacing: 0) {
+            // Continue Watching unified section
+            if !continueVM.entries.isEmpty {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Text("Continue Watching")
+                            .font(isTvOS ? .headline : .title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        Spacer()
+                    }
+                    .padding(.horizontal, isTvOS ? 40 : 16)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: isTvOS ? 50.0 : 20.0) {
+                            ForEach(continueVM.entries) { entry in
+                                ContinueWatchingCard(entry: entry,
+                                                     onResume: { e in continueVM.resume(e) },
+                                                     onPlayFromStart: { e in continueVM.playFromStart(e) })
+                            }
+                        }
+                        .padding(.horizontal, isTvOS ? 40 : 16)
+                    }
+                    .modifier(ScrollClipModifier())
+                    .buttonStyle(.borderless)
+                }
+                .padding(.top, isTvOS ? 40 : 24)
+                .opacity(continueVM.entries.isEmpty ? 0 : 1)
+            }
             ForEach(homeSections.filter { $0.isEnabled }) { section in
                 switch section.id {
                 case "trending":
@@ -540,6 +587,133 @@ struct MediaCard: View {
         }, else: { view in
             view.buttonStyle(PlainButtonStyle())
         })
+    }
+}
+
+struct ContinueWatchingCard: View {
+    let entry: ContinueWatchingEntry
+    var onResume: (ContinueWatchingEntry) -> Void
+    var onPlayFromStart: (ContinueWatchingEntry) -> Void
+    @State private var isHovering: Bool = false
+    @State private var showDetail: Bool = false
+    @State private var showActions: Bool = false
+
+    private func makeSearchResult() -> TMDBSearchResult? {
+        switch entry.type {
+        case .movie:
+            if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
+                return TMDBSearchResult(id: movieId, mediaType: "movie", title: entry.title, name: nil, overview: nil, posterPath: entry.imageURL?.replacingOccurrences(of: TMDBService.tmdbImageBaseURL, with: "") , backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
+            }
+            return nil
+        case .episode:
+            if let showId = entry.showId {
+                return TMDBSearchResult(id: showId, mediaType: "tv", title: nil, name: entry.title, overview: nil, posterPath: entry.imageURL?.replacingOccurrences(of: TMDBService.tmdbImageBaseURL, with: ""), backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
+            }
+            return nil
+        }
+    }
+
+    var body: some View {
+        Button(action: {
+            onResume(entry)
+        }) {
+            VStack(alignment: .leading, spacing: 6) {
+                if let urlStr = entry.imageURL, let url = URL(string: urlStr) {
+                    KFImage(url)
+                        .placeholder {
+                            FallbackImageView(isMovie: entry.type == .movie, size: CGSize(width: 120, height: 180))
+                        }
+                        .resizable()
+                        .aspectRatio(2/3, contentMode: .fill)
+                        .frame(width: 120, height: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .shadow(color: .black.opacity(0.1), radius: 3, x: 0, y: 1)
+                } else {
+                    FallbackImageView(isMovie: entry.type == .movie, size: CGSize(width: 120, height: 180))
+                        .frame(width: 120, height: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .shadow(color: .black.opacity(0.1), radius: 3, x: 0, y: 1)
+                }
+
+                VStack(alignment: .leading, spacing: isTvOS ? 10 : 3) {
+                    Text(entry.title)
+                        .foregroundColor(.white)
+                        .fontWeight(.medium)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: .center)
+
+                    HStack(alignment: .center, spacing: isTvOS ? 18 : 8) {
+                        ProgressView(value: entry.currentTime, total: max(entry.totalDuration, 1))
+                            .progressViewStyle(LinearProgressViewStyle(tint: .green))
+                            .frame(width: 60)
+
+                        Spacer()
+
+                        Text(entry.type == .movie ? "Movie" : "TV")
+                            .font(.caption2)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, isTvOS ? 16 : 8)
+                            .padding(.vertical, isTvOS ? 10 : 4)
+                            .applyLiquidGlassBackground(cornerRadius: 12)
+                    }
+                }
+                .frame(width: 120, alignment: .leading)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onLongPressGesture {
+            // show action sheet on touch devices
+            showActions = true
+        }
+        .contextMenu {
+            Button(action: {
+                // Open details from context menu
+                showDetail = true
+            }) {
+                Text("Open Details")
+            }
+
+            Button(action: {
+                // Resume playback
+                onResume(entry)
+            }) {
+                Text("Resume")
+            }
+
+            Button(action: {
+                onPlayFromStart(entry)
+            }) {
+                Text("Play from Beginning")
+            }
+        }
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        .onTapGesture(count: 2) {
+            // double-click to resume on mac
+            onResume(entry)
+        }
+        #endif
+        .confirmationDialog("Continue Watching", isPresented: $showActions, titleVisibility: .visible) {
+            Button("Resume") { onResume(entry) }
+            Button("Play from Beginning") { onPlayFromStart(entry) }
+            Button("Show Details") { showDetail = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .background(
+            // hidden NavigationLink for long-press or context-menu -> details
+            NavigationLink(destination: {
+                if let sr = makeSearchResult() {
+                    MediaDetailView(searchResult: sr)
+                } else {
+                    EmptyView()
+                }
+            }, isActive: $showDetail) {
+                EmptyView()
+            }.hidden()
+        )
     }
 }
 
