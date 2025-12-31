@@ -145,6 +145,34 @@ final class TrackerManager: NSObject, ObservableObject {
             }
         }
     }
+
+    func handleAniListPinAuth(token: String) {
+        isAuthenticating = true
+        Task {
+            do {
+                let user = try await fetchAniListUser(token: token)
+                let account = TrackerAccount(
+                    service: .anilist,
+                    username: user.name,
+                    accessToken: token,
+                    refreshToken: nil,
+                    expiresAt: Date().addingTimeInterval(365 * 24 * 3600),
+                    userId: String(user.id)
+                )
+                await MainActor.run {
+                    self.trackerState.addOrUpdateAccount(account)
+                    self.saveTrackerState()
+                    self.isAuthenticating = false
+                    self.authError = nil
+                }
+            } catch {
+                await MainActor.run {
+                    self.authError = error.localizedDescription
+                    self.isAuthenticating = false
+                }
+            }
+        }
+    }
     
     private func exchangeAniListCode(_ code: String) async throws -> AniListAuthResponse {
         let url = URL(string: "https://anilist.co/api/v2/oauth/token")!

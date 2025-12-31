@@ -10,6 +10,8 @@ import SwiftUI
 struct TrackersSettingsView: View {
     @StateObject private var trackerManager = TrackerManager.shared
     @State private var selectedTracker: TrackerService?
+    @State private var showAniListPinInput = false
+    @State private var anilistTokenInput: String = ""
     
     var body: some View {
         NavigationView {
@@ -37,7 +39,7 @@ struct TrackersSettingsView: View {
                                 service: .anilist,
                                 isConnected: trackerManager.trackerState.getAccount(for: .anilist) != nil,
                                 username: trackerManager.trackerState.getAccount(for: .anilist)?.username,
-                                onConnect: { trackerManager.startAniListAuth() },
+                                onConnect: { showAniListPinInput = true },
                                 onDisconnect: { trackerManager.disconnectTracker(.anilist) }
                             )
                             
@@ -76,6 +78,20 @@ struct TrackersSettingsView: View {
             #if !os(tvOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+        }
+        .alert("AniList Auth Token", isPresented: $showAniListPinInput) {
+            TextField("Paste token from anilist.co/api/v2/oauth/pin", text: $anilistTokenInput)
+            Button("Cancel", role: .cancel) {
+                anilistTokenInput = ""
+            }
+            Button("Authenticate") {
+                if !anilistTokenInput.isEmpty {
+                    trackerManager.handleAniListPinAuth(token: anilistTokenInput)
+                    anilistTokenInput = ""
+                }
+            }
+        } message: {
+            Text("Visit https://anilist.co/api/v2/oauth/pin in Safari, authorize, and paste the token here.")
         }
     }
     
