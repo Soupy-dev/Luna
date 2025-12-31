@@ -498,12 +498,30 @@ struct MediaDetailView: View {
 
                         await MainActor.run {
                             // TMDB provides: name, poster, description only
-                            self.tvShowDetail = detail
+                            // Create a modified tvShowDetail with AniList seasons
+                            var modifiedDetail = detail
+                            
+                            // Rebuild seasons array from AniList data
+                            if let aniSeasons = aniDetails?.seasons {
+                                modifiedDetail.seasons = aniSeasons.map { aniSeason in
+                                    TMDBSeason(
+                                        id: detail.id,
+                                        name: "Season \(aniSeason.seasonNumber)",
+                                        overview: "",
+                                        posterPath: detail.posterPath,
+                                        seasonNumber: aniSeason.seasonNumber,
+                                        episodeCount: aniSeason.episodes.count,
+                                        airDate: nil
+                                    )
+                                }
+                            }
+                            
+                            self.tvShowDetail = modifiedDetail
                             self.synopsis = detail.overview ?? ""
                             self.romajiTitle = aniDetails?.title ?? romaji
                             
-                            // AniList provides: all season/episode structure
-                            if let seasons = aniDetails?.seasons, let firstSeason = seasons.first {
+                            // Set the first season as selected
+                            if let firstSeason = aniDetails?.seasons.first {
                                 self.selectedSeason = TMDBSeason(
                                     id: detail.id,
                                     name: "Season \(firstSeason.seasonNumber)",

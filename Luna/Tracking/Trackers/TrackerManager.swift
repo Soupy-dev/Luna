@@ -198,10 +198,9 @@ final class TrackerManager: NSObject, ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "grant_type": "authorization_code",
             "client_id": anilistClientId,
-            "client_secret": "", // AniList doesn't require client secret for native apps
             "redirect_uri": anilistRedirectUri,
             "code": code
         ]

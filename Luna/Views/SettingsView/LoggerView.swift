@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LogEntry: Identifiable {
     let id = UUID()
@@ -54,8 +55,8 @@ struct LoggerView: View {
     @State private var searchText = ""
     @State private var isAutoScrollEnabled = true
     @State private var showingFilterSheet = false
-    @State private var exportedFileURL: URL?
-    @State private var showingShareSheet = false
+    @State private var logsContent: String = ""
+    @State private var showingFilePicker = false
     
     private var filteredLogs: [LogEntry] {
         var logs = loggerManager.logs
@@ -108,14 +109,16 @@ struct LoggerView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
+                    #if !os(tvOS)
                     Button(action: {
                         Task {
-                            exportedFileURL = await Logger.shared.exportLogsToFile()
-                            showingShareSheet = true
+                            logsContent = await Logger.shared.getLogsAsync()
+                            showingFilePicker = true
                         }
                     }) {
                         Label("Export Logs", systemImage: "square.and.arrow.up")
                     }
+                    #endif
                     
                     Button(action: {
                         loggerManager.clearLogs()
@@ -127,11 +130,15 @@ struct LoggerView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingShareSheet) {
-            if let fileURL = exportedFileURL {
-                ShareSheet(items: [fileURL])
-            }
-        }
+        #if !os(tvOS)
+        .fileExporter(
+            isPresented: $showingFilePicker,
+            document: LogDocument(content: logsContent),
+            contentType: .plainText,
+            defaultFilename: "Luna_Logs_\(DateFormatter().string(from: Date())).txt",
+            onCompletion: { _ in }
+        )
+        #endif
     }
 }
 
@@ -298,12 +305,39 @@ class LoggerManager: ObservableObject {
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
     
+    #if !os(tvOS)
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
     
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+    #endif
 }
+
+#if !os(tvOS)
+struct LogDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    
+    var content: String
+    
+    init(content: String) {
+        self.content = content
+    }
+    
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents,
+              let string = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        content = string
+    }
+    
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        let data = content.data(using: .utf8)!
+        return FileWrapper(regularFileWithContents: data)
+    }
+}
+#endif
 
 // MARK: - Date Formatters
 extension DateFormatter {
