@@ -56,6 +56,8 @@ class AniListService {
         let anime = result.data.Media
         let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
         
+        Logger.shared.log("AniListService: Raw response - episodes: \(anime.episodes ?? 0), seasonYear: \(anime.seasonYear ?? 0), season: \(anime.season ?? "UNKNOWN")", type: "AniList")
+        
         // Build episode list and organize into seasons
         let episodeCount = anime.episodes ?? 12
         let episodes: [AniListEpisode] = (1...episodeCount).map { idx in
@@ -81,6 +83,11 @@ class AniListService {
                 episodes: seasonEpisodes
             ))
             episodeIndex += episodesPerSeason
+        }
+        
+        Logger.shared.log("AniListService: Fetched \(title) with \(episodes.count) total episodes grouped into \(seasons.count) seasons", type: "AniList")
+        for season in seasons {
+            Logger.shared.log("  Season \(season.seasonNumber): \(season.episodes.count) episodes", type: "AniList")
         }
         
         return AniListAnimeWithSeasons(

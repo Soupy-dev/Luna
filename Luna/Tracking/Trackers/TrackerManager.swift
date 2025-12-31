@@ -27,7 +27,7 @@ final class TrackerManager: NSObject, ObservableObject {
     
     // OAuth config (redirects can be overridden via Info.plist keys AniListRedirectUri / TraktRedirectUri)
     private let anilistClientId = "33908"
-    private let anilistClientSecret = "1TeOfbdHy3Uk88UQdE8HKoJDtdl5ARHp4sDCi5Jh"
+    private let anilistClientSecret = "1teOfbdHy3Uk88UQdE8HKoJDtdI5ARhP4sDCi5Jh"
     private var anilistRedirectUri: String {
         Bundle.main.object(forInfoDictionaryKey: "AniListRedirectUri") as? String ?? "luna://anilist-callback"
     }
@@ -209,6 +209,7 @@ final class TrackerManager: NSObject, ObservableObject {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
         Logger.shared.log("Exchanging AniList code for token", type: "Tracker")
+        Logger.shared.log("AniList request: client_id=\(anilistClientId), client_secret length=\(anilistClientSecret.count), redirect_uri=\(anilistRedirectUri)", type: "Tracker")
         
         let (data, response) = try await URLSession.shared.data(for: request)
         let httpResponse = response as? HTTPURLResponse
