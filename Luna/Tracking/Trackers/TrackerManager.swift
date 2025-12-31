@@ -7,7 +7,9 @@
 
 import Foundation
 import Combine
+#if !os(tvOS)
 import AuthenticationServices
+#endif
 import UIKit
 
 final class TrackerManager: NSObject, ObservableObject {
@@ -19,7 +21,9 @@ final class TrackerManager: NSObject, ObservableObject {
     
     private let trackerStateURL: URL
     private var cancellables = Set<AnyCancellable>()
+    #if !os(tvOS)
     private var webAuthSession: ASWebAuthenticationSession?
+    #endif
     
     // OAuth config
     private let anilistClientId = "33908"
@@ -71,6 +75,12 @@ final class TrackerManager: NSObject, ObservableObject {
         authError = nil
         isAuthenticating = true
 
+        #if os(tvOS)
+        UIApplication.shared.open(url) { _ in }
+        DispatchQueue.main.async {
+            self.isAuthenticating = false
+        }
+        #else
         let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "luna") { [weak self] callbackURL, error in
             guard let self = self else { return }
 
@@ -99,6 +109,7 @@ final class TrackerManager: NSObject, ObservableObject {
         session.presentationContextProvider = self
         session.start()
         webAuthSession = session
+        #endif
     }
     
     func handleAniListCallback(code: String) {
@@ -201,6 +212,12 @@ final class TrackerManager: NSObject, ObservableObject {
         authError = nil
         isAuthenticating = true
 
+        #if os(tvOS)
+        UIApplication.shared.open(url) { _ in }
+        DispatchQueue.main.async {
+            self.isAuthenticating = false
+        }
+        #else
         let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "luna") { [weak self] callbackURL, error in
             guard let self = self else { return }
 
@@ -229,6 +246,7 @@ final class TrackerManager: NSObject, ObservableObject {
         session.presentationContextProvider = self
         session.start()
         webAuthSession = session
+        #endif
     }
     
     func handleTraktCallback(code: String) {
@@ -422,6 +440,7 @@ final class TrackerManager: NSObject, ObservableObject {
     }
 }
 
+#if !os(tvOS)
 extension TrackerManager: ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         UIApplication.shared.connectedScenes
@@ -430,3 +449,4 @@ extension TrackerManager: ASWebAuthenticationPresentationContextProviding {
             .first(where: { $0.isKeyWindow }) ?? ASPresentationAnchor()
     }
 }
+#endif
