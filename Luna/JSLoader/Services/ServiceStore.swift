@@ -12,35 +12,44 @@ public final class ServiceStore {
 
     // MARK: private - internal setup and update functions
 
-    private var container: NSPersistentCloudKitContainer? = nil
+    // Use generic NSPersistentContainer so we can fall back to a local store when iCloud is unavailable
+    private var container: NSPersistentContainer? = nil
 
     private init() {
-        guard let containerID = Bundle.main.iCloudContainerID else {
-            Logger.shared.log("Missing iCloud container id", type: "CloudKit")
-            return
-        }
+        if let containerID = Bundle.main.iCloudContainerID {
+            // CloudKit-enabled container when entitlements are present
+            let cloudContainer = NSPersistentCloudKitContainer(name: "ServiceModels")
 
-        container = NSPersistentCloudKitContainer(name: "ServiceModels")
-
-        guard let description = container?.persistentStoreDescriptions.first else {
-            Logger.shared.log("Missing store description", type: "CloudKit")
-            return
-        }
-
-        description.cloudKitContainerOptions = NSPersistentCloudKitContainerOptions(
-            containerIdentifier: containerID
-        )
-
-        description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
-        description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
-
-        container?.loadPersistentStores { _, error in
-            if let error = error {
-                Logger.shared.log("Failed to load persistent store: \(error.localizedDescription)", type: "CloudKit")
-            } else {
-                self.container?.viewContext.automaticallyMergesChangesFromParent = true
-                self.container?.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+            if let description = cloudContainer.persistentStoreDescriptions.first {
+                description.cloudKitContainerOptions = NSPersistentCloudKitContainerOptions(
+                    containerIdentifier: containerID
+                )
+                description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+                description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
             }
+
+            cloudContainer.loadPersistentStores { _, error in
+                if let error = error {
+                    Logger.shared.log("Failed to load persistent store (CloudKit): \(error.localizedDescription)", type: "CloudKit")
+                } else {
+                    cloudContainer.viewContext.automaticallyMergesChangesFromParent = true
+                    cloudContainer.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+                }
+            }
+
+            self.container = cloudContainer
+        } else {
+            // Fallback to local Core Data store when iCloud entitlements/identifier are missing
+            let localContainer = NSPersistentContainer(name: "ServiceModels")
+            localContainer.loadPersistentStores { _, error in
+                if let error = error {
+                    Logger.shared.log("Failed to load persistent store (local): \(error.localizedDescription)", type: "CloudKit")
+                } else {
+                    localContainer.viewContext.automaticallyMergesChangesFromParent = true
+                    localContainer.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+                }
+            }
+            self.container = localContainer
         }
     }
 
