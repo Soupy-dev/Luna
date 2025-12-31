@@ -54,6 +54,8 @@ struct LoggerView: View {
     @State private var searchText = ""
     @State private var isAutoScrollEnabled = true
     @State private var showingFilterSheet = false
+    @State private var exportedFileURL: URL?
+    @State private var showingShareSheet = false
     
     private var filteredLogs: [LogEntry] {
         var logs = loggerManager.logs
@@ -107,6 +109,15 @@ struct LoggerView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
                     Button(action: {
+                        Task {
+                            exportedFileURL = await Logger.shared.exportLogsToFile()
+                            showingShareSheet = true
+                        }
+                    }) {
+                        Label("Export Logs", systemImage: "square.and.arrow.up")
+                    }
+                    
+                    Button(action: {
                         loggerManager.clearLogs()
                     }) {
                         Label("Clear All Logs", systemImage: "trash")
@@ -114,6 +125,11 @@ struct LoggerView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+            }
+        }
+        .sheet(isPresented: $showingShareSheet) {
+            if let fileURL = exportedFileURL {
+                ShareSheet(items: [fileURL])
             }
         }
     }
@@ -277,6 +293,16 @@ class LoggerManager: ObservableObject {
             await Logger.shared.clearLogsAsync()
         }
     }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Date Formatters

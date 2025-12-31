@@ -70,9 +70,24 @@ class Logger: @unchecked Sendable {
                 let dateFormatter = DateFormatter()
                 dateFormatter.dateFormat = "dd-MM HH:mm:ss"
                 let result = self.logs.map { "[\(dateFormatter.string(from: $0.timestamp))] [\($0.type)] \($0.message)" }
-                    .joined(separator: "\n----\n")
+                    .joined(separator: "\n")
                 continuation.resume(returning: result)
             }
+        }
+    }
+    
+    func exportLogsToFile() async -> URL? {
+        let logsContent = await getLogsAsync()
+        let fileName = "Luna_Logs_\(DateFormatter().string(from: Date())).txt"
+        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let exportURL = documentsDirectory.appendingPathComponent(fileName)
+        
+        do {
+            try logsContent.write(to: exportURL, atomically: true, encoding: .utf8)
+            return exportURL
+        } catch {
+            print("Failed to export logs: \(error)")
+            return nil
         }
     }
     
