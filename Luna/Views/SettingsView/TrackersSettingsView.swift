@@ -80,9 +80,14 @@ struct TrackersSettingsView: View {
             #endif
         }
         .alert("AniList Auth Token", isPresented: $showAniListPinInput) {
-            TextField("Paste token from anilist.co/api/v2/oauth/pin", text: $anilistTokenInput)
+            TextField("Paste token", text: $anilistTokenInput)
             Button("Cancel", role: .cancel) {
                 anilistTokenInput = ""
+            }
+            Button("Open Pin Page in Safari") {
+                if let url = URL(string: "https://anilist.co/api/v2/oauth/pin") {
+                    UIApplication.shared.open(url)
+                }
             }
             Button("Authenticate") {
                 if !anilistTokenInput.isEmpty {
@@ -91,7 +96,7 @@ struct TrackersSettingsView: View {
                 }
             }
         } message: {
-            Text("Visit https://anilist.co/api/v2/oauth/pin in Safari, authorize, and paste the token here.")
+            Text("1. Tap 'Open Pin Page in Safari'\n2. Authorize the app\n3. Copy the access token shown on the page\n4. Paste it above and tap 'Authenticate'")
         }
     }
     
