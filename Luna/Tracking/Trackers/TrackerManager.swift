@@ -25,13 +25,17 @@ final class TrackerManager: NSObject, ObservableObject {
     private var webAuthSession: ASWebAuthenticationSession?
     #endif
     
-    // OAuth config
+    // OAuth config (redirects can be overridden via Info.plist keys AniListRedirectUri / TraktRedirectUri)
     private let anilistClientId = "33908"
-    private let anilistRedirectUri = "luna://anilist-callback"
+    private var anilistRedirectUri: String {
+        Bundle.main.object(forInfoDictionaryKey: "AniListRedirectUri") as? String ?? "luna://anilist-callback"
+    }
     
     private let traktClientId = "e92207aaef82a1b0b42d5901efa4756b6c417911b7b031b986d37773c234ccab"
     private let traktClientSecret = "03c457ea5986e900f140243c69d616313533cedcc776e42e07a6ddd3ab699035"
-    private let traktRedirectUri = "luna://trakt-callback"
+    private var traktRedirectUri: String {
+        Bundle.main.object(forInfoDictionaryKey: "TraktRedirectUri") as? String ?? "luna://trakt-callback"
+    }
     
     override private init() {
         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -67,7 +71,9 @@ final class TrackerManager: NSObject, ObservableObject {
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "scope", value: "public")
         ]
-        return components?.url
+        let url = components?.url
+        Logger.shared.log("AniList auth URL: \(url?.absoluteString ?? "nil")", type: "Tracker")
+        return url
     }
 
     func startAniListAuth() {
