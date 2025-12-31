@@ -152,7 +152,7 @@ struct TraktUser: Codable {
 }
 
 struct TraktIds: Codable {
-    let trakt: Int
+    let trakt: Int?
     let slug: String
     let imdb: String?
     let tmdb: Int?

@@ -68,8 +68,7 @@ final class TrackerManager: NSObject, ObservableObject {
         components?.queryItems = [
             URLQueryItem(name: "client_id", value: anilistClientId),
             URLQueryItem(name: "redirect_uri", value: anilistRedirectUri),
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "scope", value: "public")
+            URLQueryItem(name: "response_type", value: "code")
         ]
         let url = components?.url
         Logger.shared.log("AniList auth URL: \(url?.absoluteString ?? "nil")", type: "Tracker")
