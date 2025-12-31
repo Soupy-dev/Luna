@@ -33,9 +33,9 @@ enum TrackerService: String, Codable, CaseIterable {
 struct TrackerAccount: Codable {
     let service: TrackerService
     let username: String
-    let accessToken: String
-    let refreshToken: String?
-    let expiresAt: Date?
+    var accessToken: String
+    var refreshToken: String?
+    var expiresAt: Date?
     let userId: String
     var isConnected: Bool = true
     
