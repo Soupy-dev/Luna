@@ -155,28 +155,6 @@ final class ContinueWatchingViewModel: ObservableObject {
                                 Logger.shared.log("Invalid stream URL: \(streamURLString)", type: "Error")
                                 return
                             }
-                            else {
-                                // No streams resolved -> fallback to details view
-                                DispatchQueue.main.async {
-                                    var userInfo: [AnyHashable: Any] = [:]
-                                    switch entry.type {
-                                    case .movie:
-                                        if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
-                                            userInfo["tmdbId"] = movieId
-                                            userInfo["isMovie"] = true
-                                            userInfo["title"] = entry.title
-                                        }
-                                    case .episode:
-                                        if let showId = entry.showId {
-                                            userInfo["tmdbId"] = showId
-                                            userInfo["isMovie"] = false
-                                            userInfo["title"] = entry.title
-                                        }
-                                    }
-                                    NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: userInfo)
-                                }
-                                return
-                            }
                             // try external player first
                             let externalRaw = UserDefaults.standard.string(forKey: "externalPlayer") ?? ExternalPlayer.none.rawValue
                             let external = ExternalPlayer(rawValue: externalRaw) ?? .none
@@ -228,6 +206,25 @@ final class ContinueWatchingViewModel: ObservableObject {
                                 }
                                 return
                             }
+                        } else {
+                            // No streams resolved -> fallback to details view
+                            var userInfo: [AnyHashable: Any] = [:]
+                            switch entry.type {
+                            case .movie:
+                                if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
+                                    userInfo["tmdbId"] = movieId
+                                    userInfo["isMovie"] = true
+                                    userInfo["title"] = entry.title
+                                }
+                            case .episode:
+                                if let showId = entry.showId {
+                                    userInfo["tmdbId"] = showId
+                                    userInfo["isMovie"] = false
+                                    userInfo["title"] = entry.title
+                                }
+                            }
+                            NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: userInfo)
+                            return
                         }
                     }
                 }
