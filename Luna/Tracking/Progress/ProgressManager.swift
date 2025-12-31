@@ -368,14 +368,16 @@ final class ProgressManager: ObservableObject {
     func markEpisodeAsWatched(showId: Int, seasonNumber: Int, episodeNumber: Int) {
         accessQueue.async(flags: .barrier) { [weak self] in
             guard let self = self else { return }
-            if var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber) {
-                entry.isWatched = true
-                entry.currentTime = entry.totalDuration
-                entry.lastUpdated = Date()
-                    self.progressData.updateEpisode(entry)
-                    self.publishCurrentData()
-                Logger.shared.log("Marked episode as watched: S\(seasonNumber)E\(episodeNumber)", type: "Progress")
-            }
+            var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber)
+                ?? EpisodeProgressEntry(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
+            let safeDuration = entry.totalDuration > 0 ? entry.totalDuration : max(entry.currentTime, 1)
+            entry.totalDuration = safeDuration
+            entry.isWatched = true
+            entry.currentTime = safeDuration
+            entry.lastUpdated = Date()
+            self.progressData.updateEpisode(entry)
+            self.publishCurrentData()
+            Logger.shared.log("Marked episode as watched: S\(seasonNumber)E\(episodeNumber)", type: "Progress")
         }
         saveProgressData()
     }
@@ -383,14 +385,14 @@ final class ProgressManager: ObservableObject {
     func resetEpisodeProgress(showId: Int, seasonNumber: Int, episodeNumber: Int) {
         accessQueue.async(flags: .barrier) { [weak self] in
             guard let self = self else { return }
-            if var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber) {
-                entry.currentTime = 0
-                entry.isWatched = false
-                entry.lastUpdated = Date()
-                self.progressData.updateEpisode(entry)
-                self.publishCurrentData()
-                Logger.shared.log("Reset episode progress: S\(seasonNumber)E\(episodeNumber)", type: "Progress")
-            }
+            var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber)
+                ?? EpisodeProgressEntry(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
+            entry.currentTime = 0
+            entry.isWatched = false
+            entry.lastUpdated = Date()
+            self.progressData.updateEpisode(entry)
+            self.publishCurrentData()
+            Logger.shared.log("Reset episode progress: S\(seasonNumber)E\(episodeNumber)", type: "Progress")
         }
         saveProgressData()
     }
@@ -401,15 +403,51 @@ final class ProgressManager: ObservableObject {
         accessQueue.async(flags: .barrier) { [weak self] in
             guard let self = self else { return }
             for e in 1..<episodeNumber {
-                if var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: e) {
-                    entry.isWatched = true
-                    entry.currentTime = entry.totalDuration
-                    entry.lastUpdated = Date()
-                    self.progressData.updateEpisode(entry)
-                }
+                var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: e)
+                    ?? EpisodeProgressEntry(showId: showId, seasonNumber: seasonNumber, episodeNumber: e)
+                let safeDuration = entry.totalDuration > 0 ? entry.totalDuration : max(entry.currentTime, 1)
+                entry.totalDuration = safeDuration
+                entry.isWatched = true
+                entry.currentTime = safeDuration
+                entry.lastUpdated = Date()
+                self.progressData.updateEpisode(entry)
             }
             self.publishCurrentData()
             Logger.shared.log("Marked previous episodes as watched for S\(seasonNumber) up to E\(episodeNumber - 1)", type: "Progress")
+        }
+        saveProgressData()
+    }
+
+    func markEpisodeAsUnwatched(showId: Int, seasonNumber: Int, episodeNumber: Int) {
+        accessQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber)
+                ?? EpisodeProgressEntry(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
+            entry.currentTime = 0
+            entry.isWatched = false
+            entry.lastUpdated = Date()
+            self.progressData.updateEpisode(entry)
+            self.publishCurrentData()
+            Logger.shared.log("Marked episode as unwatched: S\(seasonNumber)E\(episodeNumber)", type: "Progress")
+        }
+        saveProgressData()
+    }
+
+    func markPreviousEpisodesAsUnwatched(showId: Int, seasonNumber: Int, episodeNumber: Int) {
+        guard episodeNumber > 1 else { return }
+
+        accessQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            for e in 1..<episodeNumber {
+                var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: e)
+                    ?? EpisodeProgressEntry(showId: showId, seasonNumber: seasonNumber, episodeNumber: e)
+                entry.currentTime = 0
+                entry.isWatched = false
+                entry.lastUpdated = Date()
+                self.progressData.updateEpisode(entry)
+            }
+            self.publishCurrentData()
+            Logger.shared.log("Marked previous episodes as unwatched for S\(seasonNumber) up to E\(episodeNumber - 1)", type: "Progress")
         }
         saveProgressData()
     }

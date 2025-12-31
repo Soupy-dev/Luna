@@ -12,6 +12,7 @@ struct DetailLaunch: Identifiable {
     let id = UUID()
     let searchResult: TMDBSearchResult
     let resumeHint: EpisodeResumeHint?
+    let autoPlay: Bool
 }
 
 struct HomeView: View {
@@ -99,7 +100,8 @@ struct HomeView: View {
                 if isMovie {
                     let title = userInfo["title"] as? String
                     let sr = TMDBSearchResult(id: tmdbId, mediaType: "movie", title: title, name: nil, overview: nil, posterPath: nil, backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
-                    continueDetailToShow = DetailLaunch(searchResult: sr, resumeHint: nil)
+                    let autoPlay = (userInfo["autoPlay"] as? Bool) ?? false
+                    continueDetailToShow = DetailLaunch(searchResult: sr, resumeHint: nil, autoPlay: autoPlay)
                 } else {
                     let title = userInfo["title"] as? String
                     let sr = TMDBSearchResult(id: tmdbId, mediaType: "tv", title: nil, name: title, overview: nil, posterPath: nil, backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
@@ -107,7 +109,8 @@ struct HomeView: View {
                     if let season = userInfo["seasonNumber"] as? Int, let episode = userInfo["episodeNumber"] as? Int {
                         hint = EpisodeResumeHint(showId: tmdbId, season: season, episode: episode)
                     }
-                    continueDetailToShow = DetailLaunch(searchResult: sr, resumeHint: hint)
+                    let autoPlay = (userInfo["autoPlay"] as? Bool) ?? false
+                    continueDetailToShow = DetailLaunch(searchResult: sr, resumeHint: hint, autoPlay: autoPlay)
                 }
             }
         }
@@ -120,7 +123,7 @@ struct HomeView: View {
             SettingsView()
         }
         .sheet(item: $continueDetailToShow) { launch in
-            MediaDetailView(searchResult: launch.searchResult, resumeHint: launch.resumeHint)
+            MediaDetailView(searchResult: launch.searchResult, resumeHint: launch.resumeHint, autoPlay: launch.autoPlay)
         }
     }
     

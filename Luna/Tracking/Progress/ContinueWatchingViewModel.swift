@@ -249,7 +249,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                 ProgressManager.shared.updateMovieProgress(movieId: movieId, title: entry.title, currentTime: entry.currentTime, totalDuration: entry.totalDuration)
                     // Open MediaDetailView for this movie
                     DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": movieId, "isMovie": true, "title": entry.title])
+                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": movieId, "isMovie": true, "title": entry.title, "autoPlay": true])
                     }
             }
         case .episode:
@@ -257,7 +257,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                 ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: season, episodeNumber: ep, currentTime: entry.currentTime, totalDuration: entry.totalDuration)
                     // Open MediaDetailView for this show
                     DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": showId, "isMovie": false, "title": entry.title, "seasonNumber": season, "episodeNumber": ep])
+                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": showId, "isMovie": false, "title": entry.title, "seasonNumber": season, "episodeNumber": ep, "autoPlay": true])
                     }
             }
         }

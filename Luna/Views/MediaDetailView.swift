@@ -17,6 +17,7 @@ struct EpisodeResumeHint {
 struct MediaDetailView: View {
     let searchResult: TMDBSearchResult
     let resumeHint: EpisodeResumeHint?
+    let autoPlay: Bool
     
     @StateObject private var tmdbService = TMDBService.shared
     @State private var movieDetail: TMDBMovieDetail?
@@ -43,10 +44,13 @@ struct MediaDetailView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @AppStorage("useSolidBackgroundBehindHero") private var useSolidBackgroundBehindHero = false
     @State private var pendingEpisodeSelection: (Int, Int)? = nil
+    @State private var shouldAutoPlay = false
 
-    init(searchResult: TMDBSearchResult, resumeHint: EpisodeResumeHint? = nil) {
+    init(searchResult: TMDBSearchResult, resumeHint: EpisodeResumeHint? = nil, autoPlay: Bool = false) {
         self.searchResult = searchResult
         self.resumeHint = resumeHint
+        self.autoPlay = autoPlay
+        self._shouldAutoPlay = State(initialValue: autoPlay)
     }
 
     private var headerHeight: CGFloat {
@@ -416,6 +420,7 @@ struct MediaDetailView: View {
         }
         
         showingSearchResults = true
+        shouldAutoPlay = false
     }
     
     private func loadMediaDetails() {
@@ -446,7 +451,6 @@ struct MediaDetailView: View {
                         self.romajiTitle = romaji
 
                         if let resume = resume {
-                            // pick the season matching resume, else first season >0
                             if let matchedSeason = detail.seasons.first(where: { $0.seasonNumber == resume.seasonNumber }) {
                                 self.selectedSeason = matchedSeason
                             } else if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
@@ -463,6 +467,24 @@ struct MediaDetailView: View {
 
                         self.selectedEpisodeForSearch = nil
                         self.isLoading = false
+                    }
+
+                    // If autoPlay was requested, attempt to start search after season details are loaded
+                    if shouldAutoPlay {
+                        Task { @MainActor in
+                            if selectedEpisodeForSearch == nil,
+                               let pending = pendingEpisodeSelection,
+                               let seasonDetail = self.seasonDetail,
+                               let match = seasonDetail.episodes.first(where: { $0.episodeNumber == pending.1 }) {
+                                self.selectedEpisodeForSearch = match
+                            }
+                            if !serviceManager.activeServices.isEmpty {
+                                self.searchInServices()
+                            } else {
+                                // No services; just show details
+                                self.shouldAutoPlay = false
+                            }
+                        }
                     }
                 }
             } catch {
