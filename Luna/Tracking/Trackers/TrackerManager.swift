@@ -10,7 +10,7 @@ import Combine
 import AuthenticationServices
 import UIKit
 
-final class TrackerManager: ObservableObject {
+final class TrackerManager: NSObject, ObservableObject {
     static let shared = TrackerManager()
     
     @Published var trackerState: TrackerState = TrackerState()

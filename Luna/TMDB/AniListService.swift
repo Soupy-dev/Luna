@@ -12,6 +12,11 @@ class AniListService {
     
     private let graphQLEndpoint = URL(string: "https://graphql.anilist.co")!
     private let trackerManager = TrackerManager.shared
+
+    private var preferredLanguageCode: String {
+        let raw = UserDefaults.standard.string(forKey: "tmdbLanguage") ?? "en-US"
+        return raw.split(separator: "-").first.map(String.init) ?? "en"
+    }
     
     // MARK: - Fetch Anime Details
     
@@ -46,7 +51,7 @@ class AniListService {
         }
         
         let result = try JSONDecoder().decode(Response.self, from: response)
-        return AniListAnimeDetails(from: result.data.Media)
+        return AniListAnimeDetails(from: result.data.Media, preferredLanguageCode: preferredLanguageCode)
     }
     
     // MARK: - Update Watch Progress
@@ -103,7 +108,7 @@ class AniListService {
         }
         
         let result = try JSONDecoder().decode(Response.self, from: response)
-        return result.data.Page.media.map(AniListSearchResult.init)
+        return result.data.Page.media.map { AniListSearchResult(from: $0, preferredLanguageCode: preferredLanguageCode) }
     }
     
     // MARK: - Private Helpers
@@ -137,10 +142,10 @@ struct AniListAnimeDetails {
     let title: String
     let episodes: Int?
     let status: String
-    
-    init(from anime: AniListAnime) {
+
+    init(from anime: AniListAnime, preferredLanguageCode: String) {
         self.id = anime.id
-        self.title = anime.title.romaji ?? anime.title.english ?? "Unknown"
+        self.title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
         self.episodes = anime.episodes
         self.status = ""
     }
@@ -151,11 +156,39 @@ struct AniListSearchResult {
     let title: String
     let episodes: Int?
     let coverImage: String?
-    
-    init(from anime: AniListAnime) {
+
+    init(from anime: AniListAnime, preferredLanguageCode: String) {
         self.id = anime.id
-        self.title = anime.title.romaji ?? anime.title.english ?? "Unknown"
+        self.title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
         self.episodes = anime.episodes
         self.coverImage = nil
+    }
+}
+
+enum AniListTitlePicker {
+    static func title(from title: AniListAnime.AniListTitle, preferredLanguageCode: String) -> String {
+        let lang = preferredLanguageCode.lowercased()
+
+        if lang.hasPrefix("en"), let english = title.english, !english.isEmpty {
+            return english
+        }
+
+        if lang.hasPrefix("ja"), let native = title.native, !native.isEmpty {
+            return native
+        }
+
+        if let english = title.english, !english.isEmpty {
+            return english
+        }
+
+        if let romaji = title.romaji, !romaji.isEmpty {
+            return romaji
+        }
+
+        if let native = title.native, !native.isEmpty {
+            return native
+        }
+
+        return "Unknown"
     }
 }
