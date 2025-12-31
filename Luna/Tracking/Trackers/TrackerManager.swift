@@ -366,7 +366,7 @@ final class TrackerManager: NSObject, ObservableObject {
                     accessToken: token.accessToken,
                     refreshToken: token.refreshToken,
                     expiresAt: Date().addingTimeInterval(TimeInterval(token.expiresIn)),
-                    userId: String(user.ids.trakt)
+                    userId: user.ids.trakt.map(String.init) ?? user.ids.slug
                 )
                 await MainActor.run {
                     self.trackerState.addOrUpdateAccount(account)
@@ -396,7 +396,7 @@ final class TrackerManager: NSObject, ObservableObject {
                     accessToken: token,
                     refreshToken: nil,
                     expiresAt: Date().addingTimeInterval(365 * 24 * 3600),
-                    userId: String(user.ids.trakt)
+                    userId: user.ids.trakt.map(String.init) ?? user.ids.slug
                 )
                 await MainActor.run {
                     self.trackerState.addOrUpdateAccount(account)
