@@ -364,7 +364,7 @@ var nextControllers: [UIViewController]?
 
             // Sync manga progress for the chapter being left
             if let chapterNumber = parsedChapterNumber(from: currChapter.chapterNumber) {
-                TrackerManager.shared.syncMangaProgress(mangaTitle: mangaTitle, chapterNumber: chapterNumber)
+                TrackerManager.shared.syncMangaProgress(title: mangaTitle, chapterNumber: chapterNumber)
             }
 
             if idx < chapters.count - 1
