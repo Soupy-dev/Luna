@@ -10,6 +10,8 @@ import Kingfisher
 
 struct TVShowSeasonsSection: View {
     let tvShow: TMDBTVShowWithSeasons?
+    let isAnime: Bool
+    let animeEpisodeCount: Int?
     @Binding var selectedSeason: TMDBSeason?
     @Binding var seasonDetail: TMDBSeasonDetail?
     @Binding var selectedEpisodeForSearch: TMDBEpisode?
@@ -113,11 +115,15 @@ struct TVShowSeasonsSection: View {
         }
         .onAppear {
             if let tvShow = tvShow, let selectedSeason = selectedSeason {
-                loadSeasonDetails(tvShowId: tvShow.id, season: selectedSeason)
-                Task {
-                    let romaji = await tmdbService.getRomajiTitle(for: "tv", id: tvShow.id)
-                    await MainActor.run {
-                        self.romajiTitle = romaji
+                if isAnime {
+                    setAnimeSeasonDetail(for: selectedSeason, tvShow: tvShow)
+                } else {
+                    loadSeasonDetails(tvShowId: tvShow.id, season: selectedSeason)
+                    Task {
+                        let romaji = await tmdbService.getRomajiTitle(for: "tv", id: tvShow.id)
+                        await MainActor.run {
+                            self.romajiTitle = romaji
+                        }
                     }
                 }
             }
@@ -165,7 +171,11 @@ struct TVShowSeasonsSection: View {
                 ForEach(seasons) { season in
                     Button(action: {
                         selectedSeason = season
-                        loadSeasonDetails(tvShowId: tvShow.id, season: season)
+                        if isAnime {
+                            setAnimeSeasonDetail(for: season, tvShow: tvShow)
+                        } else {
+                            loadSeasonDetails(tvShowId: tvShow.id, season: season)
+                        }
                     }) {
                         HStack {
                             Text(season.name)
@@ -197,7 +207,11 @@ struct TVShowSeasonsSection: View {
                         ForEach(seasons) { season in
                             Button(action: {
                                 selectedSeason = season
-                                loadSeasonDetails(tvShowId: tvShow.id, season: season)
+                                if isAnime {
+                                    setAnimeSeasonDetail(for: season, tvShow: tvShow)
+                                } else {
+                                    loadSeasonDetails(tvShowId: tvShow.id, season: season)
+                                }
                             }) {
                                 VStack(spacing: 8) {
                                     KFImage(URL(string: season.fullPosterURL ?? ""))
@@ -364,6 +378,40 @@ struct TVShowSeasonsSection: View {
                 }
             }
         }
+    }
+
+    private func setAnimeSeasonDetail(for season: TMDBSeason, tvShow: TMDBTVShowWithSeasons) {
+        // Build episodes from AniList count if available, otherwise TMDB season episodeCount, fallback 12
+        let fallbackCount = animeEpisodeCount ?? tvShow.numberOfEpisodes ?? season.episodeCount
+        let episodeCount = season.episodeCount > 0 ? season.episodeCount : (fallbackCount ?? 12)
+        let episodes: [TMDBEpisode] = episodeCount > 0 ? (1...episodeCount).map { idx in
+            TMDBEpisode(
+                id: tvShow.id * 1000 + season.seasonNumber * 100 + idx,
+                name: "Episode \(idx)",
+                overview: nil,
+                stillPath: nil,
+                episodeNumber: idx,
+                seasonNumber: season.seasonNumber,
+                airDate: nil,
+                runtime: tvShow.episodeRunTime?.first,
+                voteAverage: 0,
+                voteCount: 0
+            )
+        } : []
+
+        let detail = TMDBSeasonDetail(
+            id: season.id,
+            name: season.name,
+            overview: season.overview,
+            posterPath: season.posterPath,
+            seasonNumber: season.seasonNumber,
+            airDate: season.airDate,
+            episodes: episodes
+        )
+
+        seasonDetail = detail
+        selectedEpisodeForSearch = detail.episodes.first
+        isLoadingSeason = false
     }
     
     private func getAgeRating(from contentRatings: TMDBContentRatings?) -> String? {

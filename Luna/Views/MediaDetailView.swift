@@ -45,6 +45,8 @@ struct MediaDetailView: View {
     @AppStorage("useSolidBackgroundBehindHero") private var useSolidBackgroundBehindHero = false
     @State private var pendingEpisodeSelection: (Int, Int)? = nil
     @State private var shouldAutoPlay = false
+    @State private var isAnimeShow = false
+    @State private var animeEpisodeCount: Int? = nil
 
     init(searchResult: TMDBSearchResult, resumeHint: EpisodeResumeHint? = nil, autoPlay: Bool = false) {
         self.searchResult = searchResult
@@ -413,6 +415,8 @@ struct MediaDetailView: View {
         if !searchResult.isMovie {
             TVShowSeasonsSection(
                 tvShow: tvShowDetail,
+                isAnime: isAnimeShow,
+                animeEpisodeCount: animeEpisodeCount,
                 selectedSeason: $selectedSeason,
                 seasonDetail: $seasonDetail,
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
@@ -420,6 +424,41 @@ struct MediaDetailView: View {
                 tmdbService: tmdbService
             )
         }
+    }
+
+    private func detectAnime(from detail: TMDBTVShowWithSeasons) -> Bool {
+        let genreAnime = detail.genres.contains { $0.id == 16 }
+        let originJP = detail.originCountry?.contains("JP") ?? false
+        return genreAnime || originJP
+    }
+
+    private func buildAnimeSeasonDetail(season: TMDBSeason, show: TMDBTVShowWithSeasons) -> TMDBSeasonDetail {
+        let fallbackCount = animeEpisodeCount ?? show.numberOfEpisodes ?? season.episodeCount
+        let count = season.episodeCount > 0 ? season.episodeCount : (fallbackCount ?? 12)
+        let episodes: [TMDBEpisode] = count > 0 ? (1...count).map { idx in
+            TMDBEpisode(
+                id: show.id * 1000 + season.seasonNumber * 100 + idx,
+                name: "Episode \(idx)",
+                overview: nil,
+                stillPath: nil,
+                episodeNumber: idx,
+                seasonNumber: season.seasonNumber,
+                airDate: nil,
+                runtime: show.episodeRunTime?.first,
+                voteAverage: 0,
+                voteCount: 0
+            )
+        } : []
+
+        return TMDBSeasonDetail(
+            id: season.id,
+            name: season.name,
+            overview: season.overview,
+            posterPath: season.posterPath,
+            seasonNumber: season.seasonNumber,
+            airDate: season.airDate,
+            episodes: episodes
+        )
     }
     
     private func toggleBookmark() {
@@ -475,32 +514,57 @@ struct MediaDetailView: View {
                 } else {
                     let detail = try await tmdbService.getTVShowWithSeasons(id: searchResult.id)
                     let romaji = await tmdbService.getRomajiTitle(for: "tv", id: searchResult.id)
+                    let animeFlag = detectAnime(from: detail)
+                    self.isAnimeShow = animeFlag
 
                     // Prefer the last in-progress episode if we have one for this show
                     let resume = ProgressManager.shared.latestEpisodeProgress(for: detail.id)
 
-                    await MainActor.run {
-                        self.tvShowDetail = detail
-                        self.synopsis = detail.overview ?? ""
-                        self.romajiTitle = romaji
+                    if animeFlag {
+                        // Use AniList for episode/season structure, TMDB for title/overview
+                        let aniDetails = try? await AniListService.shared.fetchAnimeDetails(title: detail.name, token: nil)
+                        let totalEpisodes = aniDetails?.episodes ?? detail.numberOfEpisodes
+                        self.animeEpisodeCount = totalEpisodes
 
-                        if let resume = resume {
-                            if let matchedSeason = detail.seasons.first(where: { $0.seasonNumber == resume.seasonNumber }) {
+                        // Use TMDB seasons structure, but episodes are generated (AniList count if available)
+                        let seasons = detail.seasons.filter { $0.seasonNumber > 0 }
+                        let initialSeason = seasons.first ?? detail.seasons.first
+
+                        await MainActor.run {
+                            self.tvShowDetail = detail
+                            self.synopsis = detail.overview ?? ""
+                            self.romajiTitle = aniDetails?.title ?? romaji
+                            if let season = initialSeason {
+                                self.selectedSeason = season
+                                self.seasonDetail = buildAnimeSeasonDetail(season: season, show: detail)
+                                self.selectedEpisodeForSearch = self.seasonDetail?.episodes.first
+                            }
+                            self.isLoading = false
+                        }
+                    } else {
+                        await MainActor.run {
+                            self.tvShowDetail = detail
+                            self.synopsis = detail.overview ?? ""
+                            self.romajiTitle = romaji
+
+                            if let resume = resume {
+                                if let matchedSeason = detail.seasons.first(where: { $0.seasonNumber == resume.seasonNumber }) {
+                                    self.selectedSeason = matchedSeason
+                                } else if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
+                                    self.selectedSeason = firstSeason
+                                }
+                                self.pendingEpisodeSelection = (resume.seasonNumber, resume.episodeNumber)
+                            } else if let hint = resumeHint, hint.showId == detail.id,
+                                      let matchedSeason = detail.seasons.first(where: { $0.seasonNumber == hint.season }) {
                                 self.selectedSeason = matchedSeason
+                                self.pendingEpisodeSelection = (hint.season, hint.episode)
                             } else if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
                                 self.selectedSeason = firstSeason
                             }
-                            self.pendingEpisodeSelection = (resume.seasonNumber, resume.episodeNumber)
-                        } else if let hint = resumeHint, hint.showId == detail.id,
-                                  let matchedSeason = detail.seasons.first(where: { $0.seasonNumber == hint.season }) {
-                            self.selectedSeason = matchedSeason
-                            self.pendingEpisodeSelection = (hint.season, hint.episode)
-                        } else if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
-                            self.selectedSeason = firstSeason
-                        }
 
-                        self.selectedEpisodeForSearch = nil
-                        self.isLoading = false
+                            self.selectedEpisodeForSearch = nil
+                            self.isLoading = false
+                        }
                     }
 
                     // If autoPlay was requested, attempt to start search after season details are loaded
