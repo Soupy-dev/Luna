@@ -208,12 +208,31 @@ final class TrackerManager: NSObject, ObservableObject {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
+        Logger.shared.log("Exchanging AniList code for token", type: "Tracker")
+        
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw NSError(domain: "AniListAuth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to authenticate with AniList"])
+        let httpResponse = response as? HTTPURLResponse
+        let statusCode = httpResponse?.statusCode ?? -1
+        
+        Logger.shared.log("AniList token response status: \(statusCode)", type: "Tracker")
+        Logger.shared.log("AniList response data length: \(data.count) bytes", type: "Tracker")
+        
+        if let responseString = String(data: data, encoding: .utf8) {
+            Logger.shared.log("AniList response: \(responseString)", type: "Tracker")
         }
         
-        return try JSONDecoder().decode(AniListAuthResponse.self, from: data)
+        guard statusCode == 200 else {
+            let errorMsg = "AniList token request failed with status \(statusCode)"
+            Logger.shared.log(errorMsg, type: "Error")
+            throw NSError(domain: "AniListAuth", code: statusCode, userInfo: [NSLocalizedDescriptionKey: errorMsg])
+        }
+        
+        do {
+            return try JSONDecoder().decode(AniListAuthResponse.self, from: data)
+        } catch {
+            Logger.shared.log("Failed to decode AniList response: \(error.localizedDescription)", type: "Error")
+            throw error
+        }
     }
     
     private func fetchAniListUser(token: String) async throws -> AniListUser {
@@ -394,12 +413,31 @@ final class TrackerManager: NSObject, ObservableObject {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
+        Logger.shared.log("Exchanging Trakt code for token", type: "Tracker")
+        
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw NSError(domain: "TraktAuth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to authenticate with Trakt"])
+        let httpResponse = response as? HTTPURLResponse
+        let statusCode = httpResponse?.statusCode ?? -1
+        
+        Logger.shared.log("Trakt token response status: \(statusCode)", type: "Tracker")
+        Logger.shared.log("Trakt response data length: \(data.count) bytes", type: "Tracker")
+        
+        if let responseString = String(data: data, encoding: .utf8) {
+            Logger.shared.log("Trakt response: \(responseString)", type: "Tracker")
         }
         
-        return try JSONDecoder().decode(TraktAuthResponse.self, from: data)
+        guard statusCode == 200 else {
+            let errorMsg = "Trakt token request failed with status \(statusCode)"
+            Logger.shared.log(errorMsg, type: "Error")
+            throw NSError(domain: "TraktAuth", code: statusCode, userInfo: [NSLocalizedDescriptionKey: errorMsg])
+        }
+        
+        do {
+            return try JSONDecoder().decode(TraktAuthResponse.self, from: data)
+        } catch {
+            Logger.shared.log("Failed to decode Trakt response: \(error.localizedDescription)", type: "Error")
+            throw error
+        }
     }
     
     private func fetchTraktUser(token: String) async throws -> TraktUser {
