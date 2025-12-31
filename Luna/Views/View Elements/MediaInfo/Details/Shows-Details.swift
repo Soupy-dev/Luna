@@ -394,7 +394,15 @@ struct TVShowSeasonsSection: View {
                 // If AniList provided a count and this is a single-season show, truncate to that count
                 let totalSeasons = tvShow.seasons.filter { $0.seasonNumber > 0 }.count
                 if totalSeasons == 1, let aniCount = animeEpisodeCount, aniCount > 0 {
-                    adjustedDetail.episodes = Array(detail.episodes.prefix(aniCount))
+                    adjustedDetail = TMDBSeasonDetail(
+                        id: detail.id,
+                        name: detail.name,
+                        overview: detail.overview,
+                        posterPath: detail.posterPath,
+                        seasonNumber: detail.seasonNumber,
+                        airDate: detail.airDate,
+                        episodes: Array(detail.episodes.prefix(aniCount))
+                    )
                 }
 
                 await MainActor.run {

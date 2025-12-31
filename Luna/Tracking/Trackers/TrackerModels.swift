@@ -116,6 +116,7 @@ struct AniListAnime: Codable {
     let id: Int
     let title: AniListTitle
     let episodes: Int?
+    let status: String?
     let nextAiringEpisode: AniListAiringSchedule?
     
     struct AniListTitle: Codable {
