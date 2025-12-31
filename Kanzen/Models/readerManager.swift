@@ -391,20 +391,20 @@ var nextControllers: [UIViewController]?
             }
         }
     }
-    func fetchNext(completion: @escaping () -> Void = {})
-    {        if let selectedChapter = selectedChapter, let chapters = chapters {
-        let idx = selectedChapter.idx
-        if idx < chapters.count - 1 {
-            let nextChapters = chapters[idx + 1]
-            if let nextSources = nextChapters.chapterData, nextSources.count > 0,
-                let nextParams = nextSources[0].params
-            {
-                loadPages(params: nextParams, position: .next,completion: completion)
+    func fetchNext(completion: @escaping () -> Void = {}) {
+        if let selectedChapter = selectedChapter, let chapters = chapters {
+            let idx = selectedChapter.idx
+            if idx < chapters.count - 1 {
+                let nextChapters = chapters[idx + 1]
+                if let nextSources = nextChapters.chapterData, nextSources.count > 0,
+                    let nextParams = nextSources[0].params
+                {
+                    loadPages(params: nextParams, position: .next, completion: completion)
+                }
             }
-            
         }
     }
-
+    
     private func parsedChapterNumber(from raw: String) -> Int? {
         // Extract leading/inlined number, fallback to nil if not found
         let digits = raw.compactMap { char -> String? in
@@ -416,8 +416,6 @@ var nextControllers: [UIViewController]?
             return Int(doubleVal.rounded(.down))
         }
         return nil
-    }
-        
     }
     
     func preloadAdjacentPages()
