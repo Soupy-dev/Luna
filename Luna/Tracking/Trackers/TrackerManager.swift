@@ -29,9 +29,10 @@ final class TrackerManager: NSObject, ObservableObject {
     private let traktClientSecret = "03c457ea5986e900f140243c69d616313533cedcc776e42e07a6ddd3ab699035"
     private let traktRedirectUri = "luna://trakt-callback"
     
-    private init() {
+    override private init() {
         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         self.trackerStateURL = documentsDirectory.appendingPathComponent("TrackerState.json")
+        super.init()
         loadTrackerState()
     }
     
