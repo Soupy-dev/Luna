@@ -113,7 +113,7 @@ struct MediaDetailView: View {
         // Episode is fully watched, find the next one
         // Try next episode in same season
         if let season = tvShow.seasons.first(where: { $0.seasonNumber == latest.seasonNumber }),
-           let nextEp = season.episodeCount, nextEp > latest.episodeNumber {
+           season.episodeCount > latest.episodeNumber {
             return (season: latest.seasonNumber, episode: latest.episodeNumber + 1)
         }
         
