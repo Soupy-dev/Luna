@@ -254,7 +254,18 @@ final class TrackerManager: NSObject, ObservableObject {
         let body: [String: Any] = ["query": query]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
-        let (data, _) = try await URLSession.shared.data(for: request)
+        Logger.shared.log("Fetching AniList user", type: "Tracker")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let httpResponse = response as? HTTPURLResponse
+        let statusCode = httpResponse?.statusCode ?? -1
+        
+        Logger.shared.log("AniList user response status: \(statusCode)", type: "Tracker")
+        Logger.shared.log("AniList user response data length: \(data.count) bytes", type: "Tracker")
+        
+        if let responseString = String(data: data, encoding: .utf8) {
+            Logger.shared.log("AniList user response: \(responseString)", type: "Tracker")
+        }
         
         struct Response: Codable {
             let data: DataWrapper
@@ -263,8 +274,13 @@ final class TrackerManager: NSObject, ObservableObject {
             }
         }
         
-        let response = try JSONDecoder().decode(Response.self, from: data)
-        return response.data.Viewer
+        do {
+            let response = try JSONDecoder().decode(Response.self, from: data)
+            return response.data.Viewer
+        } catch {
+            Logger.shared.log("Failed to decode AniList user response: \(error.localizedDescription)", type: "Error")
+            throw error
+        }
     }
     
     // MARK: - Trakt Authentication
@@ -447,8 +463,25 @@ final class TrackerManager: NSObject, ObservableObject {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("2", forHTTPHeaderField: "trakt-api-version")
         
-        let (data, _) = try await URLSession.shared.data(for: request)
-        return try JSONDecoder().decode(TraktUser.self, from: data)
+        Logger.shared.log("Fetching Trakt user", type: "Tracker")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let httpResponse = response as? HTTPURLResponse
+        let statusCode = httpResponse?.statusCode ?? -1
+        
+        Logger.shared.log("Trakt user response status: \(statusCode)", type: "Tracker")
+        Logger.shared.log("Trakt user response data length: \(data.count) bytes", type: "Tracker")
+        
+        if let responseString = String(data: data, encoding: .utf8) {
+            Logger.shared.log("Trakt user response: \(responseString)", type: "Tracker")
+        }
+        
+        do {
+            return try JSONDecoder().decode(TraktUser.self, from: data)
+        } catch {
+            Logger.shared.log("Failed to decode Trakt user response: \(error.localizedDescription)", type: "Error")
+            throw error
+        }
     }
     
     // MARK: - Sync Methods
