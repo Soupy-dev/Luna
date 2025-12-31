@@ -615,12 +615,12 @@ struct ContinueWatchingCard: View {
         switch entry.type {
         case .movie:
             if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
-                return TMDBSearchResult(id: movieId, mediaType: "movie", title: entry.title, name: nil, overview: nil, posterPath: entry.imageURL?.replacingOccurrences(of: TMDBService.tmdbImageBaseURL, with: "") , backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
+                return TMDBSearchResult(id: movieId, mediaType: "movie", title: entry.showTitle ?? entry.title, name: nil, overview: nil, posterPath: entry.imageURL?.replacingOccurrences(of: TMDBService.tmdbImageBaseURL, with: "") , backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
             }
             return nil
         case .episode:
             if let showId = entry.showId {
-                return TMDBSearchResult(id: showId, mediaType: "tv", title: nil, name: entry.title, overview: nil, posterPath: entry.imageURL?.replacingOccurrences(of: TMDBService.tmdbImageBaseURL, with: ""), backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
+                return TMDBSearchResult(id: showId, mediaType: "tv", title: nil, name: entry.showTitle ?? entry.title, overview: nil, posterPath: entry.imageURL?.replacingOccurrences(of: TMDBService.tmdbImageBaseURL, with: ""), backdropPath: nil, releaseDate: nil, firstAirDate: nil, voteAverage: nil, popularity: 0.0, adult: nil, genreIds: nil)
             }
             return nil
         }
@@ -649,7 +649,7 @@ struct ContinueWatchingCard: View {
                 }
 
                 VStack(alignment: .leading, spacing: isTvOS ? 10 : 3) {
-                    Text(entry.title)
+                    Text(entry.showTitle ?? entry.title)
                         .foregroundColor(.white)
                         .fontWeight(.medium)
                         .font(.caption)

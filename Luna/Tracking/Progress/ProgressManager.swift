@@ -184,7 +184,7 @@ final class ProgressManager: ObservableObject {
             entry.totalDuration = totalDuration
             entry.lastUpdated = Date()
             
-            if entry.progress >= 0.95 {
+            if entry.progress >= 0.85 {
                 entry.isWatched = true
             }
             
@@ -214,7 +214,7 @@ final class ProgressManager: ObservableObject {
         var result: Bool = false
         accessQueue.sync {
             if let entry = self.progressData.findMovie(id: movieId) {
-                result = entry.isWatched || entry.progress >= 0.95
+                result = entry.isWatched || entry.progress >= 0.85
             }
         }
         return result
@@ -311,7 +311,7 @@ final class ProgressManager: ObservableObject {
             entry.totalDuration = totalDuration
             entry.lastUpdated = Date()
             
-            if entry.progress >= 0.95 {
+            if entry.progress >= 0.85 {
                 entry.isWatched = true
             }
             
@@ -359,7 +359,7 @@ final class ProgressManager: ObservableObject {
         var result: Bool = false
         accessQueue.sync {
             if let entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber) {
-                result = entry.isWatched || entry.progress >= 0.95
+                result = entry.isWatched || entry.progress >= 0.85
             }
         }
         return result

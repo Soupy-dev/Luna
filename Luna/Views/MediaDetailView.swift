@@ -79,6 +79,8 @@ struct MediaDetailView: View {
             return "Play"
         } else if let selectedEpisode = selectedEpisodeForSearch {
             return "Play S\(selectedEpisode.seasonNumber)E\(selectedEpisode.episodeNumber)"
+        } else if let nextEpisode = getNextEpisodeToWatch() {
+            return "Play S\(nextEpisode.season)E\(nextEpisode.episode)"
         } else if let hint = resumeHint {
             return "Play S\(hint.season)E\(hint.episode)"
         } else {
@@ -89,6 +91,38 @@ struct MediaDetailView: View {
     private var hasResumeHint: Bool {
         if let hint = resumeHint { return hint.showId == searchResult.id }
         return false
+    }
+
+    private func getNextEpisodeToWatch() -> (season: Int, episode: Int)? {
+        guard let tvShow = tvShowDetail else { return nil }
+        let latest = ProgressManager.shared.latestEpisodeProgress(for: tvShow.id)
+        guard let latest = latest else { return nil }
+        
+        // Check if the latest episode is fully watched
+        let isWatched = ProgressManager.shared.isEpisodeWatched(
+            showId: tvShow.id,
+            seasonNumber: latest.seasonNumber,
+            episodeNumber: latest.episodeNumber
+        )
+        
+        if !isWatched {
+            // Still watching this episode, return it
+            return (season: latest.seasonNumber, episode: latest.episodeNumber)
+        }
+        
+        // Episode is fully watched, find the next one
+        // Try next episode in same season
+        if let season = tvShow.seasons.first(where: { $0.seasonNumber == latest.seasonNumber }),
+           let nextEp = season.episodeCount, nextEp > latest.episodeNumber {
+            return (season: latest.seasonNumber, episode: latest.episodeNumber + 1)
+        }
+        
+        // Try first episode of next season
+        if let nextSeason = tvShow.seasons.first(where: { $0.seasonNumber > latest.seasonNumber && $0.seasonNumber > 0 }) {
+            return (season: nextSeason.seasonNumber, episode: 1)
+        }
+        
+        return nil
     }
     
     var body: some View {

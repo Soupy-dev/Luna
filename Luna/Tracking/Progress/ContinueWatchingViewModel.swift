@@ -18,7 +18,8 @@ enum ContinueMediaType {
 
 struct ContinueWatchingEntry: Identifiable {
     let id: String
-    let title: String
+    let title: String               // short label (for episodes this is S/E)
+    var showTitle: String?          // resolved canonical title for search/detail
     var imageURL: String?
     let currentTime: Double
     let totalDuration: Double
@@ -57,6 +58,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                         ContinueWatchingEntry(
                             id: "movie_\(m.id)",
                             title: m.title,
+                            showTitle: m.title,
                             imageURL: nil,
                             currentTime: m.currentTime,
                             totalDuration: m.totalDuration,
@@ -76,6 +78,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                         ContinueWatchingEntry(
                             id: e.id,
                             title: "S\(e.seasonNumber)E\(e.episodeNumber)",
+                            showTitle: nil,
                             imageURL: nil,
                             currentTime: e.currentTime,
                             totalDuration: e.totalDuration,
@@ -89,8 +92,21 @@ final class ContinueWatchingViewModel: ObservableObject {
                         )
                     }
 
-                var combined = (movieEntries + episodeEntries)
+                // Deduplicate: for episodes, keep only the most recent per show
+                var seenShowIds = Set<Int>()
+                let deduped = (movieEntries + episodeEntries)
                     .sorted { $0.lastUpdated > $1.lastUpdated }
+                    .filter { entry in
+                        if entry.type == .episode, let showId = entry.showId {
+                            if seenShowIds.contains(showId) {
+                                return false
+                            }
+                            seenShowIds.insert(showId)
+                        }
+                        return true
+                    }
+
+                var combined = deduped
                 if combined.count > self.maxEntries {
                     combined = Array(combined.prefix(self.maxEntries))
                 }
@@ -104,9 +120,10 @@ final class ContinueWatchingViewModel: ObservableObject {
                             if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
                                 do {
                                     let detail = try await TMDBService.shared.getMovieDetails(id: movieId)
-                                    if let poster = detail.fullPosterURL {
-                                        await MainActor.run {
-                                            if let idx = self.entries.firstIndex(where: { $0.id == entry.id }) {
+                                    await MainActor.run {
+                                        if let idx = self.entries.firstIndex(where: { $0.id == entry.id }) {
+                                            self.entries[idx].showTitle = detail.title
+                                            if let poster = detail.fullPosterURL {
                                                 self.entries[idx].imageURL = poster
                                             }
                                         }
@@ -119,9 +136,10 @@ final class ContinueWatchingViewModel: ObservableObject {
                             if let showId = entry.showId {
                                 do {
                                     let detail = try await TMDBService.shared.getTVShowDetails(id: showId)
-                                    if let poster = detail.fullPosterURL {
-                                        await MainActor.run {
-                                            if let idx = self.entries.firstIndex(where: { $0.id == entry.id }) {
+                                    await MainActor.run {
+                                        if let idx = self.entries.firstIndex(where: { $0.id == entry.id }) {
+                                            self.entries[idx].showTitle = detail.name
+                                            if let poster = detail.fullPosterURL {
                                                 self.entries[idx].imageURL = poster
                                             }
                                         }
@@ -138,6 +156,8 @@ final class ContinueWatchingViewModel: ObservableObject {
     }
 
     func resume(_ entry: ContinueWatchingEntry) {
+        let canonicalTitle = entry.showTitle ?? entry.title
+
         // Try to resume using the last recorded service/href when available
         if let serviceId = entry.lastServiceId, let href = entry.lastHref {
             // Attempt to find the service
@@ -180,7 +200,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                                 let pvc = PlayerViewController(url: streamURL, preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []), headers: nil, subtitles: subtitles)
                                 if entry.type == .movie {
                                     if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
-                                        pvc.mediaInfo = .movie(id: movieId, title: entry.title)
+                                        pvc.mediaInfo = .movie(id: movieId, title: canonicalTitle)
                                     }
                                 } else if let showId = entry.showId, let season = entry.seasonNumber, let ep = entry.episodeNumber {
                                     pvc.mediaInfo = .episode(showId: showId, seasonNumber: season, episodeNumber: ep)
@@ -198,7 +218,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                                 playerVC.player = AVPlayer(playerItem: item)
                                 if entry.type == .movie {
                                     if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
-                                        playerVC.mediaInfo = .movie(id: movieId, title: entry.title)
+                                        playerVC.mediaInfo = .movie(id: movieId, title: canonicalTitle)
                                     }
                                 } else if let showId = entry.showId, let season = entry.seasonNumber, let ep = entry.episodeNumber {
                                     playerVC.mediaInfo = .episode(showId: showId, seasonNumber: season, episodeNumber: ep)
@@ -222,13 +242,13 @@ final class ContinueWatchingViewModel: ObservableObject {
                                 if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
                                     userInfo["tmdbId"] = movieId
                                     userInfo["isMovie"] = true
-                                    userInfo["title"] = entry.title
+                                    userInfo["title"] = canonicalTitle
                                 }
                             case .episode:
                                 if let showId = entry.showId {
                                     userInfo["tmdbId"] = showId
                                     userInfo["isMovie"] = false
-                                    userInfo["title"] = entry.title
+                                    userInfo["title"] = canonicalTitle
                                     userInfo["seasonNumber"] = entry.seasonNumber
                                     userInfo["episodeNumber"] = entry.episodeNumber
                                 }
@@ -246,10 +266,10 @@ final class ContinueWatchingViewModel: ObservableObject {
         switch entry.type {
         case .movie:
             if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
-                ProgressManager.shared.updateMovieProgress(movieId: movieId, title: entry.title, currentTime: entry.currentTime, totalDuration: entry.totalDuration)
+                ProgressManager.shared.updateMovieProgress(movieId: movieId, title: canonicalTitle, currentTime: entry.currentTime, totalDuration: entry.totalDuration)
                     // Open MediaDetailView for this movie
                     DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": movieId, "isMovie": true, "title": entry.title, "autoPlay": true])
+                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": movieId, "isMovie": true, "title": canonicalTitle, "autoPlay": true])
                     }
             }
         case .episode:
@@ -257,18 +277,20 @@ final class ContinueWatchingViewModel: ObservableObject {
                 ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: season, episodeNumber: ep, currentTime: entry.currentTime, totalDuration: entry.totalDuration)
                     // Open MediaDetailView for this show
                     DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": showId, "isMovie": false, "title": entry.title, "seasonNumber": season, "episodeNumber": ep, "autoPlay": true])
+                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": showId, "isMovie": false, "title": canonicalTitle, "seasonNumber": season, "episodeNumber": ep, "autoPlay": true])
                     }
             }
         }
     }
 
     func playFromStart(_ entry: ContinueWatchingEntry) {
+        let canonicalTitle = entry.showTitle ?? entry.title
+
         // Reset progress to start so players won't seek
         switch entry.type {
         case .movie:
             if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
-                ProgressManager.shared.updateMovieProgress(movieId: movieId, title: entry.title, currentTime: 0, totalDuration: entry.totalDuration)
+                ProgressManager.shared.updateMovieProgress(movieId: movieId, title: canonicalTitle, currentTime: 0, totalDuration: entry.totalDuration)
             }
         case .episode:
             if let showId = entry.showId, let season = entry.seasonNumber, let ep = entry.episodeNumber {

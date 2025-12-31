@@ -66,7 +66,13 @@ struct ModulesSearchResultsSheet: View {
     
     private var displayTitle: String {
         if let episode = selectedEpisode {
-            return "\(mediaTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
+            let episodeLabel = "S\(episode.seasonNumber)E\(episode.episodeNumber)"
+            let trimmedTitle = mediaTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Avoid duplicating the episode label if the mediaTitle already contains it
+            if trimmedTitle.uppercased().contains(episodeLabel.uppercased()) {
+                return mediaTitle
+            }
+            return "\(mediaTitle) \(episodeLabel)"
         } else {
             return mediaTitle
         }
