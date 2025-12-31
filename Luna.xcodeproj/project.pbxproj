@@ -116,6 +116,10 @@
 		13F5B5922E73090000565E75 /* HomeSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5912E73090000565E75 /* HomeSection.swift */; };
 		13F5B5952E730CB200565E75 /* TMDBContentFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */; };
 		13F5B5972E730CDB00565E75 /* TMDBFiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5962E730CDB00565E75 /* TMDBFiltersView.swift */; };
+		13FAA1012FFF010100AAAAAA /* TrackerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0012FFF000100AAAAAA /* TrackerManager.swift */; };
+		13FAA1022FFF010200AAAAAA /* TrackerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0022FFF000200AAAAAA /* TrackerModels.swift */; };
+		13FAA1032FFF010300AAAAAA /* TrackersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0032FFF000300AAAAAA /* TrackersSettingsView.swift */; };
+		13FAA1042FFF010400AAAAAA /* AniListService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0042FFF000400AAAAAA /* AniListService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -242,6 +246,10 @@
 		13F5B5912E73090000565E75 /* HomeSection.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HomeSection.swift; sourceTree = "<group>"; };
 		13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBContentFilter.swift; sourceTree = "<group>"; };
 		13F5B5962E730CDB00565E75 /* TMDBFiltersView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBFiltersView.swift; sourceTree = "<group>"; };
+		13FAA0012FFF000100AAAAAA /* TrackerManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackerManager.swift; sourceTree = "<group>"; };
+		13FAA0022FFF000200AAAAAA /* TrackerModels.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackerModels.swift; sourceTree = "<group>"; };
+		13FAA0032FFF000300AAAAAA /* TrackersSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackersSettingsView.swift; sourceTree = "<group>"; };
+		13FAA0042FFF000400AAAAAA /* AniListService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AniListService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -286,6 +294,7 @@
 			isa = PBXGroup;
 			children = (
 				1375466F2E5F079000B29944 /* Progress */,
+				13FAA0502FFF00AA00AAAAAA /* Trackers */,
 			);
 			path = Tracking;
 			sourceTree = "<group>";
@@ -675,6 +684,7 @@
 				13F072982E4B2D9200EF90EB /* Models */,
 				13F0729A2E4B2D9200EF90EB /* TMDBService.swift */,
 				13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */,
+				13FAA0042FFF000400AAAAAA /* AniListService.swift */,
 			);
 			path = TMDB;
 			sourceTree = "<group>";
@@ -710,8 +720,18 @@
 				13F072792E4B2D9000EF90EB /* ServicesView.swift */,
 				13F518422EBCE42B00DEF778 /* StorageView.swift */,
 				13F0727E2E4B2D9000EF90EB /* LoggerView.swift */,
+				13FAA0032FFF000300AAAAAA /* TrackersSettingsView.swift */,
 			);
 			path = SettingsView;
+			sourceTree = "<group>";
+		};
+		13FAA0502FFF00AA00AAAAAA /* Trackers */ = {
+			isa = PBXGroup;
+			children = (
+				13FAA0012FFF000100AAAAAA /* TrackerManager.swift */,
+				13FAA0022FFF000200AAAAAA /* TrackerModels.swift */,
+			);
+			path = Trackers;
 			sourceTree = "<group>";
 		};
 		13F187A32E6F38CE00747F7E /* Library */ = {
@@ -859,6 +879,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				13FAA1042FFF010400AAAAAA /* AniListService.swift in Sources */,
+				13FAA1012FFF010100AAAAAA /* TrackerManager.swift in Sources */,
+				13FAA1022FFF010200AAAAAA /* TrackerModels.swift in Sources */,
 				12E7AF602EB80775003B7664 /* Platform.swift in Sources */,
 				129CC90C2EBA920C00D2D84B /* Bundle.swift in Sources */,
 				13DCC4F62E58B40F0028AE91 /* HybridSimilarity.swift in Sources */,
@@ -896,6 +919,7 @@
 				13F072A62E4B2D9200EF90EB /* LibraryView.swift in Sources */,
 				13F072A92E4B2D9200EF90EB /* LoggerView.swift in Sources */,
 				13F072A72E4B2D9200EF90EB /* MediaDetailView.swift in Sources */,
+				13FAA1032FFF010300AAAAAA /* TrackersSettingsView.swift in Sources */,
 				13F072A22E4B2D9200EF90EB /* SettingsView.swift in Sources */,
 				13E1EDE02ED9E66000087629 /* KanzenRunnerController.swift in Sources */,
 				13E1EDEC2ED9E66000087629 /* circularLoading.swift in Sources */,
