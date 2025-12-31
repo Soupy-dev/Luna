@@ -120,10 +120,13 @@ final class TrackerManager: NSObject, ObservableObject {
     
     func handleAniListCallback(code: String) {
         isAuthenticating = true
+        Logger.shared.log("AniList callback received with code", type: "Tracker")
         Task {
             do {
                 let token = try await exchangeAniListCode(code)
+                Logger.shared.log("AniList token exchanged successfully", type: "Tracker")
                 let user = try await fetchAniListUser(token: token.accessToken)
+                Logger.shared.log("AniList user fetched: \(user.name)", type: "Tracker")
                 let account = TrackerAccount(
                     service: .anilist,
                     username: user.name,
@@ -136,11 +139,14 @@ final class TrackerManager: NSObject, ObservableObject {
                     self.trackerState.addOrUpdateAccount(account)
                     self.saveTrackerState()
                     self.isAuthenticating = false
+                    self.authError = nil
+                    Logger.shared.log("AniList account saved", type: "Tracker")
                 }
             } catch {
                 await MainActor.run {
-                    self.authError = error.localizedDescription
+                    self.authError = "AniList auth failed: \(error.localizedDescription)"
                     self.isAuthenticating = false
+                    Logger.shared.log("AniList auth error: \(error.localizedDescription)", type: "Error")
                 }
             }
         }
@@ -287,10 +293,13 @@ final class TrackerManager: NSObject, ObservableObject {
     
     func handleTraktCallback(code: String) {
         isAuthenticating = true
+        Logger.shared.log("Trakt callback received with code", type: "Tracker")
         Task {
             do {
                 let token = try await exchangeTraktCode(code)
+                Logger.shared.log("Trakt token exchanged successfully", type: "Tracker")
                 let user = try await fetchTraktUser(token: token.accessToken)
+                Logger.shared.log("Trakt user fetched: \(user.username)", type: "Tracker")
                 let account = TrackerAccount(
                     service: .trakt,
                     username: user.username,
@@ -303,11 +312,14 @@ final class TrackerManager: NSObject, ObservableObject {
                     self.trackerState.addOrUpdateAccount(account)
                     self.saveTrackerState()
                     self.isAuthenticating = false
+                    self.authError = nil
+                    Logger.shared.log("Trakt account saved", type: "Tracker")
                 }
             } catch {
                 await MainActor.run {
-                    self.authError = error.localizedDescription
+                    self.authError = "Trakt auth failed: \(error.localizedDescription)"
                     self.isAuthenticating = false
+                    Logger.shared.log("Trakt auth error: \(error.localizedDescription)", type: "Error")
                 }
             }
         }

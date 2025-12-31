@@ -20,8 +20,8 @@ class AniListService {
     
     // MARK: - Fetch Anime Details
     
-    /// Fetch full anime details with seasons and episodes (simplified: assume 1 season with all episodes)
-    func fetchAnimeDetailsWithEpisodes(title: String, token: String?) async throws -> AniListAnimeWithEpisodes {
+    /// Fetch full anime details with seasons and episodes from AniList only
+    func fetchAnimeDetailsWithEpisodes(title: String, token: String?) async throws -> AniListAnimeWithSeasons {
         let query = """
         query {
             Media(search: "\(title.replacingOccurrences(of: "\"", with: "\\\""))", type: ANIME) {
@@ -33,6 +33,8 @@ class AniListService {
                 }
                 episodes
                 status
+                seasonYear
+                season
                 nextAiringEpisode {
                     episode
                     airingAt
@@ -54,20 +56,37 @@ class AniListService {
         let anime = result.data.Media
         let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
         
-        // Build episode list from AniList count
+        // Build episode list and organize into seasons
         let episodeCount = anime.episodes ?? 12
         let episodes: [AniListEpisode] = (1...episodeCount).map { idx in
             AniListEpisode(
                 number: idx,
                 title: "Episode \(idx)",
-                description: nil
+                description: nil,
+                seasonNumber: 1  // For now assume season 1, AniList doesn't provide granular season data
             )
         }
         
-        return AniListAnimeWithEpisodes(
+        // Group episodes into seasons (typically 12-13 per season for anime)
+        let episodesPerSeason = 12
+        var seasons: [AniListSeason] = []
+        var episodeIndex = 0
+        
+        for seasonNum in 1... {
+            let seasonEpisodes = Array(episodes.dropFirst(episodeIndex).prefix(episodesPerSeason))
+            if seasonEpisodes.isEmpty { break }
+            
+            seasons.append(AniListSeason(
+                seasonNumber: seasonNum,
+                episodes: seasonEpisodes
+            ))
+            episodeIndex += episodesPerSeason
+        }
+        
+        return AniListAnimeWithSeasons(
             id: anime.id,
             title: title,
-            episodes: episodes,
+            seasons: seasons,
             totalEpisodes: episodeCount,
             status: anime.status ?? "UNKNOWN"
         )
@@ -160,6 +179,20 @@ struct AniListEpisode {
     let number: Int
     let title: String
     let description: String?
+    let seasonNumber: Int
+}
+
+struct AniListSeason {
+    let seasonNumber: Int
+    let episodes: [AniListEpisode]
+}
+
+struct AniListAnimeWithSeasons {
+    let id: Int
+    let title: String
+    let seasons: [AniListSeason]
+    let totalEpisodes: Int
+    let status: String
 }
 
 struct AniListAnimeWithEpisodes {

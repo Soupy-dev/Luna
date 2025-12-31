@@ -36,6 +36,7 @@ struct MediaDetailView: View {
     @State private var showingAddToCollection = false
     @State private var selectedEpisodeForSearch: TMDBEpisode?
     @State private var romajiTitle: String?
+    @State private var anilistEpisodes: [AniListEpisode]? = nil
     
     @StateObject private var serviceManager = ServiceManager.shared
     @ObservedObject private var libraryManager = LibraryManager.shared
@@ -431,34 +432,6 @@ struct MediaDetailView: View {
         let originJP = detail.originCountry?.contains("JP") ?? false
         return genreAnime || originJP
     }
-
-    private func buildAnimeSeasonDetail(season: TMDBSeason, show: TMDBTVShowWithSeasons, anilistEpisodes: [AniListEpisode]) -> TMDBSeasonDetail {
-        // Convert AniList episodes to TMDB format for display
-        let tmdbEpisodes: [TMDBEpisode] = anilistEpisodes.map { aniEp in
-            TMDBEpisode(
-                id: show.id * 1000 + season.seasonNumber * 100 + aniEp.number,
-                name: aniEp.title,
-                overview: aniEp.description,
-                stillPath: nil,
-                episodeNumber: aniEp.number,
-                seasonNumber: season.seasonNumber,
-                airDate: nil,
-                runtime: show.episodeRunTime?.first,
-                voteAverage: 0,
-                voteCount: 0
-            )
-        }
-
-        return TMDBSeasonDetail(
-            id: season.id,
-            name: season.name,
-            overview: season.overview,
-            posterPath: season.posterPath,
-            seasonNumber: season.seasonNumber,
-            airDate: season.airDate,
-            episodes: tmdbEpisodes
-        )
-    }
     
     private func toggleBookmark() {
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -520,19 +493,52 @@ struct MediaDetailView: View {
                     let resume = ProgressManager.shared.latestEpisodeProgress(for: detail.id)
 
                     if animeFlag {
-                        // Use AniList for episodes/structure, TMDB for metadata
+                        // Use AniList for EVERYTHING except name, poster, and description
                         let aniDetails = try? await AniListService.shared.fetchAnimeDetailsWithEpisodes(title: detail.name, token: nil)
-                        
-                        let seasons = detail.seasons.filter { $0.seasonNumber > 0 }
-                        let initialSeason = seasons.first ?? detail.seasons.first
 
                         await MainActor.run {
+                            // TMDB provides: name, poster, description only
                             self.tvShowDetail = detail
                             self.synopsis = detail.overview ?? ""
                             self.romajiTitle = aniDetails?.title ?? romaji
-                            if let season = initialSeason, let aniEpisodes = aniDetails?.episodes {
-                                self.selectedSeason = season
-                                self.seasonDetail = self.buildAnimeSeasonDetail(season: season, show: detail, anilistEpisodes: aniEpisodes)
+                            
+                            // AniList provides: all season/episode structure
+                            if let seasons = aniDetails?.seasons, let firstSeason = seasons.first {
+                                self.selectedSeason = TMDBSeason(
+                                    id: detail.id,
+                                    name: "Season \(firstSeason.seasonNumber)",
+                                    overview: "",
+                                    posterPath: detail.posterPath,
+                                    seasonNumber: firstSeason.seasonNumber,
+                                    episodeCount: firstSeason.episodes.count,
+                                    airDate: nil
+                                )
+                                
+                                // Build season detail from AniList episodes
+                                let tmdbEpisodes: [TMDBEpisode] = firstSeason.episodes.map { aniEp in
+                                    TMDBEpisode(
+                                        id: detail.id * 1000 + firstSeason.seasonNumber * 100 + aniEp.number,
+                                        name: aniEp.title,
+                                        overview: aniEp.description,
+                                        stillPath: nil,
+                                        episodeNumber: aniEp.number,
+                                        seasonNumber: firstSeason.seasonNumber,
+                                        airDate: nil,
+                                        runtime: detail.episodeRunTime?.first,
+                                        voteAverage: 0,
+                                        voteCount: 0
+                                    )
+                                }
+                                
+                                self.seasonDetail = TMDBSeasonDetail(
+                                    id: detail.id,
+                                    name: "Season \(firstSeason.seasonNumber)",
+                                    overview: "",
+                                    posterPath: detail.posterPath,
+                                    seasonNumber: firstSeason.seasonNumber,
+                                    airDate: nil,
+                                    episodes: tmdbEpisodes
+                                )
                                 self.selectedEpisodeForSearch = self.seasonDetail?.episodes.first
                             }
                             self.isLoading = false
