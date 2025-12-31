@@ -710,15 +710,15 @@ struct ContinueWatchingCard: View {
         }
         .background(
             // hidden NavigationLink for long-press or context-menu -> details
-            NavigationLink(destination: {
+            Group {
                 if let sr = makeSearchResult() {
-                    MediaDetailView(searchResult: sr)
+                    NavigationLink(destination: MediaDetailView(searchResult: sr), isActive: $showDetail) {
+                        EmptyView()
+                    }.hidden()
                 } else {
                     EmptyView()
                 }
-            }, isActive: $showDetail) {
-                EmptyView()
-            }.hidden()
+            }
         )
     }
 }

@@ -149,8 +149,16 @@ final class ContinueWatchingViewModel: ObservableObject {
                     DispatchQueue.main.async {
                         let (streams, subtitles, sources) = streamResult
                         // pick the first available stream
-                        if let stream = streams?.first ?? sources?.first {
-                            let streamURLString = stream.url
+                        let streamURLString: String?
+                        if let source = sources?.first, let url = source["url"] as? String {
+                            streamURLString = url
+                        } else if let stream = streams?.first {
+                            streamURLString = stream
+                        } else {
+                            streamURLString = nil
+                        }
+                        
+                        if let streamURLString = streamURLString {
                             guard let streamURL = URL(string: streamURLString) else {
                                 Logger.shared.log("Invalid stream URL: \(streamURLString)", type: "Error")
                                 return
@@ -208,7 +216,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                             }
                         } else {
                             // No streams resolved -> fallback to details view
-                            var userInfo: [AnyHashable: Any] = [:]
+                            var userInfo: [String: Any] = [:]
                             switch entry.type {
                             case .movie:
                                 if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
