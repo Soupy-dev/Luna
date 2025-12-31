@@ -497,26 +497,49 @@ struct MediaDetailView: View {
                         let aniDetails = try? await AniListService.shared.fetchAnimeDetailsWithEpisodes(title: detail.name, token: nil)
 
                         await MainActor.run {
-                            // TMDB provides: name, poster, description only
-                            // Create a modified tvShowDetail with AniList seasons
-                            var modifiedDetail = detail
+                            // Build AniList seasons array
+                            let aniSeasons = aniDetails?.seasons.map { aniSeason in
+                                TMDBSeason(
+                                    id: detail.id,
+                                    name: "Season \(aniSeason.seasonNumber)",
+                                    overview: "",
+                                    posterPath: detail.posterPath,
+                                    seasonNumber: aniSeason.seasonNumber,
+                                    episodeCount: aniSeason.episodes.count,
+                                    airDate: nil
+                                )
+                            } ?? []
                             
-                            // Rebuild seasons array from AniList data
-                            if let aniSeasons = aniDetails?.seasons {
-                                modifiedDetail.seasons = aniSeasons.map { aniSeason in
-                                    TMDBSeason(
-                                        id: detail.id,
-                                        name: "Season \(aniSeason.seasonNumber)",
-                                        overview: "",
-                                        posterPath: detail.posterPath,
-                                        seasonNumber: aniSeason.seasonNumber,
-                                        episodeCount: aniSeason.episodes.count,
-                                        airDate: nil
-                                    )
-                                }
-                            }
+                            // Create a new tvShowDetail with AniList seasons
+                            let detailWithAniSeasons = TMDBTVShowWithSeasons(
+                                id: detail.id,
+                                name: detail.name,
+                                overview: detail.overview,
+                                posterPath: detail.posterPath,
+                                backdropPath: detail.backdropPath,
+                                firstAirDate: detail.firstAirDate,
+                                lastAirDate: detail.lastAirDate,
+                                voteAverage: detail.voteAverage,
+                                popularity: detail.popularity,
+                                genres: detail.genres,
+                                tagline: detail.tagline,
+                                status: detail.status,
+                                originalLanguage: detail.originalLanguage,
+                                originalName: detail.originalName,
+                                adult: detail.adult,
+                                voteCount: detail.voteCount,
+                                numberOfSeasons: aniDetails?.seasons.count,
+                                numberOfEpisodes: aniDetails?.totalEpisodes,
+                                episodeRunTime: detail.episodeRunTime,
+                                inProduction: detail.inProduction,
+                                languages: detail.languages,
+                                originCountry: detail.originCountry,
+                                type: detail.type,
+                                seasons: aniSeasons,
+                                contentRatings: detail.contentRatings
+                            )
                             
-                            self.tvShowDetail = modifiedDetail
+                            self.tvShowDetail = detailWithAniSeasons
                             self.synopsis = detail.overview ?? ""
                             self.romajiTitle = aniDetails?.title ?? romaji
                             
