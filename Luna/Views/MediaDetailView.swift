@@ -432,23 +432,22 @@ struct MediaDetailView: View {
         return genreAnime || originJP
     }
 
-    private func buildAnimeSeasonDetail(season: TMDBSeason, show: TMDBTVShowWithSeasons) -> TMDBSeasonDetail {
-        let fallbackCount = animeEpisodeCount ?? show.numberOfEpisodes ?? season.episodeCount
-        let count = season.episodeCount > 0 ? season.episodeCount : (fallbackCount ?? 12)
-        let episodes: [TMDBEpisode] = count > 0 ? (1...count).map { idx in
+    private func buildAnimeSeasonDetail(season: TMDBSeason, show: TMDBTVShowWithSeasons, anilistEpisodes: [AniListEpisode]) -> TMDBSeasonDetail {
+        // Convert AniList episodes to TMDB format for display
+        let tmdbEpisodes: [TMDBEpisode] = anilistEpisodes.map { aniEp in
             TMDBEpisode(
-                id: show.id * 1000 + season.seasonNumber * 100 + idx,
-                name: "Episode \(idx)",
-                overview: nil,
+                id: show.id * 1000 + season.seasonNumber * 100 + aniEp.number,
+                name: aniEp.title,
+                overview: aniEp.description,
                 stillPath: nil,
-                episodeNumber: idx,
+                episodeNumber: aniEp.number,
                 seasonNumber: season.seasonNumber,
                 airDate: nil,
                 runtime: show.episodeRunTime?.first,
                 voteAverage: 0,
                 voteCount: 0
             )
-        } : []
+        }
 
         return TMDBSeasonDetail(
             id: season.id,
@@ -457,7 +456,7 @@ struct MediaDetailView: View {
             posterPath: season.posterPath,
             seasonNumber: season.seasonNumber,
             airDate: season.airDate,
-            episodes: episodes
+            episodes: tmdbEpisodes
         )
     }
     
@@ -521,12 +520,9 @@ struct MediaDetailView: View {
                     let resume = ProgressManager.shared.latestEpisodeProgress(for: detail.id)
 
                     if animeFlag {
-                        // Use AniList for episode/season structure, TMDB for title/overview
-                        let aniDetails = try? await AniListService.shared.fetchAnimeDetails(title: detail.name, token: nil)
-                        let totalEpisodes = aniDetails?.episodes ?? detail.numberOfEpisodes
-                        self.animeEpisodeCount = totalEpisodes
-
-                        // Use TMDB seasons structure, but episodes are generated (AniList count if available)
+                        // Use AniList for episodes/structure, TMDB for metadata
+                        let aniDetails = try? await AniListService.shared.fetchAnimeDetailsWithEpisodes(title: detail.name, token: nil)
+                        
                         let seasons = detail.seasons.filter { $0.seasonNumber > 0 }
                         let initialSeason = seasons.first ?? detail.seasons.first
 
@@ -534,9 +530,9 @@ struct MediaDetailView: View {
                             self.tvShowDetail = detail
                             self.synopsis = detail.overview ?? ""
                             self.romajiTitle = aniDetails?.title ?? romaji
-                            if let season = initialSeason {
+                            if let season = initialSeason, let aniEpisodes = aniDetails?.episodes {
                                 self.selectedSeason = season
-                                self.seasonDetail = buildAnimeSeasonDetail(season: season, show: detail)
+                                self.seasonDetail = self.buildAnimeSeasonDetail(season: season, show: detail, anilistEpisodes: aniEpisodes)
                                 self.selectedEpisodeForSearch = self.seasonDetail?.episodes.first
                             }
                             self.isLoading = false

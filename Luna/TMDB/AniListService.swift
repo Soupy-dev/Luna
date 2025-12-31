@@ -20,8 +20,8 @@ class AniListService {
     
     // MARK: - Fetch Anime Details
     
-    /// Fetch anime episodes and details from AniList instead of TMDB
-    func fetchAnimeDetails(title: String, token: String?) async throws -> AniListAnimeDetails {
+    /// Fetch full anime details with seasons and episodes (simplified: assume 1 season with all episodes)
+    func fetchAnimeDetailsWithEpisodes(title: String, token: String?) async throws -> AniListAnimeWithEpisodes {
         let query = """
         query {
             Media(search: "\(title.replacingOccurrences(of: "\"", with: "\\\""))", type: ANIME) {
@@ -51,7 +51,26 @@ class AniListService {
         }
         
         let result = try JSONDecoder().decode(Response.self, from: response)
-        return AniListAnimeDetails(from: result.data.Media, preferredLanguageCode: preferredLanguageCode)
+        let anime = result.data.Media
+        let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
+        
+        // Build episode list from AniList count
+        let episodeCount = anime.episodes ?? 12
+        let episodes: [AniListEpisode] = (1...episodeCount).map { idx in
+            AniListEpisode(
+                number: idx,
+                title: "Episode \(idx)",
+                description: nil
+            )
+        }
+        
+        return AniListAnimeWithEpisodes(
+            id: anime.id,
+            title: title,
+            episodes: episodes,
+            totalEpisodes: episodeCount,
+            status: anime.status ?? "UNKNOWN"
+        )
     }
     
     // MARK: - Update Watch Progress
@@ -136,6 +155,20 @@ class AniListService {
 }
 
 // MARK: - Helper Models
+
+struct AniListEpisode {
+    let number: Int
+    let title: String
+    let description: String?
+}
+
+struct AniListAnimeWithEpisodes {
+    let id: Int
+    let title: String
+    let episodes: [AniListEpisode]
+    let totalEpisodes: Int
+    let status: String
+}
 
 struct AniListAnimeDetails {
     let id: Int

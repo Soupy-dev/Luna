@@ -313,6 +313,34 @@ final class TrackerManager: NSObject, ObservableObject {
         }
     }
     
+    func handleTraktPinAuth(token: String) {
+        isAuthenticating = true
+        Task {
+            do {
+                let user = try await fetchTraktUser(token: token)
+                let account = TrackerAccount(
+                    service: .trakt,
+                    username: user.username,
+                    accessToken: token,
+                    refreshToken: nil,
+                    expiresAt: Date().addingTimeInterval(365 * 24 * 3600),
+                    userId: String(user.ids.trakt)
+                )
+                await MainActor.run {
+                    self.trackerState.addOrUpdateAccount(account)
+                    self.saveTrackerState()
+                    self.isAuthenticating = false
+                    self.authError = nil
+                }
+            } catch {
+                await MainActor.run {
+                    self.authError = error.localizedDescription
+                    self.isAuthenticating = false
+                }
+            }
+        }
+    }
+    
     private func exchangeTraktCode(_ code: String) async throws -> TraktAuthResponse {
         let url = URL(string: "https://api.trakt.tv/oauth/token")!
         var request = URLRequest(url: url)

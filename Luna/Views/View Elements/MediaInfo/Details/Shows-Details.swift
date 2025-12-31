@@ -381,37 +381,41 @@ struct TVShowSeasonsSection: View {
     }
 
     private func setAnimeSeasonDetail(for season: TMDBSeason, tvShow: TMDBTVShowWithSeasons) {
-        // Build episodes from AniList count if available, otherwise TMDB season episodeCount, fallback 12
-        let fallbackCount = animeEpisodeCount ?? tvShow.numberOfEpisodes ?? season.episodeCount
-        let episodeCount = season.episodeCount > 0 ? season.episodeCount : (fallbackCount ?? 12)
-        let episodes: [TMDBEpisode] = episodeCount > 0 ? (1...episodeCount).map { idx in
-            TMDBEpisode(
-                id: tvShow.id * 1000 + season.seasonNumber * 100 + idx,
-                name: "Episode \(idx)",
-                overview: nil,
-                stillPath: nil,
-                episodeNumber: idx,
-                seasonNumber: season.seasonNumber,
-                airDate: nil,
-                runtime: tvShow.episodeRunTime?.first,
-                voteAverage: 0,
-                voteCount: 0
-            )
-        } : []
+        // For anime, fetch real TMDB episode data but truncate to AniList count
+        isLoadingSeason = true
+        seasonDetail = nil
+        selectedEpisodeForSearch = nil
 
-        let detail = TMDBSeasonDetail(
-            id: season.id,
-            name: season.name,
-            overview: season.overview,
-            posterPath: season.posterPath,
-            seasonNumber: season.seasonNumber,
-            airDate: season.airDate,
-            episodes: episodes
-        )
+        Task {
+            do {
+                let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShow.id, seasonNumber: season.seasonNumber)
+                var adjustedDetail = detail
 
-        seasonDetail = detail
-        selectedEpisodeForSearch = detail.episodes.first
-        isLoadingSeason = false
+                // If AniList provided a count and this is a single-season show, truncate to that count
+                let totalSeasons = tvShow.seasons.filter { $0.seasonNumber > 0 }.count
+                if totalSeasons == 1, let aniCount = animeEpisodeCount, aniCount > 0 {
+                    adjustedDetail.episodes = Array(detail.episodes.prefix(aniCount))
+                }
+
+                await MainActor.run {
+                    self.seasonDetail = adjustedDetail
+                    self.isLoadingSeason = false
+
+                    if let pending = pendingEpisodeSelection,
+                       pending.0 == season.seasonNumber,
+                       let match = adjustedDetail.episodes.first(where: { $0.episodeNumber == pending.1 }) {
+                        self.selectedEpisodeForSearch = match
+                        self.pendingEpisodeSelection = nil
+                    } else if let firstEpisode = adjustedDetail.episodes.first {
+                        self.selectedEpisodeForSearch = firstEpisode
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoadingSeason = false
+                }
+            }
+        }
     }
     
     private func getAgeRating(from contentRatings: TMDBContentRatings?) -> String? {
