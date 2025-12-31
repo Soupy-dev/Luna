@@ -34,5 +34,22 @@ struct SoraApp: App {
             }
 #endif
         }
+        .onOpenURL { url in
+            handleDeepLink(url)
+        }
+    }
+    
+    private func handleDeepLink(_ url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else {
+            return
+        }
+        
+        if let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
+            if url.host == "anilist-callback" {
+                TrackerManager.shared.handleAniListCallback(code: code)
+            } else if url.host == "trakt-callback" {
+                TrackerManager.shared.handleTraktCallback(code: code)
+            }
+        }
     }
 }

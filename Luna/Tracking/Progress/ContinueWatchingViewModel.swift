@@ -2,7 +2,7 @@
 //  ContinueWatchingViewModel.swift
 //  Luna
 //
-//  Created by GitHub Copilot on request
+//  Created by Soupy-dev
 //
 
 import Foundation

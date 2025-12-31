@@ -12,6 +12,25 @@
 		<string>nplayer-https</string>
 		<string>senplayer</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>AniList OAuth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>luna</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Trakt OAuth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>luna</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

@@ -307,6 +307,7 @@ final class ProgressManager: ObservableObject {
             var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber) 
                 ?? EpisodeProgressEntry(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
             
+            let previousWatchedState = entry.isWatched
             entry.currentTime = currentTime
             entry.totalDuration = totalDuration
             entry.lastUpdated = Date()
@@ -317,6 +318,13 @@ final class ProgressManager: ObservableObject {
             
             self.progressData.updateEpisode(entry)
             self.publishCurrentData()
+            
+            // Sync to trackers if just reached watched threshold
+            if !previousWatchedState && entry.isWatched {
+                DispatchQueue.main.async {
+                    TrackerManager.shared.syncWatchProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, progress: entry.progress)
+                }
+            }
         }
         debouncedSave()
     }
@@ -378,6 +386,11 @@ final class ProgressManager: ObservableObject {
             self.progressData.updateEpisode(entry)
             self.publishCurrentData()
             Logger.shared.log("Marked episode as watched: S\(seasonNumber)E\(episodeNumber)", type: "Progress")
+            
+            // Sync to trackers
+            DispatchQueue.main.async {
+                TrackerManager.shared.syncWatchProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, progress: 1.0)
+            }
         }
         saveProgressData()
     }

@@ -657,6 +657,15 @@ struct ContinueWatchingCard: View {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity, alignment: .center)
 
+                    if entry.type == .episode, let season = entry.seasonNumber, let ep = entry.episodeNumber {
+                        Text("S\(season)E\(ep)")
+                            .foregroundColor(.white.opacity(0.8))
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+
                     HStack(alignment: .center, spacing: isTvOS ? 18 : 8) {
                         ProgressView(value: entry.currentTime, total: max(entry.totalDuration, 1))
                             .progressViewStyle(LinearProgressViewStyle(tint: .green))
