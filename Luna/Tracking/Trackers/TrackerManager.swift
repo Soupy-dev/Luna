@@ -210,7 +210,9 @@ final class TrackerManager: NSObject, ObservableObject {
             URLQueryItem(name: "redirect_uri", value: traktRedirectUri),
             URLQueryItem(name: "response_type", value: "code")
         ]
-        return components?.url
+        let url = components?.url
+        Logger.shared.log("Trakt auth URL: \(url?.absoluteString ?? "nil")", type: "Tracker")
+        return url
     }
 
     func startTraktAuth() {
