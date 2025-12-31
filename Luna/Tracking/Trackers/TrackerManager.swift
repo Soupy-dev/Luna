@@ -64,10 +64,11 @@ final class TrackerManager: NSObject, ObservableObject {
     // MARK: - AniList Authentication
     
     func getAniListAuthURL() -> URL? {
+        let redirect = anilistRedirectUri.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? anilistRedirectUri
         var components = URLComponents(string: "https://anilist.co/api/v2/oauth/authorize")
         components?.queryItems = [
             URLQueryItem(name: "client_id", value: anilistClientId),
-            URLQueryItem(name: "redirect_uri", value: anilistRedirectUri),
+            URLQueryItem(name: "redirect_uri", value: redirect),
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "scope", value: "public")
         ]
@@ -204,10 +205,11 @@ final class TrackerManager: NSObject, ObservableObject {
     // MARK: - Trakt Authentication
     
     func getTraktAuthURL() -> URL? {
+        let redirect = traktRedirectUri.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? traktRedirectUri
         var components = URLComponents(string: "https://trakt.tv/oauth/authorize")
         components?.queryItems = [
             URLQueryItem(name: "client_id", value: traktClientId),
-            URLQueryItem(name: "redirect_uri", value: traktRedirectUri),
+            URLQueryItem(name: "redirect_uri", value: redirect),
             URLQueryItem(name: "response_type", value: "code")
         ]
         let url = components?.url
