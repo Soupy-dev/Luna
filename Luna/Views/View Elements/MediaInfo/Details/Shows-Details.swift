@@ -381,7 +381,17 @@ struct TVShowSeasonsSection: View {
     }
 
     private func setAnimeSeasonDetail(for season: TMDBSeason, tvShow: TMDBTVShowWithSeasons) {
-        // For anime, fetch real TMDB episode data but truncate to AniList count
+        // For anime, check if seasonDetail is already populated with AniList episodes
+        // If so, just update selected episode and return without fetching TMDB
+        if let existingDetail = seasonDetail, existingDetail.seasonNumber == season.seasonNumber {
+            // Already have AniList episodes loaded
+            if selectedEpisodeForSearch == nil, let firstEpisode = existingDetail.episodes.first {
+                self.selectedEpisodeForSearch = firstEpisode
+            }
+            return
+        }
+        
+        // If no AniList data exists, fall back to TMDB
         isLoadingSeason = true
         seasonDetail = nil
         selectedEpisodeForSearch = nil
@@ -390,20 +400,6 @@ struct TVShowSeasonsSection: View {
             do {
                 let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShow.id, seasonNumber: season.seasonNumber)
                 var adjustedDetail = detail
-
-                // If AniList provided a count and this is a single-season show, truncate to that count
-                let totalSeasons = tvShow.seasons.filter { $0.seasonNumber > 0 }.count
-                if totalSeasons == 1, let aniCount = animeEpisodeCount, aniCount > 0 {
-                    adjustedDetail = TMDBSeasonDetail(
-                        id: detail.id,
-                        name: detail.name,
-                        overview: detail.overview,
-                        posterPath: detail.posterPath,
-                        seasonNumber: detail.seasonNumber,
-                        airDate: detail.airDate,
-                        episodes: Array(detail.episodes.prefix(aniCount))
-                    )
-                }
 
                 await MainActor.run {
                     self.seasonDetail = adjustedDetail

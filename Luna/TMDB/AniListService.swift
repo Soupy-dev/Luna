@@ -39,6 +39,24 @@ class AniListService {
                     episode
                     airingAt
                 }
+                relations {
+                    edges {
+                        relationType
+                        node {
+                            id
+                            title {
+                                romaji
+                                english
+                                native
+                            }
+                            episodes
+                            status
+                            seasonYear
+                            season
+                            type
+                        }
+                    }
+                }
             }
         }
         """
@@ -58,34 +76,71 @@ class AniListService {
         
         Logger.shared.log("AniListService: Raw response - episodes: \(anime.episodes ?? 0), seasonYear: \(anime.seasonYear ?? 0), season: \(anime.season ?? "UNKNOWN")", type: "AniList")
         
-        // Build episode list and organize into seasons
-        let episodeCount = anime.episodes ?? 12
-        let episodes: [AniListEpisode] = (1...episodeCount).map { idx in
-            AniListEpisode(
-                number: idx,
-                title: "Episode \(idx)",
-                description: nil,
-                seasonNumber: 1  // For now assume season 1, AniList doesn't provide granular season data
-            )
+        // Collect all anime to process (original + sequels)
+        var allAnimeToProcess: [(anime: AniListAnime, seasonOffset: Int)] = [(anime, 0)]
+        
+        // Find and add sequels
+        if let relations = anime.relations {
+            for edge in relations.edges {
+                if edge.relationType == "SEQUEL", edge.node.type == "ANIME" {
+                    Logger.shared.log("AniListService: Found sequel: \(AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode))", type: "AniList")
+                    // Calculate season offset based on previous anime episode counts
+                    let currentSeasonOffset = allAnimeToProcess.reduce(0) { acc, item in
+                        let episodeCount = item.anime.episodes ?? 12
+                        let episodesPerSeason = 12
+                        return acc + ((episodeCount + episodesPerSeason - 1) / episodesPerSeason)
+                    }
+                    allAnimeToProcess.append((edge.node, currentSeasonOffset))
+                }
+            }
         }
         
-        // Group episodes into seasons (typically 12-13 per season for anime)
-        let episodesPerSeason = 12
+        // Build all seasons from collected anime
         var seasons: [AniListSeason] = []
-        var episodeIndex = 0
+        var currentEpisodeNumber = 1
         
-        for seasonNum in 1... {
-            let seasonEpisodes = Array(episodes.dropFirst(episodeIndex).prefix(episodesPerSeason))
-            if seasonEpisodes.isEmpty { break }
+        for (currentAnime, seasonOffset) in allAnimeToProcess {
+            let episodeCount = currentAnime.episodes ?? 12
+            Logger.shared.log("AniListService: Processing anime with \(episodeCount) episodes, season offset: \(seasonOffset)", type: "AniList")
             
-            seasons.append(AniListSeason(
-                seasonNumber: seasonNum,
-                episodes: seasonEpisodes
-            ))
-            episodeIndex += episodesPerSeason
+            // Build episode list for this anime
+            let episodesPerSeason = 12
+            var episodeIndex = 0
+            var seasonNum = seasonOffset + 1
+            
+            for _ in 1... {
+                let endEpisodeNum = min(currentEpisodeNumber + episodesPerSeason - 1, currentEpisodeNumber + (episodeCount - episodeIndex) - 1)
+                let episodeCount = endEpisodeNum - currentEpisodeNumber + 1
+                
+                let seasonEpisodes: [AniListEpisode] = (0..<episodeCount).map { offset in
+                    let epNum = currentEpisodeNumber + offset
+                    AniListEpisode(
+                        number: epNum,
+                        title: "Episode \(epNum)",
+                        description: nil,
+                        seasonNumber: seasonNum
+                    )
+                }
+                
+                if seasonEpisodes.isEmpty { break }
+                
+                seasons.append(AniListSeason(
+                    seasonNumber: seasonNum,
+                    episodes: seasonEpisodes
+                ))
+                
+                currentEpisodeNumber += episodeCount
+                episodeIndex += episodeCount
+                seasonNum += 1
+                
+                if episodeIndex >= episodeCount {
+                    break
+                }
+            }
         }
         
-        Logger.shared.log("AniListService: Fetched \(title) with \(episodes.count) total episodes grouped into \(seasons.count) seasons", type: "AniList")
+        let totalEpisodes = allAnimeToProcess.reduce(0) { $0 + ($1.anime.episodes ?? 12) }
+        Logger.shared.log("AniListService: Fetched \(title) with \(totalEpisodes) total episodes grouped into \(seasons.count) seasons", type: "AniList")
         for season in seasons {
             Logger.shared.log("  Season \(season.seasonNumber): \(season.episodes.count) episodes", type: "AniList")
         }
@@ -94,7 +149,7 @@ class AniListService {
             id: anime.id,
             title: title,
             seasons: seasons,
-            totalEpisodes: episodeCount,
+            totalEpisodes: totalEpisodes,
             status: anime.status ?? "UNKNOWN"
         )
     }
