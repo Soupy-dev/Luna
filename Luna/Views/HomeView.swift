@@ -697,9 +697,15 @@ struct ContinueWatchingCard: View {
         }
         #endif
         .confirmationDialog("Continue Watching", isPresented: $showActions, titleVisibility: .visible) {
-            Button("Resume") { onResume(entry) }
-            Button("Play from Beginning") { onPlayFromStart(entry) }
-            Button("Show Details") { showDetail = true }
+            Button(action: { onResume(entry) }) {
+                Text("Resume")
+            }
+            Button(action: { onPlayFromStart(entry) }) {
+                Text("Play from Beginning")
+            }
+            Button(action: { showDetail = true }) {
+                Text("Show Details")
+            }
             Button("Cancel", role: .cancel) {}
         }
         .background(
