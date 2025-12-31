@@ -23,19 +23,22 @@ struct SoraApp: App {
         WindowGroup {
 #if os(tvOS)
             ContentView()
+                .onOpenURL(perform: handleDeepLink)
 #else
-            if showKanzen {
-                    KanzenMenu().environmentObject(settings).environmentObject(moduleManager).environmentObject(favouriteManager)
-                    .environment(\.managedObjectContext, favouriteManager.container.viewContext)
-                    .accentColor(settings.accentColor)
+            Group {
+                if showKanzen {
+                    KanzenMenu()
+                        .environmentObject(settings)
+                        .environmentObject(moduleManager)
+                        .environmentObject(favouriteManager)
+                        .environment(\.managedObjectContext, favouriteManager.container.viewContext)
+                        .accentColor(settings.accentColor)
+                } else {
+                    ContentView()
+                }
             }
-            else{
-                ContentView()
-            }
+            .onOpenURL(perform: handleDeepLink)
 #endif
-        }
-        .onOpenURL { url in
-            handleDeepLink(url)
         }
     }
     
