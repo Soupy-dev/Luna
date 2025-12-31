@@ -389,7 +389,11 @@ final class TrackerManager: NSObject, ObservableObject {
 
             let mutation = """
             mutation {
-                SaveMediaListEntry(mediaId: \(mediaId), progress: \(chapterNumber), status: CURRENT) {
+                SaveMediaListEntry(
+                    mediaId: \(mediaId),
+                    progress: \(chapterNumber),
+                    status: CURRENT
+                ) {
                     id
                     progress
                     status
@@ -407,11 +411,18 @@ final class TrackerManager: NSObject, ObservableObject {
                 let body: [String: Any] = ["query": mutation]
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-                let (_, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await URLSession.shared.data(for: request)
                 if (response as? HTTPURLResponse)?.statusCode == 200 {
-                    Logger.shared.log("Synced manga to AniList: chapter \(chapterNumber) for \(title)", type: "Tracker")
+                    // Check for GraphQL errors
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let errors = json["errors"] as? [[String: Any]], !errors.isEmpty {
+                        let errorMsg = (errors.first?["message"] as? String) ?? "Unknown error"
+                        Logger.shared.log("AniList manga sync error: \(errorMsg)", type: "Tracker")
+                    } else {
+                        Logger.shared.log("Synced manga to AniList: chapter \(chapterNumber) for \(title)", type: "Tracker")
+                    }
                 } else {
-                    Logger.shared.log("AniList manga sync failed for \(title)", type: "Tracker")
+                    Logger.shared.log("AniList manga sync returned status \((response as? HTTPURLResponse)?.statusCode ?? -1)", type: "Tracker")
                 }
             } catch {
                 Logger.shared.log("Failed to sync manga to AniList: \(error.localizedDescription)", type: "Error")
@@ -442,12 +453,30 @@ final class TrackerManager: NSObject, ObservableObject {
             return
         }
         
+        // Determine status: COMPLETED if >= 85%, otherwise CURRENT for in-progress
+        let status = progress >= 85 ? "COMPLETED" : "CURRENT"
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        
         let mutation = """
         mutation {
-            SaveMediaListEntry(mediaId: \(anilistId), progress: \(episodeNumber), status: CURRENT) {
+            SaveMediaListEntry(
+                mediaId: \(anilistId),
+                progress: \(episodeNumber),
+                status: \(status),
+                completedAt: {
+                    year: \(Calendar.current.component(.year, from: Date()))
+                    month: \(Calendar.current.component(.month, from: Date()))
+                    day: \(Calendar.current.component(.day, from: Date()))
+                }
+            ) {
                 id
                 progress
                 status
+                completedAt {
+                    year
+                    month
+                    day
+                }
             }
         }
         """
@@ -462,21 +491,58 @@ final class TrackerManager: NSObject, ObservableObject {
             let body: [String: Any] = ["query": mutation]
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
             if (response as? HTTPURLResponse)?.statusCode == 200 {
-                Logger.shared.log("Synced to AniList: S\(seasonNumber)E\(episodeNumber)", type: "Tracker")
+                // Parse response to check for errors
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let errors = json["errors"] as? [[String: Any]], !errors.isEmpty {
+                    let errorMsg = (errors.first?["message"] as? String) ?? "Unknown error"
+                    Logger.shared.log("AniList sync error: \(errorMsg)", type: "Tracker")
+                } else {
+                    Logger.shared.log("Synced to AniList: S\(seasonNumber)E\(episodeNumber) (\(status))", type: "Tracker")
+                }
+            } else {
+                Logger.shared.log("AniList sync returned status \((response as? HTTPURLResponse)?.statusCode ?? -1)", type: "Tracker")
             }
         } catch {
             Logger.shared.log("Failed to sync to AniList: \(error.localizedDescription)", type: "Error")
         }
     }
+
     
     private func syncToTrakt(account: TrackerAccount, showId: Int, seasonNumber: Int, episodeNumber: Int, progress: Double) async {
+        // First, get the Trakt ID from TMDB ID
+        guard let traktId = await getTraktIdFromTmdbId(showId) else {
+            Logger.shared.log("Could not find Trakt ID for TMDB ID \(showId)", type: "Tracker")
+            return
+        }
+        
+        // Only mark as watched if progress >= 85% (following NuvioStreaming pattern)
+        guard progress >= 85 else {
+            // For progress < 85%, use scrobble pause instead
+            await scrobblePause(account: account, traktId: traktId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, progress: progress)
+            return
+        }
+        
+        // Mark episode as watched with proper payload structure
+        let watchedAt = ISO8601DateFormatter().string(from: Date())
         let payload: [String: Any] = [
-            "episodes": [
+            "shows": [
                 [
-                    "number": episodeNumber,
-                    "season": seasonNumber
+                    "ids": [
+                        "trakt": traktId
+                    ],
+                    "seasons": [
+                        [
+                            "number": seasonNumber,
+                            "episodes": [
+                                [
+                                    "number": episodeNumber,
+                                    "watched_at": watchedAt
+                                ]
+                            ]
+                        ]
+                    ]
                 ]
             ]
         ]
@@ -494,12 +560,74 @@ final class TrackerManager: NSObject, ObservableObject {
             
             let (_, response) = try await URLSession.shared.data(for: request)
             if (response as? HTTPURLResponse)?.statusCode == 201 {
-                Logger.shared.log("Synced to Trakt: S\(seasonNumber)E\(episodeNumber)", type: "Tracker")
+                Logger.shared.log("Synced to Trakt: S\(seasonNumber)E\(episodeNumber) (watched)", type: "Tracker")
+            } else {
+                Logger.shared.log("Trakt sync returned status \((response as? HTTPURLResponse)?.statusCode ?? -1)", type: "Tracker")
             }
         } catch {
             Logger.shared.log("Failed to sync to Trakt: \(error.localizedDescription)", type: "Error")
         }
     }
+    
+    private func scrobblePause(account: TrackerAccount, traktId: Int, seasonNumber: Int, episodeNumber: Int, progress: Double) async {
+        let payload: [String: Any] = [
+            "progress": progress,
+            "episode": [
+                "season": seasonNumber,
+                "number": episodeNumber
+            ]
+        ]
+        
+        do {
+            let url = URL(string: "https://api.trakt.tv/scrobble/pause")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(traktClientId, forHTTPHeaderField: "trakt-api-key")
+            request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("2", forHTTPHeaderField: "trakt-api-version")
+            
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+            
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if (response as? HTTPURLResponse)?.statusCode == 201 {
+                Logger.shared.log("Scrobbled to Trakt: S\(seasonNumber)E\(episodeNumber) \(Int(progress))%", type: "Tracker")
+            }
+        } catch {
+            Logger.shared.log("Failed to scrobble to Trakt: \(error.localizedDescription)", type: "Error")
+        }
+    }
+    
+    private func getTraktIdFromTmdbId(_ tmdbId: Int) async -> Int? {
+        do {
+            let url = URL(string: "https://api.trakt.tv/search/tmdb?type=show&id=\(tmdbId)")!
+            var request = URLRequest(url: url)
+            request.setValue(traktClientId, forHTTPHeaderField: "trakt-api-key")
+            request.setValue("2", forHTTPHeaderField: "trakt-api-version")
+            
+            let (data, _) = try await URLSession.shared.data(for: request)
+            
+            struct SearchResult: Codable {
+                let show: ShowData?
+                struct ShowData: Codable {
+                    let ids: IDData
+                    struct IDData: Codable {
+                        let trakt: Int
+                    }
+                }
+            }
+            
+            if let results = try JSONDecoder().decode([SearchResult].self, from: data).first,
+               let traktId = results.show?.ids.trakt {
+                return traktId
+            }
+            return nil
+        } catch {
+            Logger.shared.log("Failed to get Trakt ID: \(error.localizedDescription)", type: "Error")
+            return nil
+        }
+    }
+
     
     // MARK: - Helper Methods
     
