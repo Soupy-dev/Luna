@@ -75,7 +75,9 @@ struct TrackersSettingsView: View {
                     .padding(.vertical)
                 }
             }
+            #if !os(tvOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
         }
         .sheet(isPresented: $showAniListAuth) {
             if let url = trackerManager.getAniListAuthURL() {
