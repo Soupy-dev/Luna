@@ -12,6 +12,7 @@ import Kingfisher
 struct readerManagerView:View {
     @State  var chapters: [Chapter]?
     @State var selectedChapter: Chapter?
+    let mangaTitle: String
     @ObservedObject var kanzen : KanzenEngine
     @EnvironmentObject var settings : Settings
     @Environment(\.dismiss) var dismiss
@@ -27,10 +28,11 @@ struct readerManagerView:View {
     // new Implementation
     
     @StateObject   var reader_manager: readerManager
-    init (chapters: [Chapter]?,selectedChapter: Chapter?,kanzen: KanzenEngine)
+    init (chapters: [Chapter]?,selectedChapter: Chapter?,kanzen: KanzenEngine, mangaTitle: String)
     {
         self.kanzen = kanzen
-        _reader_manager =  StateObject(wrappedValue: readerManager(kanzen:kanzen,chapters: chapters,selectedChapter: selectedChapter))
+        self.mangaTitle = mangaTitle
+        _reader_manager =  StateObject(wrappedValue: readerManager(kanzen:kanzen,chapters: chapters,selectedChapter: selectedChapter, mangaTitle: mangaTitle))
         _chapters = State(initialValue: chapters)
         _selectedChapter = State(initialValue: selectedChapter)
     }

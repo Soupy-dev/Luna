@@ -64,11 +64,10 @@ final class TrackerManager: NSObject, ObservableObject {
     // MARK: - AniList Authentication
     
     func getAniListAuthURL() -> URL? {
-        let redirect = anilistRedirectUri.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? anilistRedirectUri
         var components = URLComponents(string: "https://anilist.co/api/v2/oauth/authorize")
         components?.queryItems = [
             URLQueryItem(name: "client_id", value: anilistClientId),
-            URLQueryItem(name: "redirect_uri", value: redirect),
+            URLQueryItem(name: "redirect_uri", value: anilistRedirectUri),
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "scope", value: "public")
         ]
@@ -205,11 +204,10 @@ final class TrackerManager: NSObject, ObservableObject {
     // MARK: - Trakt Authentication
     
     func getTraktAuthURL() -> URL? {
-        let redirect = traktRedirectUri.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? traktRedirectUri
         var components = URLComponents(string: "https://trakt.tv/oauth/authorize")
         components?.queryItems = [
             URLQueryItem(name: "client_id", value: traktClientId),
-            URLQueryItem(name: "redirect_uri", value: redirect),
+            URLQueryItem(name: "redirect_uri", value: traktRedirectUri),
             URLQueryItem(name: "response_type", value: "code")
         ]
         let url = components?.url
@@ -322,6 +320,48 @@ final class TrackerManager: NSObject, ObservableObject {
     }
     
     // MARK: - Sync Methods
+
+    func syncMangaProgress(title: String, chapterNumber: Int) {
+        guard trackerState.syncEnabled else { return }
+        guard let account = trackerState.getAccount(for: .anilist), account.isConnected else { return }
+
+        Task {
+            guard let mediaId = await getAniListMangaId(title: title) else {
+                Logger.shared.log("Could not find AniList manga ID for title \(title)", type: "Tracker")
+                return
+            }
+
+            let mutation = """
+            mutation {
+                SaveMediaListEntry(mediaId: \(mediaId), progress: \(chapterNumber), status: CURRENT) {
+                    id
+                    progress
+                    status
+                }
+            }
+            """
+
+            do {
+                let url = URL(string: "https://graphql.anilist.co")!
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
+
+                let body: [String: Any] = ["query": mutation]
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if (response as? HTTPURLResponse)?.statusCode == 200 {
+                    Logger.shared.log("Synced manga to AniList: chapter \(chapterNumber) for \(title)", type: "Tracker")
+                } else {
+                    Logger.shared.log("AniList manga sync failed for \(title)", type: "Tracker")
+                }
+            } catch {
+                Logger.shared.log("Failed to sync manga to AniList: \(error.localizedDescription)", type: "Error")
+            }
+        }
+    }
     
     func syncWatchProgress(showId: Int, seasonNumber: Int, episodeNumber: Int, progress: Double, isMovie: Bool = false) {
         guard trackerState.syncEnabled else { return }
@@ -440,6 +480,41 @@ final class TrackerManager: NSObject, ObservableObject {
             let response = try JSONDecoder().decode(Response.self, from: data)
             return response.data.Media?.id
         } catch {
+            return nil
+        }
+    }
+
+    private func getAniListMangaId(title: String) async -> Int? {
+        let escaped = title.replacingOccurrences(of: "\"", with: "\\\"")
+        let query = """
+        query {
+            Media(search: "\(escaped)", type: MANGA) {
+                id
+            }
+        }
+        """
+
+        do {
+            let url = URL(string: "https://graphql.anilist.co")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: Any] = ["query": query]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+            let (data, _) = try await URLSession.shared.data(for: request)
+
+            struct Response: Codable {
+                let data: DataWrapper
+                struct DataWrapper: Codable { let Media: MediaData? }
+                struct MediaData: Codable { let id: Int }
+            }
+
+            let response = try JSONDecoder().decode(Response.self, from: data)
+            return response.data.Media?.id
+        } catch {
+            Logger.shared.log("Failed to resolve AniList manga ID: \(error.localizedDescription)", type: "Error")
             return nil
         }
     }

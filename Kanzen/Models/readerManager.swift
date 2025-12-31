@@ -24,7 +24,8 @@ class readerManager: ObservableObject {
     }
     var changeIndex: Bool = false
 
-     var kanzen : KanzenEngine
+    var kanzen : KanzenEngine
+    let mangaTitle: String
     // Cached controllers - only recreated when data changes
  var currControllers: [UIViewController]?
   var prevControllers: [UIViewController]?
@@ -46,7 +47,7 @@ var nextControllers: [UIViewController]?
         }
     }
     
-    init(index: Int = 0, currChapter: [PageData] = [], prevChapter: [PageData] = [], nextChapter: [PageData] = [], shiftChapterLeft: @escaping () -> Void = {}, shiftChapterRight: @escaping () -> Void = {}, fetchPrev: @escaping () -> Void = {}, fetchNext: @escaping () -> Void = {}, kanzen: KanzenEngine,chapters: [Chapter]?, selectedChapter: Chapter?) {
+    init(index: Int = 0, currChapter: [PageData] = [], prevChapter: [PageData] = [], nextChapter: [PageData] = [], shiftChapterLeft: @escaping () -> Void = {}, shiftChapterRight: @escaping () -> Void = {}, fetchPrev: @escaping () -> Void = {}, fetchNext: @escaping () -> Void = {}, kanzen: KanzenEngine,chapters: [Chapter]?, selectedChapter: Chapter?, mangaTitle: String) {
         self.index = index
         self.currChapter = currChapter
         self.prevChapter = prevChapter
@@ -54,6 +55,7 @@ var nextControllers: [UIViewController]?
         self.kanzen = kanzen
         self.chapters = chapters
         self.selectedChapter = selectedChapter
+        self.mangaTitle = mangaTitle
     }
     func initChapters(){
         // resetState
@@ -359,6 +361,12 @@ var nextControllers: [UIViewController]?
         if let currChapter = selectedChapter, let chapters = chapters
         {
             let idx = currChapter.idx
+
+            // Sync manga progress for the chapter being left
+            if let chapterNumber = parsedChapterNumber(from: currChapter.chapterNumber) {
+                TrackerManager.shared.syncMangaProgress(mangaTitle: mangaTitle, chapterNumber: chapterNumber)
+            }
+
             if idx < chapters.count - 1
             {
                 selectedChapter = chapters[idx + 1]
@@ -395,6 +403,19 @@ var nextControllers: [UIViewController]?
             }
             
         }
+    }
+
+    private func parsedChapterNumber(from raw: String) -> Int? {
+        // Extract leading/inlined number, fallback to nil if not found
+        let digits = raw.compactMap { char -> String? in
+            if char.isNumber || char == "." { return String(char) }
+            return nil
+        }.joined()
+
+        if let doubleVal = Double(digits) {
+            return Int(doubleVal.rounded(.down))
+        }
+        return nil
     }
         
     }
