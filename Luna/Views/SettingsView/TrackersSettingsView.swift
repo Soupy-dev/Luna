@@ -9,8 +9,6 @@ import SwiftUI
 
 struct TrackersSettingsView: View {
     @StateObject private var trackerManager = TrackerManager.shared
-    @State private var showAniListAuth = false
-    @State private var showTraktAuth = false
     @State private var selectedTracker: TrackerService?
     
     var body: some View {
@@ -39,7 +37,7 @@ struct TrackersSettingsView: View {
                                 service: .anilist,
                                 isConnected: trackerManager.trackerState.getAccount(for: .anilist) != nil,
                                 username: trackerManager.trackerState.getAccount(for: .anilist)?.username,
-                                onConnect: { showAniListAuth = true },
+                                onConnect: { trackerManager.startAniListAuth() },
                                 onDisconnect: { trackerManager.disconnectTracker(.anilist) }
                             )
                             
@@ -48,7 +46,7 @@ struct TrackersSettingsView: View {
                                 service: .trakt,
                                 isConnected: trackerManager.trackerState.getAccount(for: .trakt) != nil,
                                 username: trackerManager.trackerState.getAccount(for: .trakt)?.username,
-                                onConnect: { showTraktAuth = true },
+                                onConnect: { trackerManager.startTraktAuth() },
                                 onDisconnect: { trackerManager.disconnectTracker(.trakt) }
                             )
                         }
@@ -78,16 +76,6 @@ struct TrackersSettingsView: View {
             #if !os(tvOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-        }
-        .sheet(isPresented: $showAniListAuth) {
-            if let url = trackerManager.getAniListAuthURL() {
-                SafariView(url: url)
-            }
-        }
-        .sheet(isPresented: $showTraktAuth) {
-            if let url = trackerManager.getTraktAuthURL() {
-                SafariView(url: url)
-            }
         }
     }
     
@@ -143,39 +131,4 @@ struct TrackersSettingsView: View {
         .background(Color.gray.opacity(0.1))
         .cornerRadius(12)
     }
-}
-
-// Simple Safari View wrapper for OAuth flows
-struct SafariView: UIViewControllerRepresentable {
-    let url: URL
-    
-    func makeUIViewController(context: Context) -> SafariViewController {
-        SafariViewController(url: url)
-    }
-    
-    func updateUIViewController(_ uiViewController: SafariViewController, context: Context) {}
-}
-
-class SafariViewController: UIViewController {
-    let url: URL
-    
-    init(url: URL) {
-        self.url = url
-        super.init(nibName: nil, bundle: nil)
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        // Open in app browser or external browser
-        UIApplication.shared.open(url)
-        self.dismiss(animated: true)
-    }
-}
-
-#Preview {
-    TrackersSettingsView()
 }

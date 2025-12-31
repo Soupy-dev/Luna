@@ -7,6 +7,8 @@
 
 import Foundation
 import Combine
+import AuthenticationServices
+import UIKit
 
 final class TrackerManager: ObservableObject {
     static let shared = TrackerManager()
@@ -17,6 +19,7 @@ final class TrackerManager: ObservableObject {
     
     private let trackerStateURL: URL
     private var cancellables = Set<AnyCancellable>()
+    private var webAuthSession: ASWebAuthenticationSession?
     
     // OAuth config
     private let anilistClientId = "33908"
@@ -57,9 +60,44 @@ final class TrackerManager: ObservableObject {
             URLQueryItem(name: "client_id", value: anilistClientId),
             URLQueryItem(name: "redirect_uri", value: anilistRedirectUri),
             URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "scope", value: "AniList")
+            URLQueryItem(name: "scope", value: "public")
         ]
         return components?.url
+    }
+
+    func startAniListAuth() {
+        guard let url = getAniListAuthURL() else { return }
+        authError = nil
+        isAuthenticating = true
+
+        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "luna") { [weak self] callbackURL, error in
+            guard let self = self else { return }
+
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.authError = error.localizedDescription
+                    self.isAuthenticating = false
+                }
+                return
+            }
+
+            guard let callbackURL = callbackURL,
+                  let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: true),
+                  let code = components.queryItems?.first(where: { $0.name == "code" })?.value else {
+                DispatchQueue.main.async {
+                    self.authError = "Invalid AniList callback"
+                    self.isAuthenticating = false
+                }
+                return
+            }
+
+            self.handleAniListCallback(code: code)
+        }
+
+        session.prefersEphemeralWebBrowserSession = true
+        session.presentationContextProvider = self
+        session.start()
+        webAuthSession = session
     }
     
     func handleAniListCallback(code: String) {
@@ -155,6 +193,41 @@ final class TrackerManager: ObservableObject {
             URLQueryItem(name: "response_type", value: "code")
         ]
         return components?.url
+    }
+
+    func startTraktAuth() {
+        guard let url = getTraktAuthURL() else { return }
+        authError = nil
+        isAuthenticating = true
+
+        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "luna") { [weak self] callbackURL, error in
+            guard let self = self else { return }
+
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.authError = error.localizedDescription
+                    self.isAuthenticating = false
+                }
+                return
+            }
+
+            guard let callbackURL = callbackURL,
+                  let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: true),
+                  let code = components.queryItems?.first(where: { $0.name == "code" })?.value else {
+                DispatchQueue.main.async {
+                    self.authError = "Invalid Trakt callback"
+                    self.isAuthenticating = false
+                }
+                return
+            }
+
+            self.handleTraktCallback(code: code)
+        }
+
+        session.prefersEphemeralWebBrowserSession = true
+        session.presentationContextProvider = self
+        session.start()
+        webAuthSession = session
     }
     
     func handleTraktCallback(code: String) {
@@ -345,5 +418,14 @@ final class TrackerManager: ObservableObject {
     func disconnectTracker(_ service: TrackerService) {
         trackerState.disconnectAccount(for: service)
         saveTrackerState()
+    }
+}
+
+extension TrackerManager: ASWebAuthenticationPresentationContextProviding {
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: { $0.isKeyWindow }) ?? ASPresentationAnchor()
     }
 }
