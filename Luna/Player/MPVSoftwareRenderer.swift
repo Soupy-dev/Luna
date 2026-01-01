@@ -1409,7 +1409,6 @@ final class MPVSoftwareRenderer {
             "ind": "Indonesian",
             "msa": "Malay",
             "fil": "Filipino",
-            "tha": "Thai",
             "cat": "Catalan",
             "eus": "Basque",
             "glg": "Galician",
