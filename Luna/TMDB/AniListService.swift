@@ -329,36 +329,39 @@ class AniListService {
     // MARK: - Catalog Mapping Helpers
 
     private func mapAniListCatalogToTMDB(_ animeList: [AniListAnime], tmdbService: TMDBService) async -> [TMDBSearchResult] {
-        await withTaskGroup(of: (TMDBSearchResult?, AniListAnime).self) { group in
+        await withTaskGroup(of: TMDBSearchResult?.self) { group in
             for anime in animeList {
                 group.addTask {
                     let titleCandidates = AniListTitlePicker.titleCandidates(from: anime.title)
                     for candidate in titleCandidates where !candidate.isEmpty {
                         if let match = try? await tmdbService.searchTVShows(query: candidate).first {
-                            return (match.asSearchResult, anime)
+                            return match.asSearchResult
                         }
                     }
                     // Fallback: return AniList data as TMDBSearchResult when no TMDB match found
                     let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
-                    let posterPath = anime.coverImage?.large ?? anime.coverImage?.medium
                     let fallback = TMDBSearchResult(
                         id: anime.id,
+                        mediaType: "tv",
                         title: title,
+                        name: title,
                         overview: nil,
-                        posterPath: posterPath,
+                        posterPath: anime.coverImage?.large ?? anime.coverImage?.medium,
                         backdropPath: nil,
                         releaseDate: nil,
-                        mediaType: .tv,
-                        voteAverage: 0,
-                        voteCount: 0
+                        firstAirDate: nil,
+                        voteAverage: nil,
+                        popularity: 0,
+                        adult: nil,
+                        genreIds: nil
                     )
-                    return (fallback, anime)
+                    return fallback
                 }
             }
 
             var results: [TMDBSearchResult] = []
             var seenIds = Set<Int>()
-            for await (match, _) in group {
+            for await match in group {
                 if let match = match, !seenIds.contains(match.id) {
                     seenIds.insert(match.id)
                     results.append(match)
