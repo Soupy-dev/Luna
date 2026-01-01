@@ -42,7 +42,9 @@ struct HomeView: View {
     }
 
     private var enabledCatalogs: [Catalog] {
-        catalogManager.getEnabledCatalogs()
+        // Access the @Published property directly to ensure view updates when catalogs change
+        _ = catalogManager.catalogs // Trigger observation
+        return catalogManager.getEnabledCatalogs()
     }
     
     var body: some View {
@@ -359,6 +361,10 @@ struct HomeView: View {
                         title: catalog.name,
                         items: displayItems
                     )
+                } else {
+                    let hasResults = catalogResults[catalog.id] != nil
+                    let itemCount = catalogResults[catalog.id]?.count ?? 0
+                    Logger.shared.log("Catalog '\(catalog.name)' (\(catalog.id)): hasResults=\(hasResults), items=\(itemCount)", type: "HomeView")
                 }
             }
             
@@ -440,6 +446,14 @@ struct HomeView: View {
                         updated["upcomingAnime"] = contentFilter.filterSearchResults(upcomingAnimeResult)
 
                         self.catalogResults = updated
+                        
+                        // Log all catalog data for debugging
+                        Logger.shared.log("Loaded \(updated.count) catalog types with data", type: "HomeView")
+                        for (catalogId, items) in updated {
+                            Logger.shared.log("  \(catalogId): \(items.count) items", type: "HomeView")
+                        }
+                        
+                        Logger.shared.log("Enabled catalogs: \(self.enabledCatalogs.map { $0.id }.joined(separator: ", "))", type: "HomeView")
 
                         let heroPool = !(updated["trending"] ?? []).isEmpty ? (updated["trending"] ?? []) : updated.values.flatMap { $0 }
                         self.heroContent = heroPool.first { $0.backdropPath != nil } ?? heroPool.first

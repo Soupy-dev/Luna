@@ -66,10 +66,11 @@ class CatalogManager: ObservableObject {
     func saveCatalogs() {
         if let data = try? JSONEncoder().encode(catalogs) {
             userDefaults.set(data, forKey: catalogsKey)
-            // Force publish the change to ensure SwiftUI updates
-            DispatchQueue.main.async {
-                self.objectWillChange.send()
-            }
+            userDefaults.synchronize()
+        }
+        // Dispatch to main thread to notify observers after persistence
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
         }
     }
     

@@ -871,8 +871,11 @@ final class PlayerViewController: UIViewController {
         var trackActions: [UIAction] = []
         
         if tracks.isEmpty {
-            let noTracksAction = UIAction(title: "No audio tracks available", attributes: .disabled) { _ in }
-            trackActions.append(noTracksAction)
+            // Even if we can't find tracks, the button should be enabled
+            // This might indicate a timing issue or stream without proper metadata
+            Logger.shared.log("Warning: No audio tracks found in stream", type: "Warn")
+            let defaultAction = UIAction(title: "No tracks detected (check stream)", state: .off) { _ in }
+            trackActions.append(defaultAction)
         } else {
             trackActions = tracks.map { (id, name) in
                 UIAction(
@@ -905,7 +908,8 @@ final class PlayerViewController: UIViewController {
         trackActions.append(disableAction)
         
         if tracks.isEmpty {
-            let noTracksAction = UIAction(title: "No subtitle tracks available", attributes: .disabled) { _ in }
+            // Don't disable - just inform the user
+            let noTracksAction = UIAction(title: "No subtitles in stream", state: .off) { _ in }
             trackActions.append(noTracksAction)
         } else {
             for (id, name) in tracks {
@@ -924,7 +928,6 @@ final class PlayerViewController: UIViewController {
         let subtitleMenu = UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: trackActions)
         subtitleButton.menu = subtitleMenu
     }
-    
     private func loadSubtitles(_ urls: [String]) {
         subtitleURLs = urls
         

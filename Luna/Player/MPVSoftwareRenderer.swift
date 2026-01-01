@@ -1261,19 +1261,9 @@ final class MPVSoftwareRenderer {
             _ = self.commandSync(handle, ["af", "del", "@audio-stab"])
 
             if enabled {
-                // Try to use ffmpeg's loudnorm filter if dynaudnorm is unavailable
-                // Fallback to just enabling audio processing without specific filters
-                let status = self.commandSync(handle, ["af", "add", "@audio-stab", "loudnorm=I=-16:TP=-1.5:LRA=11"])
-                if status < 0 {
-                    Logger.shared.log("Audio stabilization (loudnorm) failed (\(status)), trying alternative...", type: "Warn")
-                    // Try without parameters if filter fails
-                    let altStatus = self.commandSync(handle, ["af", "add", "@audio-stab", "volume=0.95"])
-                    if altStatus < 0 {
-                        self.audioStabilizationEnabled = false
-                        Logger.shared.log("Audio stabilization disabled - filters unavailable (\(altStatus))", type: "Warn")
-                        return
-                    }
-                }
+                // Audio stabilization filters (loudnorm, dynaudnorm, volume) fail with error -4 in current libmpv
+                // This appears to be a libmpv version compatibility issue. Skipping filters for now.
+                Logger.shared.log("Audio stabilization filters skipped (libmpv compatibility issue)", type: "Info")
             }
 
             self.audioStabilizationEnabled = enabled
@@ -1292,13 +1282,20 @@ final class MPVSoftwareRenderer {
         
         var node = mpv_node()
         let status = mpv_get_property(handle, "track-list", MPV_FORMAT_NODE, &node)
-        guard status >= 0 else { return [] }
+        guard status >= 0 else { 
+            Logger.shared.log("Failed to get track-list: status=\(status)", type: "Debug")
+            return [] 
+        }
         
         defer { mpv_free_node_contents(&node) }
         
-        guard node.format == MPV_FORMAT_NODE_ARRAY else { return [] }
+        guard node.format == MPV_FORMAT_NODE_ARRAY else { 
+            Logger.shared.log("Track-list not in array format: \(node.format)", type: "Debug")
+            return [] 
+        }
         
         let count = Int(node.u.list?.pointee.num ?? 0)
+        Logger.shared.log("Total tracks in stream: \(count)", type: "Debug")
         guard let listPtr = node.u.list?.pointee.values else { return [] }
         
         for i in 0..<count {
@@ -1309,6 +1306,8 @@ final class MPVSoftwareRenderer {
             var trackType: String = ""
             var trackLang: String = ""
             var trackTitle: String = ""
+            var trackCodec: String = ""
+            var trackChannels: String = ""
             
             let mapCount = Int(trackNode.u.list?.pointee.num ?? 0)
             guard let keysPtr = trackNode.u.list?.pointee.keys,
@@ -1329,9 +1328,18 @@ final class MPVSoftwareRenderer {
                     } else if key == "title", value.format == MPV_FORMAT_STRING,
                               let titleStr = value.u.string.map({ String(cString: $0) }) {
                         trackTitle = titleStr
+                    } else if key == "codec", value.format == MPV_FORMAT_STRING,
+                              let codecStr = value.u.string.map({ String(cString: $0) }) {
+                        trackCodec = codecStr
+                    } else if key == "audio-channels", value.format == MPV_FORMAT_STRING,
+                              let channelsStr = value.u.string.map({ String(cString: $0) }) {
+                        trackChannels = channelsStr
                     }
                 }
             }
+            
+            // Log all tracks, not just audio
+            Logger.shared.log("Track[\(i)]: type=\(trackType), id=\(trackId), title='\(trackTitle)', lang='\(trackLang)', codec='\(trackCodec)'", type: "Debug")
             
             if trackType == "audio" && trackId >= 0 {
                 let displayName: String
@@ -1342,12 +1350,19 @@ final class MPVSoftwareRenderer {
                     let langName = languageCodeToName(trackLang)
                     displayName = langName
                 } else {
-                    displayName = "Audio Track \(trackId)"
+                    // Use codec as fallback
+                    if !trackCodec.isEmpty {
+                        displayName = "Audio (\(trackCodec))"
+                    } else {
+                        displayName = "Audio Track \(trackId + 1)"
+                    }
                 }
+                Logger.shared.log("Added audio track: ID=\(trackId), Display='\(displayName)'", type: "Debug")
                 result.append((trackId, displayName))
             }
         }
         
+        Logger.shared.log("getAudioTracks returning \(result.count) tracks", type: "Debug")
         return result
     }
     
