@@ -432,11 +432,6 @@ final class PlayerViewController: UIViewController {
         if let subs = initialSubtitles, !subs.isEmpty {
             loadSubtitles(subs)
         }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.updateAudioTracksMenu()
-            self?.updateSubtitleTracksMenu()
-        }
     }
     
     private func prepareSeekToLastPosition(for mediaInfo: MediaInfo) {
@@ -1334,6 +1329,11 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
     func renderer(_ renderer: MPVSoftwareRenderer, didBecomeReadyToSeek: Bool) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            
+            // Update audio and subtitle tracks now that the video is ready
+            self.updateAudioTracksMenu()
+            self.updateSubtitleTracksMenu()
+            
             if let seekTime = self.pendingSeekTime {
                 self.renderer.seek(to: seekTime)
                 Logger.shared.log("Resumed MPV playback from \(Int(seekTime))s", type: "Progress")

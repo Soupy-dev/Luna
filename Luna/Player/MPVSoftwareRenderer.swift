@@ -239,6 +239,8 @@ final class MPVSoftwareRenderer {
         currentURL = url
         currentHeaders = headers
         
+        Logger.shared.log("MPVSoftwareRenderer: Loading \(url.absoluteString)", type: "Info")
+        
         renderQueue.async { [weak self] in
             guard let self else { return }
             self.isLoading = true
@@ -249,7 +251,10 @@ final class MPVSoftwareRenderer {
             }
         }
         
-        guard let handle = mpv else { return }
+        guard let handle = mpv else {
+            Logger.shared.log("MPVSoftwareRenderer: MPV handle is nil, cannot load", type: "Error")
+            return
+        }
         
         renderQueue.async { [weak self] in
             guard let self else { return }
@@ -263,6 +268,7 @@ final class MPVSoftwareRenderer {
             }
             
             let target = finalURL.isFileURL ? finalURL.path : finalURL.absoluteString
+            Logger.shared.log("MPVSoftwareRenderer: Sending loadfile command for \(target)", type: "Info")
             self.command(handle, ["loadfile", target, "replace"])
         }
     }
@@ -415,7 +421,10 @@ final class MPVSoftwareRenderer {
     }
     
     private func performRenderUpdate() {
-        guard let context = renderContext else { return }
+        guard let context = renderContext else {
+            Logger.shared.log("MPVSoftwareRenderer: renderContext is nil in performRenderUpdate", type: "Warn")
+            return
+        }
         let status = mpv_render_context_update(context)
         
         let updateFlags = UInt32(status)
@@ -432,12 +441,18 @@ final class MPVSoftwareRenderer {
     private func renderFrame() {
         guard let context = renderContext else { return }
         let videoSize = currentVideoSize()
-        guard videoSize.width > 0, videoSize.height > 0 else { return }
+        guard videoSize.width > 0, videoSize.height > 0 else {
+            Logger.shared.log("MPVSoftwareRenderer: Invalid video size \(videoSize.width)x\(videoSize.height)", type: "Warn")
+            return
+        }
         
         let targetSize = targetRenderSize(for: videoSize)
         let width = Int(targetSize.width)
         let height = Int(targetSize.height)
-        guard width > 0, height > 0 else { return }
+        guard width > 0, height > 0 else {
+            Logger.shared.log("MPVSoftwareRenderer: Invalid target size \(width)x\(height)", type: "Warn")
+            return
+        }
         if lastRenderDimensions != targetSize {
             lastRenderDimensions = targetSize
             if targetSize != videoSize {
@@ -963,6 +978,7 @@ final class MPVSoftwareRenderer {
             
             if shouldNotifyLoadingEnd {
                 self.delegate?.renderer(self, didChangeLoading: false)
+                Logger.shared.log("First frame enqueued, video ready to display", type: "Info")
             }
             
             if #available(iOS 18.0, *) {
@@ -1245,8 +1261,8 @@ final class MPVSoftwareRenderer {
             _ = self.commandSync(handle, ["af", "del", "@audio-stab"])
 
             if enabled {
-                // Use FFmpeg's dynamic audio normalizer with conservative defaults. Keep syntax simple to avoid AVFilterGraph errors.
-                let status = self.commandSync(handle, ["af", "add", "@audio-stab", "dynaudnorm=f=75:g=10:p=0.5"])
+                // Use FFmpeg's dynamic audio normalizer. Check mpv error logs for syntax issues.
+                let status = self.commandSync(handle, ["af", "add", "@audio-stab", "dynaudnorm"])
                 if status < 0 {
                     self.audioStabilizationEnabled = false
                     Logger.shared.log("Audio stabilization failed to enable (\(status))", type: "Warn")

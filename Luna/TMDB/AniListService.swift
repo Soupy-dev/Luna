@@ -206,11 +206,33 @@ class AniListService {
         let isNotTV = anime.format.map { !($0 == "TV" || $0 == "TV_SHORT") } ?? false
         if isNotTV {
             Logger.shared.log("AniListService: Initial result for '\(title)' is format \(anime.format ?? "UNKNOWN"), searching for TV version...", type: "AniList")
-            if let tvCandidate = try? await fetchAniListAnimeBySearch(title, formats: ["TV", "TV_SHORT"], expectedEpisodeCount: expectedEpisodeCountHint, preferredSeasonYear: preferredSeasonYearHint) {
-                anime = tvCandidate
-                Logger.shared.log("AniListService: Swapped to TV entry (ID: \(anime.id), format: \(anime.format ?? "UNKNOWN"))", type: "AniList")
-            } else {
-                Logger.shared.log("AniListService: No TV version found, using original result", type: "AniList")
+            do {
+                // First try searching with the provided title
+                if let tvCandidate = try await fetchAniListAnimeBySearch(title, formats: ["TV", "TV_SHORT"], expectedEpisodeCount: expectedEpisodeCountHint, preferredSeasonYear: preferredSeasonYearHint) {
+                    anime = tvCandidate
+                    Logger.shared.log("AniListService: Swapped to TV entry (ID: \(anime.id), format: \(anime.format ?? "UNKNOWN"))", type: "AniList")
+                } else {
+                    // Try alternative title formats by removing qualifiers like "Part", "OVA", "ONA"
+                    let cleanedTitle = title
+                        .replacingOccurrences(of: " Part [0-9]+", with: "", options: .regularExpression)
+                        .replacingOccurrences(of: " OVA", with: "", options: [.caseInsensitive])
+                        .replacingOccurrences(of: " ONA", with: "", options: [.caseInsensitive])
+                        .trimmingCharacters(in: .whitespaces)
+                    
+                    if cleanedTitle != title {
+                        Logger.shared.log("AniListService: Retrying TV search with cleaned title: '\(cleanedTitle)'", type: "AniList")
+                        if let tvCandidate = try await fetchAniListAnimeBySearch(cleanedTitle, formats: ["TV", "TV_SHORT"], expectedEpisodeCount: expectedEpisodeCountHint, preferredSeasonYear: preferredSeasonYearHint) {
+                            anime = tvCandidate
+                            Logger.shared.log("AniListService: Swapped to TV entry with cleaned title (ID: \(anime.id), format: \(anime.format ?? "UNKNOWN"))", type: "AniList")
+                        } else {
+                            Logger.shared.log("AniListService: No TV version found even with cleaned title, using original \(anime.format ?? "UNKNOWN") result", type: "AniList")
+                        }
+                    } else {
+                        Logger.shared.log("AniListService: No TV version found, using original result", type: "AniList")
+                    }
+                }
+            } catch {
+                Logger.shared.log("AniListService: TV search error: \(error.localizedDescription), using original ONA result", type: "AniList")
             }
         } else if let expected = expectedEpisodeCountHint {
             let candidateEpisodes = anime.episodes ?? 0
@@ -221,9 +243,13 @@ class AniListService {
             }()
             if episodeGap > max(12, expected / 2) || yearGap > 2 {
                 Logger.shared.log("AniListService: Re-scoring AniList search to find closer match (expected episodes: \(expected), current: \(candidateEpisodes), year gap: \(yearGap))", type: "AniList")
-                if let better = try? await fetchAniListAnimeBySearch(title, formats: ["TV", "TV_SHORT"], expectedEpisodeCount: expectedEpisodeCountHint, preferredSeasonYear: preferredSeasonYearHint), better.id != anime.id {
-                    anime = better
-                    Logger.shared.log("AniListService: Swapped to closer AniList match (ID: \(anime.id), format: \(anime.format ?? "UNKNOWN"), episodes: \(anime.episodes ?? 0))", type: "AniList")
+                do {
+                    if let better = try await fetchAniListAnimeBySearch(title, formats: ["TV", "TV_SHORT"], expectedEpisodeCount: expectedEpisodeCountHint, preferredSeasonYear: preferredSeasonYearHint), better.id != anime.id {
+                        anime = better
+                        Logger.shared.log("AniListService: Swapped to closer AniList match (ID: \(anime.id), format: \(anime.format ?? "UNKNOWN"), episodes: \(anime.episodes ?? 0))", type: "AniList")
+                    }
+                } catch {
+                    Logger.shared.log("AniListService: Re-scoring search error: \(error.localizedDescription)", type: "AniList")
                 }
             }
         }
