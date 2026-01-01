@@ -147,6 +147,22 @@ class AniListService {
                                 large
                                 medium
                             }
+                            relations {
+                                edges {
+                                    relationType
+                                    node {
+                                        id
+                                        title { romaji english native }
+                                        episodes
+                                        status
+                                        seasonYear
+                                        season
+                                        format
+                                        type
+                                        coverImage { large medium }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -179,14 +195,14 @@ class AniListService {
 
         appendAnime(anime)
 
-        // BFS over sequels to gather full chain (format must be TV/TV_SHORT)
+        // BFS over sequels/prequels to gather full chain (format must be TV/TV_SHORT)
         var queue: [AniListAnime] = [anime]
         var seenIds = Set<Int>([anime.id])
         while let current = queue.first {
             queue.removeFirst()
             if let rels = current.relations?.edges {
                 for edge in rels {
-                    guard edge.relationType == "SEQUEL", edge.node.type == "ANIME" else { continue }
+                    guard (edge.relationType == "SEQUEL" || edge.relationType == "PREQUEL"), edge.node.type == "ANIME" else { continue }
                     // Filter to TV or TV_SHORT to avoid movies/OVAs blending into seasons
                     if let format = edge.node.format, !(format == "TV" || format == "TV_SHORT") { continue }
                     if !seenIds.insert(edge.node.id).inserted { continue }
