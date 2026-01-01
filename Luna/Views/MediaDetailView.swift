@@ -500,6 +500,12 @@ struct MediaDetailView: View {
                         // Use Jikan (MyAnimeList) for anime data
                         let jikanDetails = try? await JikanService.shared.fetchAnimeDetailsWithEpisodes(malId: searchResult.id)
                         
+                        // Cache AniList ID for tracking (convert MAL ID → AniList ID) - must be done outside MainActor
+                        var anilistId: Int? = nil
+                        if let malId = jikanDetails?.malId {
+                            anilistId = try? await AniListService.shared.getAniListId(fromMalId: malId)
+                        }
+                        
                         // Also fetch TMDB episodes for images (if available)
                         var tmdbEpisodeImages: [Int: String] = [:] // Maps episode number to stillPath
                         do {
@@ -536,9 +542,8 @@ struct MediaDetailView: View {
                             
                             Logger.shared.log("Built anime as 1 season with \(totalEps) episodes", type: "Anime")
                             
-                            // Cache AniList ID for tracking (convert MAL ID → AniList ID)
-                            if let malId = jikanDetails?.malId,
-                               let anilistId = try? await AniListService.shared.getAniListId(fromMalId: malId) {
+                            // Cache the AniList ID if we got one
+                            if let anilistId = anilistId, let malId = jikanDetails?.malId {
                                 TrackerManager.shared.cacheAniListId(tmdbId: detail.id, anilistId: anilistId)
                                 Logger.shared.log("Cached AniList ID \(anilistId) for TMDB ID \(detail.id) (MAL ID: \(malId))", type: "Anime")
                             }
