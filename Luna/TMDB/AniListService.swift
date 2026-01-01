@@ -182,11 +182,15 @@ class AniListService {
         let result = try JSONDecoder().decode(Response.self, from: response)
         var anime = result.data.Media
 
-        // If the first hit is not a TV/TV_SHORT (e.g., picked an OVA), try to find a TV entry by search
-        if let fmt = anime.format, !(fmt == "TV" || fmt == "TV_SHORT") {
+        // If the first hit is not a TV/TV_SHORT (e.g., picked an OVA/Movie), try to find a TV entry by search
+        let isNotTV = anime.format.map { !($0 == "TV" || $0 == "TV_SHORT") } ?? false
+        if isNotTV {
+            Logger.shared.log("AniListService: Initial result for '\(title)' is format \(anime.format ?? "UNKNOWN"), searching for TV version...", type: "AniList")
             if let tvCandidate = try? await fetchAniListAnimeBySearch(title, formats: ["TV", "TV_SHORT"]) {
                 anime = tvCandidate
-                Logger.shared.log("AniListService: Swapped to TV entry for title \(title)", type: "AniList")
+                Logger.shared.log("AniListService: Swapped to TV entry (ID: \(anime.id), format: \(anime.format ?? "UNKNOWN"))", type: "AniList")
+            } else {
+                Logger.shared.log("AniListService: No TV version found, using original result", type: "AniList")
             }
         }
         let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
@@ -292,7 +296,10 @@ class AniListService {
                         seasonNumber: seasonIndex,
                         stillPath: tmdbEp.stillPath,
                         airDate: tmdbEp.airDate,
-                        runtime: tmdbEp.runtime
+                        runtime: tmdbEp.runtime,
+                        absoluteEpisodeIndex: absoluteEp,
+                        tmdbSeasonNumber: tmdbEp.seasonNumber,
+                        tmdbEpisodeNumber: tmdbEp.episodeNumber
                     )
                 } else {
                     return AniListEpisode(
@@ -302,7 +309,10 @@ class AniListService {
                         seasonNumber: seasonIndex,
                         stillPath: nil,
                         airDate: nil,
-                        runtime: nil
+                        runtime: nil,
+                        absoluteEpisodeIndex: absoluteEp,
+                        tmdbSeasonNumber: seasonIndex,
+                        tmdbEpisodeNumber: localEp
                     )
                 }
             }
@@ -534,8 +544,8 @@ class AniListService {
         let formatList = formats.map { "\"\($0)\"" }.joined(separator: ",")
         let query = """
         query {
-            Page(perPage: 5) {
-                media(search: \"\(title.replacingOccurrences(of: "\"", with: "\\\""))\", type: ANIME, format_in: [\(formatList)]) {
+            Page(perPage: 10) {
+                media(search: \"\(title.replacingOccurrences(of: "\"", with: "\\\""))\", type: ANIME, format_in: [\(formatList)], sort: POPULARITY_DESC) {
                     id
                     title { romaji english native }
                     episodes
@@ -578,6 +588,14 @@ class AniListService {
 
         let data = try await executeGraphQLQuery(query, token: nil)
         let decoded = try JSONDecoder().decode(Response.self, from: data)
+        
+        // Log all found results for debugging
+        Logger.shared.log("AniListService: TV search found \(decoded.data.Page.media.count) results", type: "AniList")
+        for (idx, result) in decoded.data.Page.media.prefix(3).enumerated() {
+            let resultTitle = AniListTitlePicker.title(from: result.title, preferredLanguageCode: preferredLanguageCode)
+            Logger.shared.log("  [\(idx+1)] ID: \(result.id), Format: \(result.format ?? "nil"), Episodes: \(result.episodes ?? 0), Title: \(resultTitle)", type: "AniList")
+        }
+        
         return decoded.data.Page.media.first
     }
 }
@@ -599,6 +617,9 @@ struct AniListEpisode: AniListEpisodeProtocol {
     let stillPath: String?
     let airDate: String?
     let runtime: Int?
+    let absoluteEpisodeIndex: Int  // TMDB absolute episode index for tracking
+    let tmdbSeasonNumber: Int      // Actual TMDB season number for playback
+    let tmdbEpisodeNumber: Int     // Actual TMDB episode number for playback
 }
 
 struct AniListSeasonWithPoster {

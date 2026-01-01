@@ -319,6 +319,7 @@ struct TVShowSeasonsSection: View {
     }
     
     private func episodeTapAction(episode: TMDBEpisode) {
+        Logger.shared.log("Episode tapped: S\(episode.seasonNumber)E\(episode.episodeNumber) - \(episode.name)", type: "Anime")
         selectedEpisodeForSearch = episode
         searchInServicesForEpisode(episode: episode)
     }
@@ -386,7 +387,13 @@ struct TVShowSeasonsSection: View {
 
     private func setAnimeSeasonDetail(for season: TMDBSeason, tvShow: TMDBTVShowWithSeasons) {
         // For anime, use pre-built episode cache from MediaDetailView
+        Logger.shared.log("setAnimeSeasonDetail: Looking for season \(season.seasonNumber) in cache (available: \(animeSeasonCache?.keys ?? []))", type: "Anime")
+        
         if let cachedEpisodes = animeSeasonCache?[season.seasonNumber] {
+            Logger.shared.log("Cache HIT for season \(season.seasonNumber): \(cachedEpisodes.count) episodes", type: "Anime")
+            for (idx, ep) in cachedEpisodes.prefix(3).enumerated() {
+                Logger.shared.log("  Episode \(idx+1): S\(ep.seasonNumber)E\(ep.episodeNumber) - \(ep.name)", type: "Anime")
+            }
             seasonDetail = TMDBSeasonDetail(
                 id: tvShow.id,
                 name: season.name,
@@ -407,6 +414,8 @@ struct TVShowSeasonsSection: View {
             return
         }
         
+        Logger.shared.log("Cache MISS for season \(season.seasonNumber) - falling back to TMDB fetch", type: "Anime")
+        
         // Fallback: fetch from TMDB
         isLoadingSeason = true
         seasonDetail = nil
@@ -415,6 +424,10 @@ struct TVShowSeasonsSection: View {
         Task {
             do {
                 let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShow.id, seasonNumber: season.seasonNumber)
+                Logger.shared.log("Fetched season \(season.seasonNumber) from TMDB: \(detail.episodes.count) episodes", type: "Anime")
+                for (idx, ep) in detail.episodes.prefix(3).enumerated() {
+                    Logger.shared.log("  TMDB Episode \(idx+1): S\(ep.seasonNumber)E\(ep.episodeNumber) - \(ep.name)", type: "Anime")
+                }
 
                 await MainActor.run {
                     self.seasonDetail = detail

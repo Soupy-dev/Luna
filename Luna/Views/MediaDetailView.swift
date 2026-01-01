@@ -521,13 +521,23 @@ struct MediaDetailView: View {
                                 Logger.shared.log("Cached AniList ID \(anilistId) for TMDB ID \(detail.id)", type: "Anime")
                             }
 
-                            // Build AniList seasons array with unique IDs
+                            // Build AniList seasons array with unique IDs, using AniList season posters
                             let aniSeasons = aniDetails?.seasons.map { aniSeason in
-                                TMDBSeason(
+                                // Extract posterPath from posterUrl if it exists
+                                var posterPath: String? = detail.posterPath
+                                if let posterUrl = aniSeason.posterUrl {
+                                    if posterUrl.contains("/original/") {
+                                        posterPath = posterUrl.components(separatedBy: "/original/").last.flatMap { "/" + $0 }
+                                    } else if posterUrl.contains("/original") {
+                                        posterPath = posterUrl.components(separatedBy: "/original").last
+                                    }
+                                }
+                                
+                                return TMDBSeason(
                                     id: detail.id * 1000 + aniSeason.seasonNumber,
                                     name: "Season \(aniSeason.seasonNumber)",
                                     overview: "",
-                                    posterPath: detail.posterPath,
+                                    posterPath: posterPath,
                                     seasonNumber: aniSeason.seasonNumber,
                                     episodeCount: aniSeason.episodes.count,
                                     airDate: nil
@@ -590,13 +600,17 @@ struct MediaDetailView: View {
                                             name: aniEp.title,
                                             overview: aniEp.description,
                                             stillPath: aniEp.stillPath,
-                                            episodeNumber: aniEp.number,
-                                            seasonNumber: season.seasonNumber,
+                                            episodeNumber: aniEp.tmdbEpisodeNumber,  // Use actual TMDB episode number
+                                            seasonNumber: aniEp.tmdbSeasonNumber,     // Use actual TMDB season number
                                             airDate: aniEp.airDate,
                                             runtime: aniEp.runtime ?? detail.episodeRunTime?.first,
                                             voteAverage: 0,
                                             voteCount: 0
                                         )
+                                    }
+                                    Logger.shared.log("Mapped Season \(season.seasonNumber) episodes to TMDB:", type: "Anime")
+                                    for (idx, ep) in seasonEpisodes.prefix(3).enumerated() {
+                                        Logger.shared.log("  AniList S\(season.seasonNumber)E\(idx+1) → TMDB S\(ep.seasonNumber)E\(ep.episodeNumber)", type: "Anime")
                                     }
                                     seasonCache[season.seasonNumber] = seasonEpisodes
                                 }
@@ -605,11 +619,21 @@ struct MediaDetailView: View {
                                 // Set detail for first season
                                 if let firstSeason = aniDetails?.seasons.first,
                                    let firstSeasonEpisodes = seasonCache[firstSeason.seasonNumber] {
+                                    // Extract posterPath from posterUrl if it exists
+                                    var seasonPosterPath: String? = detail.posterPath
+                                    if let posterUrl = firstSeason.posterUrl {
+                                        if posterUrl.contains("/original/") {
+                                            seasonPosterPath = posterUrl.components(separatedBy: "/original/").last.flatMap { "/" + $0 }
+                                        } else if posterUrl.contains("/original") {
+                                            seasonPosterPath = posterUrl.components(separatedBy: "/original").last
+                                        }
+                                    }
+                                    
                                     self.seasonDetail = TMDBSeasonDetail(
                                         id: detail.id,
                                         name: "Season \(firstSeason.seasonNumber)",
                                         overview: "",
-                                        posterPath: detail.posterPath,
+                                        posterPath: seasonPosterPath,
                                         seasonNumber: firstSeason.seasonNumber,
                                         airDate: nil,
                                         episodes: firstSeasonEpisodes
