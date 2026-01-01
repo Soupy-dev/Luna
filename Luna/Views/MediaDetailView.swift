@@ -493,8 +493,14 @@ struct MediaDetailView: View {
                     let resume = ProgressManager.shared.latestEpisodeProgress(for: detail.id)
 
                     if animeFlag {
-                        // Use AniList for EVERYTHING except name, poster, and description
-                        let aniDetails = try? await AniListService.shared.fetchAnimeDetailsWithEpisodes(title: detail.name, token: nil)
+                        // Use AniList for structure + sequels, TMDB for episode details
+                        let aniDetails = try? await AniListService.shared.fetchAnimeDetailsWithEpisodes(
+                            title: detail.name,
+                            tmdbShowId: detail.id,
+                            tmdbService: tmdbService,
+                            tmdbShowPoster: detail.posterPath,
+                            token: nil
+                        )
 
                         await MainActor.run {
                             Logger.shared.log("Anime detected for: \(detail.name)", type: "Anime")
@@ -559,13 +565,13 @@ struct MediaDetailView: View {
                                     id: detail.id,
                                     name: "Season \(firstSeason.seasonNumber)",
                                     overview: "",
-                                    posterPath: detail.posterPath,
+                                    posterPath: (firstSeason as? AnyObject) != nil ? detail.posterPath : detail.posterPath,
                                     seasonNumber: firstSeason.seasonNumber,
                                     episodeCount: firstSeason.episodes.count,
                                     airDate: nil
                                 )
                                 
-                                // Build season detail from AniList episodes
+                                // Convert AniList episodes (which already have TMDB data) to TMDBEpisode format
                                 let tmdbEpisodes: [TMDBEpisode] = firstSeason.episodes.map { aniEp in
                                     TMDBEpisode(
                                         id: detail.id * 1000 + firstSeason.seasonNumber * 100 + aniEp.number,

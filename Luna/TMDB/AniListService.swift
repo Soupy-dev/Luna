@@ -17,11 +17,94 @@ class AniListService {
         let raw = UserDefaults.standard.string(forKey: "tmdbLanguage") ?? "en-US"
         return raw.split(separator: "-").first.map(String.init) ?? "en"
     }
+
+    enum AniListCatalogKind {
+        case trending
+        case popular
+        case topRated
+        case airing
+        case upcoming
+    }
+
+    // MARK: - Catalog Fetching
+
+    /// Fetch a lightweight AniList catalog and hydrate entries with TMDB matches for posters/details.
+    func fetchAnimeCatalog(
+        _ kind: AniListCatalogKind,
+        limit: Int = 20,
+        tmdbService: TMDBService
+    ) async throws -> [TMDBSearchResult] {
+        let sort: String
+        let status: String?
+
+        switch kind {
+        case .trending:
+            sort = "TRENDING_DESC"
+            status = nil
+        case .popular:
+            sort = "POPULARITY_DESC"
+            status = nil
+        case .topRated:
+            sort = "SCORE_DESC"
+            status = nil
+        case .airing:
+            sort = "POPULARITY_DESC"
+            status = "RELEASING"
+        case .upcoming:
+            sort = "POPULARITY_DESC"
+            status = "NOT_YET_RELEASED"
+        }
+
+        let statusClause = status.map { ", status: \($0)" } ?? ""
+        let query = """
+        query {
+            Page(perPage: \(limit)) {
+                media(type: ANIME, sort: [\(sort)]\(statusClause)) {
+                    id
+                    title {
+                        romaji
+                        english
+                        native
+                    }
+                    episodes
+                    status
+                    coverImage {
+                        large
+                        medium
+                    }
+                }
+            }
+        }
+        """
+
+        struct CatalogResponse: Codable {
+            let data: DataWrapper
+            struct DataWrapper: Codable {
+                let Page: PageData
+            }
+            struct PageData: Codable {
+                let media: [AniListAnime]
+            }
+        }
+
+        let data = try await executeGraphQLQuery(query, token: nil)
+        let decoded = try JSONDecoder().decode(CatalogResponse.self, from: data)
+        let animeList = decoded.data.Page.media
+        return await mapAniListCatalogToTMDB(animeList, tmdbService: tmdbService)
+    }
     
     // MARK: - Fetch Anime Details
     
-    /// Fetch full anime details with seasons and episodes from AniList only
-    func fetchAnimeDetailsWithEpisodes(title: String, token: String?) async throws -> AniListAnimeWithSeasons {
+    /// Fetch full anime details with seasons and episodes from AniList + TMDB
+    /// Uses AniList for season structure and sequels, TMDB for episode details
+    func fetchAnimeDetailsWithEpisodes(
+        title: String,
+        tmdbShowId: Int,
+        tmdbService: TMDBService,
+        tmdbShowPoster: String?,
+        token: String?
+    ) async throws -> AniListAnimeWithSeasons {
+        // Query AniList for anime structure + sequels + coverImage
         let query = """
         query {
             Media(search: "\(title.replacingOccurrences(of: "\"", with: "\\\""))", type: ANIME) {
@@ -35,6 +118,10 @@ class AniListService {
                 status
                 seasonYear
                 season
+                coverImage {
+                    large
+                    medium
+                }
                 nextAiringEpisode {
                     episode
                     airingAt
@@ -54,6 +141,10 @@ class AniListService {
                             seasonYear
                             season
                             type
+                            coverImage {
+                                large
+                                medium
+                            }
                         }
                     }
                 }
@@ -76,8 +167,10 @@ class AniListService {
         
         Logger.shared.log("AniListService: Raw response - episodes: \(anime.episodes ?? 0), seasonYear: \(anime.seasonYear ?? 0), season: \(anime.season ?? "UNKNOWN")", type: "AniList")
         
-        // Collect all anime to process (original + sequels)
-        var allAnimeToProcess: [(anime: AniListAnime, seasonOffset: Int)] = [(anime, 0)]
+        // Collect all anime to process (original + sequels with their posters)
+        var allAnimeToProcess: [(anime: AniListAnime, seasonOffset: Int, posterUrl: String?)] = [
+            (anime, 0, anime.coverImage?.large ?? anime.coverImage?.medium ?? tmdbShowPoster)
+        ]
         
         // Find and add sequels
         if let relations = anime.relations {
@@ -90,59 +183,88 @@ class AniListService {
                         let episodesPerSeason = 12
                         return acc + ((episodeCount + episodesPerSeason - 1) / episodesPerSeason)
                     }
-                    allAnimeToProcess.append((edge.node, currentSeasonOffset))
+                    let sequelPoster = edge.node.coverImage?.large ?? edge.node.coverImage?.medium
+                    allAnimeToProcess.append((edge.node, currentSeasonOffset, sequelPoster))
                 }
             }
         }
         
-        // Build all seasons from collected anime
+        // Fetch all TMDB season data (excluding Season 0 specials)
+        var allTmdbEpisodes: [Int: TMDBEpisode] = [:]
+        do {
+            let tvShowDetail = try await tmdbService.getTVShowWithSeasons(id: tmdbShowId)
+            
+            // Fetch details for each real season (skip season 0)
+            for season in tvShowDetail.seasons where season.seasonNumber > 0 {
+                do {
+                    let seasonDetail = try await tmdbService.getSeasonDetails(tvShowId: tmdbShowId, seasonNumber: season.seasonNumber)
+                    for episode in seasonDetail.episodes {
+                        allTmdbEpisodes[episode.episodeNumber] = episode
+                    }
+                } catch {
+                    Logger.shared.log("AniListService: Failed to fetch TMDB season \(season.seasonNumber): \(error.localizedDescription)", type: "AniList")
+                }
+            }
+        } catch {
+            Logger.shared.log("AniListService: Failed to fetch TMDB show details: \(error.localizedDescription)", type: "AniList")
+        }
+        
+        // Build all seasons from AniList structure + TMDB episode details
         var seasons: [AniListSeason] = []
         var currentEpisodeNumber = 1
         
-        for (currentAnime, seasonOffset) in allAnimeToProcess {
-            let episodeCount = currentAnime.episodes ?? 12
-            Logger.shared.log("AniListService: Processing anime with \(episodeCount) episodes, season offset: \(seasonOffset)", type: "AniList")
+        for (currentAnime, seasonOffset, posterUrl) in allAnimeToProcess {
+            let totalEpisodesInAnime = currentAnime.episodes ?? 12
+            Logger.shared.log("AniListService: Processing anime with \(totalEpisodesInAnime) episodes, season offset: \(seasonOffset), poster: \(posterUrl ?? "none")", type: "AniList")
             
-            // Build episode list for this anime
             let episodesPerSeason = 12
             var episodeIndex = 0
             var seasonNum = seasonOffset + 1
             
-            for _ in 1... {
-                let endEpisodeNum = min(currentEpisodeNumber + episodesPerSeason - 1, currentEpisodeNumber + (episodeCount - episodeIndex) - 1)
-                let episodeCount = endEpisodeNum - currentEpisodeNumber + 1
+            while episodeIndex < totalEpisodesInAnime {
+                let remainingEpisodes = totalEpisodesInAnime - episodeIndex
+                let episodesThisSeason = min(episodesPerSeason, remainingEpisodes)
                 
-                let seasonEpisodes: [AniListEpisode] = (0..<episodeCount).map { offset in
+                let seasonEpisodes: [AniListEpisode] = (0..<episodesThisSeason).map { offset in
                     let epNum = currentEpisodeNumber + offset
-                    return AniListEpisode(
-                        number: epNum,
-                        title: "Episode \(epNum)",
-                        description: nil,
-                        seasonNumber: seasonNum
-                    )
+                    // Try to get TMDB episode data, fallback to basic info
+                    if let tmdbEp = allTmdbEpisodes[epNum] {
+                        return AliListEpisodeWithDetails(
+                        return AniListEpisodeWithDetails(
+                            number: epNum,
+                            title: tmdbEp.name,
+                            description: tmdbEp.overview,
+                            seasonNumber: seasonNum,
+                            stillPath: tmdbEp.stillPath,
+                            airDate: tmdbEp.airDate,
+                            runtime: tmdbEp.runtime
+                        )
+                    } else {
+                        return AniListEpisode(
+                            number: epNum,
+                            title: "Episode \(epNum)",
+                            description: nil,
+                            seasonNumber: seasonNum
+                        )
+                    }
                 }
                 
-                if seasonEpisodes.isEmpty { break }
-                
-                seasons.append(AniListSeason(
+                seasons.append(AniListSeasonWithPoster(
                     seasonNumber: seasonNum,
-                    episodes: seasonEpisodes
+                    episodes: seasonEpisodes,
+                    posterUrl: posterUrl
                 ))
                 
-                currentEpisodeNumber += episodeCount
-                episodeIndex += episodeCount
+                currentEpisodeNumber += episodesThisSeason
+                episodeIndex += episodesThisSeason
                 seasonNum += 1
-                
-                if episodeIndex >= episodeCount {
-                    break
-                }
             }
         }
         
         let totalEpisodes = allAnimeToProcess.reduce(0) { $0 + ($1.anime.episodes ?? 12) }
         Logger.shared.log("AniListService: Fetched \(title) with \(totalEpisodes) total episodes grouped into \(seasons.count) seasons", type: "AniList")
         for season in seasons {
-            Logger.shared.log("  Season \(season.seasonNumber): \(season.episodes.count) episodes", type: "AniList")
+            Logger.shared.log("  Season \(season.seasonNumber): \(season.episodes.count) episodes, poster: \(season.posterUrl ?? "none")", type: "AniList")
         }
         
         return AniListAnimeWithSeasons(
@@ -210,6 +332,34 @@ class AniListService {
         let result = try JSONDecoder().decode(Response.self, from: response)
         return result.data.Page.media.map { AniListSearchResult(from: $0, preferredLanguageCode: preferredLanguageCode) }
     }
+
+    // MARK: - Catalog Mapping Helpers
+
+    private func mapAniListCatalogToTMDB(_ animeList: [AniListAnime], tmdbService: TMDBService) async -> [TMDBSearchResult] {
+        await withTaskGroup(of: TMDBSearchResult?.self) { group in
+            for anime in animeList {
+                group.addTask {
+                    let titleCandidates = AniListTitlePicker.titleCandidates(from: anime.title)
+                    for candidate in titleCandidates where !candidate.isEmpty {
+                        if let match = try? await tmdbService.searchTVShows(query: candidate).first {
+                            return match.asSearchResult
+                        }
+                    }
+                    return nil
+                }
+            }
+
+            var results: [TMDBSearchResult] = []
+            var seenIds = Set<Int>()
+            for await match in group {
+                if let match = match, !seenIds.contains(match.id) {
+                    seenIds.insert(match.id)
+                    results.append(match)
+                }
+            }
+            return results
+        }
+    }
     
     // MARK: - Private Helpers
     
@@ -244,9 +394,41 @@ struct AniListEpisode {
     let seasonNumber: Int
 }
 
+struct AniListEpisodeWithDetails: AniListEpisode {
+    let stillPath: String?
+    let airDate: String?
+    let runtime: Int?
+    
+    init(number: Int, title: String, description: String?, seasonNumber: Int, stillPath: String?, airDate: String?, runtime: Int?) {
+        self.stillPath = stillPath
+        self.airDate = airDate
+        self.runtime = runtime
+        super.init(number: number, title: title, description: description, seasonNumber: seasonNumber)
+    }
+}
+
+struct AniListEpisodeWithDetails {
+    let number: Int
+    let title: String
+    let description: String?
+    let seasonNumber: Int
+    let stillPath: String?
+    let airDate: String?
+    let runtime: Int?
+}
+
 struct AniListSeason {
     let seasonNumber: Int
     let episodes: [AniListEpisode]
+}
+
+struct AniListSeasonWithPoster: AniListSeason {
+    let posterUrl: String?
+    
+    init(seasonNumber: Int, episodes: [AniListEpisode], posterUrl: String?) {
+        self.posterUrl = posterUrl
+        super.init(seasonNumber: seasonNumber, episodes: episodes)
+    }
 }
 
 struct AniListAnimeWithSeasons {
@@ -318,5 +500,15 @@ enum AniListTitlePicker {
         }
 
         return "Unknown"
+    }
+
+    static func titleCandidates(from title: AniListAnime.AniListTitle) -> [String] {
+        var seen = Set<String>()
+        let ordered = [title.english, title.romaji, title.native].compactMap { $0 }
+        return ordered.filter { value in
+            if seen.contains(value) { return false }
+            seen.insert(value)
+            return true
+        }
     }
 }

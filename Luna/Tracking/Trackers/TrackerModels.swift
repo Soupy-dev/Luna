@@ -119,6 +119,7 @@ struct AniListAnime: Codable {
     let status: String?
     let seasonYear: Int?
     let season: String?
+    let coverImage: AniListCoverImage?
     let nextAiringEpisode: AniListAiringSchedule?
     let relations: AniListRelations?
     let type: String?
@@ -128,6 +129,11 @@ struct AniListAnime: Codable {
         let english: String?
         let native: String?
     }
+}
+
+struct AniListCoverImage: Codable {
+    let large: String?
+    let medium: String?
 }
 
 struct AniListRelations: Codable {

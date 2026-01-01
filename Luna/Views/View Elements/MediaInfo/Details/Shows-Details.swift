@@ -382,16 +382,15 @@ struct TVShowSeasonsSection: View {
 
     private func setAnimeSeasonDetail(for season: TMDBSeason, tvShow: TMDBTVShowWithSeasons) {
         // For anime, check if seasonDetail is already populated with AniList episodes
-        // If so, just update selected episode and return without fetching TMDB
+        // If so, fetch TMDB details for posters and descriptions
         if let existingDetail = seasonDetail, existingDetail.seasonNumber == season.seasonNumber {
-            // Already have AniList episodes loaded
+            // Already have the right season loaded, just update selected episode
             if selectedEpisodeForSearch == nil, let firstEpisode = existingDetail.episodes.first {
                 self.selectedEpisodeForSearch = firstEpisode
             }
             return
         }
         
-        // If no AniList data exists, fall back to TMDB
         isLoadingSeason = true
         seasonDetail = nil
         selectedEpisodeForSearch = nil
@@ -399,18 +398,17 @@ struct TVShowSeasonsSection: View {
         Task {
             do {
                 let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShow.id, seasonNumber: season.seasonNumber)
-                var adjustedDetail = detail
 
                 await MainActor.run {
-                    self.seasonDetail = adjustedDetail
+                    self.seasonDetail = detail
                     self.isLoadingSeason = false
 
                     if let pending = pendingEpisodeSelection,
                        pending.0 == season.seasonNumber,
-                       let match = adjustedDetail.episodes.first(where: { $0.episodeNumber == pending.1 }) {
+                       let match = detail.episodes.first(where: { $0.episodeNumber == pending.1 }) {
                         self.selectedEpisodeForSearch = match
                         self.pendingEpisodeSelection = nil
-                    } else if let firstEpisode = adjustedDetail.episodes.first {
+                    } else if let firstEpisode = detail.episodes.first {
                         self.selectedEpisodeForSearch = firstEpisode
                     }
                 }

@@ -132,7 +132,8 @@ struct EpisodeCell: View {
                         Text(overview)
                             .font(.caption2)
                             .foregroundColor(.secondary)
-                            .lineLimit(3)
+                            .lineLimit(isSelected ? nil : 3)
+                            .fixedSize(horizontal: false, vertical: true)
                             .multilineTextAlignment(.leading)
                     }
                 }
