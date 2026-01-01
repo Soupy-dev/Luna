@@ -497,51 +497,58 @@ struct MediaDetailView: View {
                     let resume = ProgressManager.shared.latestEpisodeProgress(for: detail.id)
 
                     if animeFlag {
-                        // Use AniList for structure + sequels, TMDB for episode details
-                        let aniDetails = try? await AniListService.shared.fetchAnimeDetailsWithEpisodes(
-                            title: detail.name,
-                            tmdbShowId: detail.id,
-                            tmdbService: tmdbService,
-                            tmdbShowPoster: detail.posterPath,
-                            token: nil
-                        )
+                        // Use Jikan (MyAnimeList) for anime data
+                        let jikanDetails = try? await JikanService.shared.fetchAnimeDetailsWithEpisodes(malId: searchResult.id)
+                        
+                        // Also fetch TMDB episodes for images (if available)
+                        var tmdbEpisodeImages: [Int: String] = [:] // Maps episode number to stillPath
+                        do {
+                            let tvShowDetail = try await tmdbService.getTVShowWithSeasons(id: searchResult.id)
+                            for season in tvShowDetail.seasons where season.seasonNumber > 0 {
+                                if let seasonDetail = try? await tmdbService.getSeasonDetails(tvShowId: searchResult.id, seasonNumber: season.seasonNumber) {
+                                    for episode in seasonDetail.episodes {
+                                        if let stillPath = episode.stillPath {
+                                            tmdbEpisodeImages[episode.episodeNumber] = stillPath
+                                        }
+                                    }
+                                }
+                            }
+                            Logger.shared.log("Fetched TMDB images for \(tmdbEpisodeImages.count) episodes", type: "Anime")
+                        } catch {
+                            Logger.shared.log("TMDB episodes not available for this anime, using Jikan data only", type: "Anime")
+                        }
 
                         await MainActor.run {
                             Logger.shared.log("Anime detected for: \(detail.name)", type: "Anime")
-                            Logger.shared.log("AniList returned \(aniDetails?.seasons.count ?? 0) seasons", type: "Anime")
-                            if let seasons = aniDetails?.seasons {
-                                for season in seasons {
-                                    Logger.shared.log("Season \(season.seasonNumber): \(season.episodes.count) episodes", type: "Anime")
-                                }
-                            }
+                            Logger.shared.log("Jikan returned \(jikanDetails?.totalEpisodes ?? 0) episodes", type: "Anime")
                             
-                            // Cache the AniList ID for syncing
-                            if let anilistId = aniDetails?.id {
+                            // Jikan anime are all single-season shows with all episodes
+                            let totalEps = jikanDetails?.totalEpisodes ?? 0
+                            let aniSeasons = [TMDBSeason(
+                                id: detail.id * 1000 + 1,
+                                name: "Season 1",
+                                overview: "",
+                                posterPath: jikanDetails?.posterUrl ?? detail.posterPath,
+                                seasonNumber: 1,
+                                episodeCount: totalEps,
+                                airDate: nil
+                            )]
+                            
+                            Logger.shared.log("Built anime as 1 season with \(totalEps) episodes", type: "Anime")
+                            
+                            // Cache AniList ID for tracking (convert MAL ID → AniList ID)
+                            if let malId = jikanDetails?.malId,
+                               let anilistId = try? await AniListService.shared.getAniListId(fromMalId: malId) {
                                 TrackerManager.shared.cacheAniListId(tmdbId: detail.id, anilistId: anilistId)
-                                Logger.shared.log("Cached AniList ID \(anilistId) for TMDB ID \(detail.id)", type: "Anime")
+                                Logger.shared.log("Cached AniList ID \(anilistId) for TMDB ID \(detail.id) (MAL ID: \(malId))", type: "Anime")
                             }
                             
-                            // Build AniList seasons array with unique IDs
-                            let aniSeasons = aniDetails?.seasons.map { aniSeason in
-                                TMDBSeason(
-                                    id: detail.id * 1000 + aniSeason.seasonNumber,  // Unique ID per season
-                                    name: "Season \(aniSeason.seasonNumber)",
-                                    overview: "",
-                                    posterPath: detail.posterPath,
-                                    seasonNumber: aniSeason.seasonNumber,
-                                    episodeCount: aniSeason.episodes.count,
-                                    airDate: nil
-                                )
-                            } ?? []
-                            
-                            Logger.shared.log("Built \(aniSeasons.count) TMDBSeason objects", type: "Anime")
-                            
-                            // Create a new tvShowDetail with AniList seasons
+                            // Create a new tvShowDetail with anime season
                             let detailWithAniSeasons = TMDBTVShowWithSeasons(
                                 id: detail.id,
                                 name: detail.name,
-                                overview: detail.overview,
-                                posterPath: detail.posterPath,
+                                overview: jikanDetails?.synopsis ?? detail.overview,
+                                posterPath: jikanDetails?.posterUrl ?? detail.posterPath,
                                 backdropPath: detail.backdropPath,
                                 firstAirDate: detail.firstAirDate,
                                 lastAirDate: detail.lastAirDate,
@@ -549,13 +556,13 @@ struct MediaDetailView: View {
                                 popularity: detail.popularity,
                                 genres: detail.genres,
                                 tagline: detail.tagline,
-                                status: detail.status,
+                                status: jikanDetails?.status ?? detail.status,
                                 originalLanguage: detail.originalLanguage,
                                 originalName: detail.originalName,
                                 adult: detail.adult,
                                 voteCount: detail.voteCount,
-                                numberOfSeasons: aniDetails?.seasons.count,
-                                numberOfEpisodes: aniDetails?.totalEpisodes,
+                                numberOfSeasons: 1,
+                                numberOfEpisodes: totalEps,
                                 episodeRunTime: detail.episodeRunTime,
                                 inProduction: detail.inProduction,
                                 languages: detail.languages,
@@ -566,57 +573,45 @@ struct MediaDetailView: View {
                             )
                             
                             self.tvShowDetail = detailWithAniSeasons
-                            self.synopsis = detail.overview ?? ""
-                            self.romajiTitle = aniDetails?.title ?? romaji
+                            self.synopsis = jikanDetails?.synopsis ?? detail.overview ?? ""
+                            self.romajiTitle = jikanDetails?.title ?? romaji
                             
-                            // Set the first season as selected
-                            if let firstSeason = aniDetails?.seasons.first {
-                                self.selectedSeason = TMDBSeason(
-                                    id: detail.id * 1000 + firstSeason.seasonNumber,  // Unique ID per season
-                                    name: "Season \(firstSeason.seasonNumber)",
-                                    overview: "",
-                                    posterPath: (firstSeason as? AnyObject) != nil ? detail.posterPath : detail.posterPath,
-                                    seasonNumber: firstSeason.seasonNumber,
-                                    episodeCount: firstSeason.episodes.count,
-                                    airDate: nil
+                            // Set the season and episodes
+                            self.selectedSeason = aniSeasons.first
+                            
+                            // Build episodes from Jikan data + TMDB images
+                            let seasonEpisodes: [TMDBEpisode] = jikanDetails?.episodes.enumerated().map { index, jikanEp in
+                                let episodeNum = index + 1
+                                TMDBEpisode(
+                                    id: detail.id * 1000 + 100 + episodeNum,
+                                    name: jikanEp.title ?? "Episode \(episodeNum)",
+                                    overview: nil,
+                                    stillPath: tmdbEpisodeImages[episodeNum],
+                                    episodeNumber: episodeNum,
+                                    seasonNumber: 1,
+                                    airDate: jikanEp.aired,
+                                    runtime: detail.episodeRunTime?.first,
+                                    voteAverage: jikanEp.score ?? 0,
+                                    voteCount: 0
                                 )
-                                
-                                    // Build cache for all anime seasons upfront
-                                var seasonCache: [Int: [TMDBEpisode]] = [:]
-                                for season in aniDetails?.seasons ?? [] {
-                                    let seasonEpisodes: [TMDBEpisode] = season.episodes.map { aniEp in
-                                        TMDBEpisode(
-                                            id: detail.id * 1000 + season.seasonNumber * 100 + aniEp.number,
-                                            name: aniEp.title,
-                                            overview: aniEp.description,
-                                            stillPath: aniEp.stillPath,
-                                            episodeNumber: aniEp.number,
-                                            seasonNumber: season.seasonNumber,
-                                            airDate: aniEp.airDate,
-                                            runtime: aniEp.runtime ?? detail.episodeRunTime?.first,
-                                            voteAverage: 0,
-                                            voteCount: 0
-                                        )
-                                    }
-                                    seasonCache[season.seasonNumber] = seasonEpisodes
-                                }
-                                self.animeSeasonEpisodeCache = seasonCache
-                                
-                                // Set detail for first season
-                                if let firstSeason = aniDetails?.seasons.first,
-                                   let firstSeasonEpisodes = seasonCache[firstSeason.seasonNumber] {
-                                    self.seasonDetail = TMDBSeasonDetail(
-                                        id: detail.id,
-                                        name: "Season \(firstSeason.seasonNumber)",
-                                        overview: "",
-                                        posterPath: detail.posterPath,
-                                        seasonNumber: firstSeason.seasonNumber,
-                                        airDate: nil,
-                                        episodes: firstSeasonEpisodes
-                                    )
-                                    self.selectedEpisodeForSearch = self.seasonDetail?.episodes.first
-                                }
-                            }
+                            } ?? []
+                            
+                            // Cache the episodes for this season
+                            var seasonCache: [Int: [TMDBEpisode]] = [:]
+                            seasonCache[1] = seasonEpisodes
+                            self.animeSeasonEpisodeCache = seasonCache
+                            
+                            // Set season detail
+                            self.seasonDetail = TMDBSeasonDetail(
+                                id: detail.id,
+                                name: "Season 1",
+                                overview: "",
+                                posterPath: jikanDetails?.posterUrl ?? detail.posterPath,
+                                seasonNumber: 1,
+                                airDate: nil,
+                                episodes: seasonEpisodes
+                            )
+                            self.selectedEpisodeForSearch = self.seasonDetail?.episodes.first
                             self.isLoading = false
                         }
                     } else {

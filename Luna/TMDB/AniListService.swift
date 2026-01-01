@@ -373,6 +373,38 @@ class AniListService {
         }
     }
     
+    // MARK: - MAL ID to AniList ID Conversion
+    
+    /// Convert MyAnimeList ID to AniList ID for tracking purposes
+    func getAniListId(fromMalId malId: Int) async throws -> Int? {
+        let query = """
+        query {
+            Media(idMal: \(malId), type: ANIME) {
+                id
+            }
+        }
+        """
+        
+        struct Response: Codable {
+            let data: DataWrapper?
+            struct DataWrapper: Codable {
+                let Media: MediaData?
+                struct MediaData: Codable {
+                    let id: Int
+                }
+            }
+        }
+        
+        do {
+            let data = try await executeGraphQLQuery(query, token: nil)
+            let result = try JSONDecoder().decode(Response.self, from: data)
+            return result.data?.Media?.id
+        } catch {
+            Logger.shared.log("AniListService: Failed to convert MAL ID \(malId) to AniList ID: \(error.localizedDescription)", type: "AniList")
+            return nil
+        }
+    }
+    
     // MARK: - Private Helpers
     
     private func executeGraphQLQuery(_ query: String, token: String?) async throws -> Data {
