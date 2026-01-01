@@ -1271,10 +1271,10 @@ final class MPVSoftwareRenderer {
                     if key == "id", value.format == MPV_FORMAT_INT64 {
                         trackId = Int(value.u.int64)
                     } else if key == "type", value.format == MPV_FORMAT_STRING,
-                              let typeStr = String(cString: value.u.string ?? "", encoding: .utf8) {
+                              let typeStr = value.u.string.map({ String(cString: $0) }) {
                         trackType = typeStr
                     } else if key == "lang", value.format == MPV_FORMAT_STRING,
-                              let langStr = String(cString: value.u.string ?? "", encoding: .utf8) {
+                              let langStr = value.u.string.map({ String(cString: $0) }) {
                         trackLang = langStr
                     }
                 }
@@ -1330,13 +1330,13 @@ final class MPVSoftwareRenderer {
                     if key == "id", value.format == MPV_FORMAT_INT64 {
                         trackId = Int(value.u.int64)
                     } else if key == "type", value.format == MPV_FORMAT_STRING,
-                              let typeStr = String(cString: value.u.string ?? "", encoding: .utf8) {
+                              let typeStr = value.u.string.map({ String(cString: $0) }) {
                         trackType = typeStr
                     } else if key == "lang", value.format == MPV_FORMAT_STRING,
-                              let langStr = String(cString: value.u.string ?? "", encoding: .utf8) {
+                              let langStr = value.u.string.map({ String(cString: $0) }) {
                         trackLang = langStr
                     } else if key == "title", value.format == MPV_FORMAT_STRING,
-                              let titleStr = String(cString: value.u.string ?? "", encoding: .utf8) {
+                              let titleStr = value.u.string.map({ String(cString: $0) }) {
                         trackTitle = titleStr
                     }
                 }
