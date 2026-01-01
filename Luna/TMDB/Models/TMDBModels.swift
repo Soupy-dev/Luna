@@ -446,7 +446,7 @@ struct TMDBTVShowWithSeasons: Codable, Identifiable {
     let languages: [String]?
     let originCountry: [String]?
     let type: String?
-    let seasons: [TMDBSeason]
+    var seasons: [TMDBSeason]
     let contentRatings: TMDBContentRatings?
     
     enum CodingKeys: String, CodingKey {

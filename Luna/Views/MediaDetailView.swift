@@ -513,6 +513,12 @@ struct MediaDetailView: View {
                                 }
                             }
                             
+                            // Cache the AniList ID for syncing
+                            if let anilistId = aniDetails?.id {
+                                TrackerManager.shared.cacheAniListId(tmdbId: detail.id, anilistId: anilistId)
+                                Logger.shared.log("Cached AniList ID \(anilistId) for TMDB ID \(detail.id)", type: "Anime")
+                            }
+                            
                             // Build AniList seasons array with unique IDs
                             let aniSeasons = aniDetails?.seasons.map { aniSeason in
                                 TMDBSeason(

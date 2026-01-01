@@ -25,6 +25,10 @@ final class TrackerManager: NSObject, ObservableObject {
     private var webAuthSession: ASWebAuthenticationSession?
     #endif
     
+    // Cache for TMDB ID -> AniList ID mappings to support anime syncing
+    private var anilistIdCache: [Int: Int] = [:]
+    private let anilistIdCacheLock = NSLock()
+    
     // OAuth config (redirects can be overridden via Info.plist keys AniListRedirectUri / TraktRedirectUri)
     private let anilistClientId = "33908"
     private let anilistClientSecret = "1TeOfbdHy3Uk88UQdE8HKoJDtdI5ARHP4sDCi5Jh"
@@ -487,6 +491,12 @@ final class TrackerManager: NSObject, ObservableObject {
     
     // MARK: - Sync Methods
 
+    func cacheAniListId(tmdbId: Int, anilistId: Int) {
+        anilistIdCacheLock.lock()
+        defer { anilistIdCacheLock.unlock() }
+        anilistIdCache[tmdbId] = anilistId
+    }
+
     func syncMangaProgress(title: String, chapterNumber: Int) {
         guard trackerState.syncEnabled else {
             Logger.shared.log("Skipping manga sync (sync disabled) for \(title) ch \(chapterNumber)", type: "Tracker")
@@ -763,40 +773,13 @@ final class TrackerManager: NSObject, ObservableObject {
     // MARK: - Helper Methods
     
     private func getAniListMediaId(tmdbId: Int) async -> Int? {
-        let query = """
-        query {
-            Media(idMal: \(tmdbId), type: ANIME) {
-                id
-            }
+        // Check cache first
+        anilistIdCacheLock.lock()
+        defer { anilistIdCacheLock.unlock() }
+        if let cachedId = anilistIdCache[tmdbId] {
+            return cachedId
         }
-        """
-        
-        do {
-            let url = URL(string: "https://graphql.anilist.co")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            
-            let body: [String: Any] = ["query": query]
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            
-            let (data, _) = try await URLSession.shared.data(for: request)
-            
-            struct Response: Codable {
-                let data: DataWrapper
-                struct DataWrapper: Codable {
-                    let Media: MediaData?
-                    struct MediaData: Codable {
-                        let id: Int
-                    }
-                }
-            }
-            
-            let response = try JSONDecoder().decode(Response.self, from: data)
-            return response.data.Media?.id
-        } catch {
-            return nil
-        }
+        return nil
     }
 
     private func getAniListMangaId(title: String) async -> Int? {
