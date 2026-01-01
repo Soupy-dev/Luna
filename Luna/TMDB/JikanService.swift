@@ -185,11 +185,7 @@ class JikanService {
             )
         }
     }
-}
 
-// MARK: - Jikan Response Models
-    }
-    
     // MARK: - Find Anime by Title
     
     /// Find anime by title (and year, if available) and return the best match with episodes
