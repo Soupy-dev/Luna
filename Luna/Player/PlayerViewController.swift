@@ -172,7 +172,6 @@ final class PlayerViewController: UIViewController {
         b.setImage(img, for: .normal)
         b.tintColor = .white
         b.alpha = 0.0
-        b.isHidden = true
         b.showsMenuAsPrimaryAction = true
         return b
     }()
@@ -197,7 +196,6 @@ final class PlayerViewController: UIViewController {
         b.setImage(img, for: .normal)
         b.tintColor = .white
         b.alpha = 0.0
-        b.isHidden = true
         b.showsMenuAsPrimaryAction = true
         return b
     }()
@@ -875,20 +873,20 @@ final class PlayerViewController: UIViewController {
     private func updateAudioTracksMenu() {
         let tracks = renderer.getAudioTracks()
         
-        guard !tracks.isEmpty else {
-            audioButton.isHidden = true
-            return
-        }
+        var trackActions: [UIAction] = []
         
-        audioButton.isHidden = false
-        
-        let trackActions = tracks.map { (id, name) in
-            UIAction(
-                title: name,
-                state: .off
-            ) { [weak self] _ in
-                self?.renderer.setAudioTrack(id: id)
-                self?.updateAudioTracksMenu()
+        if tracks.isEmpty {
+            let noTracksAction = UIAction(title: "No audio tracks available", attributes: .disabled) { _ in }
+            trackActions.append(noTracksAction)
+        } else {
+            trackActions = tracks.map { (id, name) in
+                UIAction(
+                    title: name,
+                    state: .off
+                ) { [weak self] _ in
+                    self?.renderer.setAudioTrack(id: id)
+                    self?.updateAudioTracksMenu()
+                }
             }
         }
         
@@ -901,14 +899,6 @@ final class PlayerViewController: UIViewController {
         
         var trackActions: [UIAction] = []
 
-        if tracks.isEmpty {
-            subtitleButton.isHidden = true
-            subtitleButton.menu = nil
-            return
-        }
-
-        subtitleButton.isHidden = false
-        
         let disableAction = UIAction(
             title: "Disable Subtitles",
             image: UIImage(systemName: "xmark"),
@@ -919,16 +909,21 @@ final class PlayerViewController: UIViewController {
         }
         trackActions.append(disableAction)
         
-        for (id, name) in tracks {
-            let action = UIAction(
-                title: name,
-                image: UIImage(systemName: "captions.bubble"),
-                state: .off
-            ) { [weak self] _ in
-                self?.renderer.setSubtitleTrack(id: id)
-                self?.updateSubtitleTracksMenu()
+        if tracks.isEmpty {
+            let noTracksAction = UIAction(title: "No subtitle tracks available", attributes: .disabled) { _ in }
+            trackActions.append(noTracksAction)
+        } else {
+            for (id, name) in tracks {
+                let action = UIAction(
+                    title: name,
+                    image: UIImage(systemName: "captions.bubble"),
+                    state: .off
+                ) { [weak self] _ in
+                    self?.renderer.setSubtitleTrack(id: id)
+                    self?.updateSubtitleTracksMenu()
+                }
+                trackActions.append(action)
             }
-            trackActions.append(action)
         }
         
         let subtitleMenu = UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: trackActions)
