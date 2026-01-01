@@ -585,9 +585,9 @@ struct MediaDetailView: View {
                             self.selectedSeason = aniSeasons.first
                             
                             // Build episodes from Jikan data + TMDB images
-                            let seasonEpisodes: [TMDBEpisode] = jikanDetails?.episodes.enumerated().map { index, jikanEp in
+                            let seasonEpisodes: [TMDBEpisode] = jikanDetails?.episodes.enumerated().map { index, jikanEp -> TMDBEpisode in
                                 let episodeNum = index + 1
-                                TMDBEpisode(
+                                return TMDBEpisode(
                                     id: detail.id * 1000 + 100 + episodeNum,
                                     name: jikanEp.title ?? "Episode \(episodeNum)",
                                     overview: nil,
