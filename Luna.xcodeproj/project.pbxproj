@@ -120,6 +120,8 @@
 		13FAA1022FFF010200AAAAAA /* TrackerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0022FFF000200AAAAAA /* TrackerModels.swift */; };
 		13FAA1032FFF010300AAAAAA /* TrackersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0032FFF000300AAAAAA /* TrackersSettingsView.swift */; };
 		13FAA1042FFF010400AAAAAA /* AniListService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0042FFF000400AAAAAA /* AniListService.swift */; };
+		14AAA0023FFF000200AAAAAA /* CatalogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AAA0013FFF000100AAAAAA /* CatalogManager.swift */; };
+		14AAA0043FFF000400AAAAAA /* CatalogsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -250,6 +252,8 @@
 		13FAA0022FFF000200AAAAAA /* TrackerModels.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackerModels.swift; sourceTree = "<group>"; };
 		13FAA0032FFF000300AAAAAA /* TrackersSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackersSettingsView.swift; sourceTree = "<group>"; };
 		13FAA0042FFF000400AAAAAA /* AniListService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AniListService.swift; sourceTree = "<group>"; };
+		14AAA0013FFF000100AAAAAA /* CatalogManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogManager.swift; sourceTree = "<group>"; };
+		14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogsSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -590,6 +594,7 @@
 			isa = PBXGroup;
 			children = (
 				12DF1FC12F040D6500E80375 /* AdaptiveConfirmationDialog.swift */,
+						14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */,
 				13F187A32E6F38CE00747F7E /* Library */,
 				13F072802E4B2D9000EF90EB /* MediaInfo */,
 				13F072882E4B2D9000EF90EB /* SearchResultCard.swift */,
@@ -757,6 +762,7 @@
 			isa = PBXGroup;
 			children = (
 				13F5B5932E730B0200565E75 /* Library */,
+				14AAA0013FFF000100AAAAAA /* CatalogManager.swift */,
 				13F5B5912E73090000565E75 /* HomeSection.swift */,
 			);
 			path = Models;
@@ -938,6 +944,7 @@
 				13E1EDD32ED9E65F00087629 /* mangaModel.xcdatamodeld in Sources */,
 				13F5B58F2E7308F300565E75 /* HomeSectionsView.swift in Sources */,
 				13F0729B2E4B2D9200EF90EB /* ServicesEntity.swift in Sources */,
+				14AAA0023FFF000200AAAAAA /* CatalogManager.swift in Sources */,
 				13F5B5922E73090000565E75 /* HomeSection.swift in Sources */,
 				13F0729C2E4B2D9200EF90EB /* JavaScriptCore+Extensions.swift in Sources */,
 				13F072B22E4B2D9200EF90EB /* FallbackImageView.swift in Sources */,
@@ -974,6 +981,7 @@
 				13E1EDD42ED9E65F00087629 /* mangaData.swift in Sources */,
 				13F072B32E4B2D9200EF90EB /* ServicesResultsSheet.swift in Sources */,
 				13F072A52E4B2D9200EF90EB /* HomeView.swift in Sources */,
+				14AAA0043FFF000400AAAAAA /* CatalogsSettingsView.swift in Sources */,
 				13E1EDDC2ED9E65F00087629 /* JavaScriptCore.swift in Sources */,
 				13F187B12E6F38CE00747F7E /* CollectionDetailView.swift in Sources */,
 				13E1EDF12ED9E66000087629 /* kanzenModuleView.swift in Sources */,

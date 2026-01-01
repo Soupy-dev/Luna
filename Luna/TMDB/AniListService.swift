@@ -210,7 +210,7 @@ class AniListService {
         }
         
         // Build all seasons from AniList structure + TMDB episode details
-        var seasons: [AniListSeasonProtocol] = []
+        var seasons: [AniListSeasonWithPoster] = []
         var currentEpisodeNumber = 1
         
         for (currentAnime, seasonOffset, posterUrl) in allAnimeToProcess {
@@ -225,7 +225,7 @@ class AniListService {
                 let remainingEpisodes = totalEpisodesInAnime - episodeIndex
                 let episodesThisSeason = min(episodesPerSeason, remainingEpisodes)
                 
-                let seasonEpisodes: [AniListEpisodeProtocol] = (0..<episodesThisSeason).map { offset in
+                let seasonEpisodes: [AniListEpisode] = (0..<episodesThisSeason).map { offset in
                     let epNum = currentEpisodeNumber + offset
                     // Try to get TMDB episode data, fallback to basic info
                     if let tmdbEp = allTmdbEpisodes[epNum] {
@@ -416,19 +416,7 @@ struct AniListEpisodeWithDetails: AniListEpisodeProtocol {
     let runtime: Int?
 }
 
-protocol AniListSeasonProtocol {
-    var seasonNumber: Int { get }
-    var episodes: [AniListEpisode] { get }
-    var posterUrl: String? { get }
-}
-
-struct AniListSeason: AniListSeasonProtocol {
-    let seasonNumber: Int
-    let episodes: [AniListEpisode]
-    var posterUrl: String? { return nil }
-}
-
-struct AniListSeasonWithPoster: AniListSeasonProtocol {
+struct AniListSeasonWithPoster {
     let seasonNumber: Int
     let episodes: [AniListEpisode]
     let posterUrl: String?
