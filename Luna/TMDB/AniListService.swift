@@ -340,24 +340,8 @@ class AniListService {
                             return match.asSearchResult
                         }
                     }
-                    // Fallback: return AniList data as TMDBSearchResult when no TMDB match found
-                    let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLang)
-                    let fallback = TMDBSearchResult(
-                        id: anime.id,
-                        mediaType: "tv",
-                        title: title,
-                        name: title,
-                        overview: nil,
-                        posterPath: anime.coverImage?.large ?? anime.coverImage?.medium,
-                        backdropPath: nil,
-                        releaseDate: nil,
-                        firstAirDate: nil,
-                        voteAverage: nil,
-                        popularity: 0,
-                        adult: nil,
-                        genreIds: nil
-                    )
-                    return fallback
+                    // Skip entries without a TMDB match to avoid invalid IDs downstream
+                    return nil
                 }
             }
 
