@@ -421,10 +421,6 @@ struct TVShowSeasonsSection: View {
             self.selectedEpisodeForSearch = firstEpisode
         }
     }
-            self.selectedEpisodeForSearch = firstEpisode
-        }
-    }
-    }
     
     private func getAgeRating(from contentRatings: TMDBContentRatings?) -> String? {
         guard let contentRatings = contentRatings else { return nil }
