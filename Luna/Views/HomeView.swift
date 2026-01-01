@@ -27,7 +27,14 @@ struct HomeView: View {
 
     @State private var hasLoadedContent = false
     
-    @StateObject private var catalogManager = CatalogManager.shared
+    @AppStorage("homeSections") private var homeSectionsData: Data = {
+        if let data = try? JSONEncoder().encode(HomeSection.defaultSections) {
+            return data
+        }
+        return Data()
+    }()
+    @State private var homeSections: [HomeSection] = []
+    
     @StateObject private var tmdbService = TMDBService.shared
     @StateObject private var contentFilter = TMDBContentFilter.shared
     @StateObject private var continueVM = ContinueWatchingViewModel()
@@ -41,10 +48,9 @@ struct HomeView: View {
 #endif
     }
 
-    private var enabledCatalogs: [Catalog] {
-        // Access the @Published property directly to ensure view updates when catalogs change
-        _ = catalogManager.catalogs // Trigger observation
-        return catalogManager.getEnabledCatalogs()
+    private var enabledCatalogs: [HomeSection] {
+        // Access the homeSections directly and filter enabled ones
+        return homeSections.filter { $0.isEnabled }.sorted { $0.order < $1.order }
     }
     
     var body: some View {
@@ -78,6 +84,7 @@ struct HomeView: View {
         .navigationBarHidden(true)
         .onAppear {
             if !hasLoadedContent {
+                loadSections()
                 loadContent()
             }
         }
@@ -360,7 +367,7 @@ struct HomeView: View {
                         ? limitedItems.filter { $0.id != heroContent?.id }
                         : limitedItems
                     MediaSection(
-                        title: catalog.name,
+                        title: catalog.title,
                         items: displayItems
                     )
                 }
@@ -466,6 +473,14 @@ struct HomeView: View {
                     Logger.shared.log("Error loading content: \(error)", type: "Error")
                 }
             }
+        }
+    }
+    
+    private func loadSections() {
+        if let decoded = try? JSONDecoder().decode([HomeSection].self, from: homeSectionsData) {
+            homeSections = decoded.sorted { $0.order < $1.order }
+        } else {
+            homeSections = HomeSection.defaultSections
         }
     }
 }

@@ -713,8 +713,21 @@ class AniListService {
  
         func seasonYearScore(for anime: AniListAnime) -> Int {
             guard let expectedYear = preferredSeasonYear, let year = anime.seasonYear else { return 0 }
+            
+            // Exact year match for Season 1 gets massive bonus - this properly handles remakes
+            if expectedYear == year {
+                return 500  // Exact match - strongly prefer this version
+            }
+            
+            // Year difference penalty
             let diff = abs(expectedYear - year)
-            return 180 - min(diff, 10) * 20
+            if diff <= 2 {
+                return 200 - diff * 50  // Within 2 years is still good
+            } else if diff <= 5 {
+                return 100 - diff * 20  // Within 5 years is okay
+            } else {
+                return max(0, 50 - diff * 10)  // More than 5 years apart
+            }
         }
  
         func episodesHintScore(for anime: AniListAnime) -> Int {

@@ -1279,6 +1279,7 @@ final class MPVSoftwareRenderer {
         guard let handle = mpv else { return [] }
         
         var result: [(Int, String)] = []
+        var trackNumber = 1  // For user-friendly numbering
         
         var node = mpv_node()
         let status = mpv_get_property(handle, "track-list", MPV_FORMAT_NODE, &node)
@@ -1350,15 +1351,27 @@ final class MPVSoftwareRenderer {
                     let langName = languageCodeToName(trackLang)
                     displayName = langName
                 } else {
-                    // Use codec as fallback
+                    // Use numbered audio track with codec if available
                     if !trackCodec.isEmpty {
-                        displayName = "Audio (\(trackCodec))"
+                        displayName = "Audio Track \(trackNumber) (\(trackCodec.uppercased()))"
                     } else {
-                        displayName = "Audio Track \(trackId + 1)"
+                        displayName = "Audio Track \(trackNumber)"
                     }
                 }
-                Logger.shared.log("Added audio track: ID=\(trackId), Display='\(displayName)'", type: "Debug")
-                result.append((trackId, displayName))
+                
+                // Only add if it's unique - skip duplicates based on display name
+                // (duplicates occur when HLS streams include identical audio tracks for each video quality variant)
+                let isDuplicate = result.contains { existingTrack in
+                    existingTrack.1 == displayName
+                }
+                
+                if !isDuplicate {
+                    Logger.shared.log("Added audio track: ID=\(trackId), Display='\(displayName)'", type: "Debug")
+                    result.append((trackId, displayName))
+                    trackNumber += 1
+                } else {
+                    Logger.shared.log("Skipped duplicate audio track: ID=\(trackId), Display='\(displayName)'", type: "Debug")
+                }
             }
         }
         
