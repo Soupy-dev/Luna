@@ -122,6 +122,7 @@ class AniListService {
                     large
                     medium
                 }
+                format
                 nextAiringEpisode {
                     episode
                     airingAt
@@ -140,6 +141,7 @@ class AniListService {
                             status
                             seasonYear
                             season
+                            format
                             type
                             coverImage {
                                 large
@@ -167,24 +169,30 @@ class AniListService {
         
         Logger.shared.log("AniListService: Raw response - episodes: \(anime.episodes ?? 0), seasonYear: \(anime.seasonYear ?? 0), season: \(anime.season ?? "UNKNOWN")", type: "AniList")
         
-        // Collect all anime to process (original + sequels with their posters)
-        var allAnimeToProcess: [(anime: AniListAnime, seasonOffset: Int, posterUrl: String?)] = [
-            (anime, 0, anime.coverImage?.large ?? anime.coverImage?.medium ?? tmdbShowPoster)
-        ]
-        
-        // Find and add sequels
-        if let relations = anime.relations {
-            for edge in relations.edges {
-                if edge.relationType == "SEQUEL", edge.node.type == "ANIME" {
+        // Collect all anime to process (original + all recursive sequels) with posters
+        var allAnimeToProcess: [(anime: AniListAnime, seasonOffset: Int, posterUrl: String?)] = []
+
+        func appendAnime(_ entry: AniListAnime) {
+            let poster = entry.coverImage?.large ?? entry.coverImage?.medium ?? tmdbShowPoster
+            allAnimeToProcess.append((entry, 0, poster))
+        }
+
+        appendAnime(anime)
+
+        // BFS over sequels to gather full chain (format must be TV/TV_SHORT)
+        var queue: [AniListAnime] = [anime]
+        var seenIds = Set<Int>([anime.id])
+        while let current = queue.first {
+            queue.removeFirst()
+            if let rels = current.relations?.edges {
+                for edge in rels {
+                    guard edge.relationType == "SEQUEL", edge.node.type == "ANIME" else { continue }
+                    // Filter to TV or TV_SHORT to avoid movies/OVAs blending into seasons
+                    if let format = edge.node.format, !(format == "TV" || format == "TV_SHORT") { continue }
+                    if !seenIds.insert(edge.node.id).inserted { continue }
                     Logger.shared.log("AniListService: Found sequel: \(AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode))", type: "AniList")
-                    // Calculate season offset based on previous anime episode counts
-                    let currentSeasonOffset = allAnimeToProcess.reduce(0) { acc, item in
-                        let episodeCount = item.anime.episodes ?? 12
-                        let episodesPerSeason = 12
-                        return acc + ((episodeCount + episodesPerSeason - 1) / episodesPerSeason)
-                    }
-                    let sequelPoster = edge.node.coverImage?.large ?? edge.node.coverImage?.medium
-                    allAnimeToProcess.append((edge.node, currentSeasonOffset, sequelPoster))
+                    appendAnime(edge.node)
+                    queue.append(edge.node)
                 }
             }
         }
@@ -219,7 +227,10 @@ class AniListService {
         var seasonIndex = 1
         
         for (currentAnime, seasonOffset, posterUrl) in allAnimeToProcess {
-            let totalEpisodesInAnime = currentAnime.episodes ?? 12
+            // Prefer AniList episode count; if missing/zero, use remaining TMDB episodes if we have them, else default 12
+            let remainingTmdb = max(0, tmdbEpisodesByAbsolute.count - (currentAbsoluteEpisode - 1))
+            let inferredCount = remainingTmdb > 0 ? remainingTmdb : 12
+            let totalEpisodesInAnime = (currentAnime.episodes ?? 0) > 0 ? (currentAnime.episodes ?? 0) : inferredCount
             Logger.shared.log("AniListService: Processing anime with \(totalEpisodesInAnime) episodes, season offset: \(seasonOffset), poster: \(posterUrl ?? "none")", type: "AniList")
             
             // Each anime (original or sequel) is its own season with episodes numbered from 1
