@@ -157,4 +157,3 @@ private struct DayBucket: Identifiable {
     let date: Date
     let items: [AniListAiringScheduleEntry]
 }
-*** End File
