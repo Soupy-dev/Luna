@@ -386,68 +386,41 @@ struct TVShowSeasonsSection: View {
     }
 
     private func setAnimeSeasonDetail(for season: TMDBSeason, tvShow: TMDBTVShowWithSeasons) {
-        // For anime, use pre-built episode cache from MediaDetailView
-        Logger.shared.log("setAnimeSeasonDetail: Looking for season \(season.seasonNumber) in cache (available: \(animeSeasonCache?.keys ?? []))", type: "Anime")
+        // For anime, ALWAYS use pre-built cache from MediaDetailView
+        // This cache is authoritative and already has correct TMDB episode mappings
+        let cacheKeys = animeSeasonCache?.keys.map { String($0) }.joined(separator: ", ") ?? "empty"
+        Logger.shared.log("setAnimeSeasonDetail: Looking for season \(season.seasonNumber) in cache (available: \(cacheKeys))", type: "Anime")
         
-        if let cachedEpisodes = animeSeasonCache?[season.seasonNumber] {
-            Logger.shared.log("Cache HIT for season \(season.seasonNumber): \(cachedEpisodes.count) episodes", type: "Anime")
-            for (idx, ep) in cachedEpisodes.prefix(3).enumerated() {
-                Logger.shared.log("  Episode \(idx+1): S\(ep.seasonNumber)E\(ep.episodeNumber) - \(ep.name)", type: "Anime")
-            }
-            seasonDetail = TMDBSeasonDetail(
-                id: tvShow.id,
-                name: season.name,
-                overview: season.overview ?? "",
-                posterPath: season.posterPath,
-                seasonNumber: season.seasonNumber,
-                airDate: season.airDate,
-                episodes: cachedEpisodes
-            )
-            if let pending = pendingEpisodeSelection,
-               pending.0 == season.seasonNumber,
-               let match = cachedEpisodes.first(where: { $0.episodeNumber == pending.1 }) {
-                self.selectedEpisodeForSearch = match
-                self.pendingEpisodeSelection = nil
-            } else if let firstEpisode = cachedEpisodes.first {
-                self.selectedEpisodeForSearch = firstEpisode
-            }
+        guard let cachedEpisodes = animeSeasonCache?[season.seasonNumber] else {
+            Logger.shared.log("ERROR: No cache for season \(season.seasonNumber)! This indicates a bug in MediaDetailView cache building.", type: "Anime")
+            seasonDetail = nil
             return
         }
         
-        Logger.shared.log("Cache MISS for season \(season.seasonNumber) - falling back to TMDB fetch", type: "Anime")
-        
-        // Fallback: fetch from TMDB
-        isLoadingSeason = true
-        seasonDetail = nil
-        selectedEpisodeForSearch = nil
-
-        Task {
-            do {
-                let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShow.id, seasonNumber: season.seasonNumber)
-                Logger.shared.log("Fetched season \(season.seasonNumber) from TMDB: \(detail.episodes.count) episodes", type: "Anime")
-                for (idx, ep) in detail.episodes.prefix(3).enumerated() {
-                    Logger.shared.log("  TMDB Episode \(idx+1): S\(ep.seasonNumber)E\(ep.episodeNumber) - \(ep.name)", type: "Anime")
-                }
-
-                await MainActor.run {
-                    self.seasonDetail = detail
-                    self.isLoadingSeason = false
-
-                    if let pending = pendingEpisodeSelection,
-                       pending.0 == season.seasonNumber,
-                       let match = detail.episodes.first(where: { $0.episodeNumber == pending.1 }) {
-                        self.selectedEpisodeForSearch = match
-                        self.pendingEpisodeSelection = nil
-                    } else if let firstEpisode = detail.episodes.first {
-                        self.selectedEpisodeForSearch = firstEpisode
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.isLoadingSeason = false
-                }
-            }
+        Logger.shared.log("Cache HIT for season \(season.seasonNumber): \(cachedEpisodes.count) episodes", type: "Anime")
+        for (idx, ep) in cachedEpisodes.prefix(3).enumerated() {
+            Logger.shared.log("  Episode \(idx+1): S\(ep.seasonNumber)E\(ep.episodeNumber) - \(ep.name)", type: "Anime")
         }
+        
+        seasonDetail = TMDBSeasonDetail(
+            id: tvShow.id,
+            name: season.name,
+            overview: season.overview ?? "",
+            posterPath: season.posterPath,
+            seasonNumber: season.seasonNumber,
+            airDate: season.airDate,
+            episodes: cachedEpisodes
+        )
+        
+        if let pending = pendingEpisodeSelection,
+           pending.0 == season.seasonNumber,
+           let match = cachedEpisodes.first(where: { $0.episodeNumber == pending.1 }) {
+            self.selectedEpisodeForSearch = match
+            self.pendingEpisodeSelection = nil
+        } else if let firstEpisode = cachedEpisodes.first {
+            self.selectedEpisodeForSearch = firstEpisode
+        }
+    }
     }
     
     private func getAgeRating(from contentRatings: TMDBContentRatings?) -> String? {

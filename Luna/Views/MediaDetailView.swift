@@ -522,7 +522,7 @@ struct MediaDetailView: View {
                             }
 
                             // Build AniList seasons array with unique IDs, using AniList season posters
-                            let aniSeasons = aniDetails?.seasons.map { aniSeason in
+                            let aniSeasons: [TMDBSeason] = aniDetails?.seasons.map { aniSeason in
                                 // Extract posterPath from posterUrl if it exists
                                 var posterPath: String? = detail.posterPath
                                 if let posterUrl = aniSeason.posterUrl {
