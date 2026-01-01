@@ -671,7 +671,6 @@ class AniListService {
             Logger.shared.log("  [\(idx+1)] ID: \(result.id), Format: \(formatText), Episodes: \(episodeText), Title: \(resultTitle)", type: "AniList")
         }
 
-        let results = decoded.data.Page.media
         guard !results.isEmpty else { return nil }
  
         func normalized(_ value: String) -> String {
