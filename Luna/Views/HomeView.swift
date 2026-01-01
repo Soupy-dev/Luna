@@ -351,7 +351,7 @@ struct HomeView: View {
                 .padding(.top, isTvOS ? 40 : 24)
                 .opacity(continueVM.entries.isEmpty ? 0 : 1)
             }
-            ForEach(enabledCatalogs, id: \.id) { catalog in
+            ForEach(enabledCatalogs) { catalog in
                 if let items = catalogResults[catalog.id], !items.isEmpty {
                     let limitedItems = Array(items.prefix(15))
                     let displayItems = catalog.id == "trending"
