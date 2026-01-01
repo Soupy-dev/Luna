@@ -254,6 +254,10 @@ struct JikanAnimeDetailResponse: Codable {
     let data: JikanAnimeDetail
 }
 
+struct JikanCatalogResponse: Codable {
+    let data: [JikanAnime]
+}
+
 struct JikanEpisodeResponse: Codable {
     let data: [JikanEpisode]
     let pagination: JikanPagination
