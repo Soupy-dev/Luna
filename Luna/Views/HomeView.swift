@@ -386,8 +386,8 @@ struct HomeView: View {
                 async let trendingAnime = AniListService.shared.fetchAnimeCatalog(.trending, limit: 20, tmdbService: tmdbService)
                 async let popularAnime = AniListService.shared.fetchAnimeCatalog(.popular, limit: 20, tmdbService: tmdbService)
                 async let topRatedAnime = AniListService.shared.fetchAnimeCatalog(.topRated, limit: 20, tmdbService: tmdbService)
-                async let airingAnime = AniListService.shared.fetchAnimeCatalog(.airing, limit: 20, tmdbService: tmdbService)
-                async let upcomingAnime = AniListService.shared.fetchAnimeCatalog(.upcoming, limit: 20, tmdbService: tmdbService)
+                async let airingAnime = AniListService.shared.fetchAnimeCatalog(.airing, limit: 50, tmdbService: tmdbService)
+                async let upcomingAnime = AniListService.shared.fetchAnimeCatalog(.upcoming, limit: 50, tmdbService: tmdbService)
                 
                 let (
                     trendingResult,

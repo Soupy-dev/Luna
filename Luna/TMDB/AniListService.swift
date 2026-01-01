@@ -212,55 +212,46 @@ class AniListService {
         // Build all seasons from AniList structure + TMDB episode details
         var seasons: [AniListSeasonWithPoster] = []
         var currentEpisodeNumber = 1
-        var seasonIndex = 1 // ensure seasons across sequels increment globally
+        var seasonIndex = 1
         
         for (currentAnime, seasonOffset, posterUrl) in allAnimeToProcess {
             let totalEpisodesInAnime = currentAnime.episodes ?? 12
             Logger.shared.log("AniListService: Processing anime with \(totalEpisodesInAnime) episodes, season offset: \(seasonOffset), poster: \(posterUrl ?? "none")", type: "AniList")
             
-            let episodesPerSeason = 12
-            var episodeIndex = 0
-            
-            while episodeIndex < totalEpisodesInAnime {
-                let remainingEpisodes = totalEpisodesInAnime - episodeIndex
-                let episodesThisSeason = min(episodesPerSeason, remainingEpisodes)
-                
-                let seasonEpisodes: [AniListEpisode] = (0..<episodesThisSeason).map { offset in
-                    let epNum = currentEpisodeNumber + offset
-                    // Try to get TMDB episode data, fallback to basic info
-                    if let tmdbEp = allTmdbEpisodes[epNum] {
-                        return AniListEpisode(
-                            number: epNum,
-                            title: tmdbEp.name,
-                            description: tmdbEp.overview,
-                            seasonNumber: seasonIndex,
-                            stillPath: tmdbEp.stillPath,
-                            airDate: tmdbEp.airDate,
-                            runtime: tmdbEp.runtime
-                        )
-                    } else {
-                        return AniListEpisode(
-                            number: epNum,
-                            title: "Episode \(epNum)",
-                            description: nil,
-                            seasonNumber: seasonIndex,
-                            stillPath: nil,
-                            airDate: nil,
-                            runtime: nil
-                        )
-                    }
+            // Each anime (original or sequel) is its own season with all its episodes
+            let seasonEpisodes: [AniListEpisode] = (0..<totalEpisodesInAnime).map { offset in
+                let epNum = currentEpisodeNumber + offset
+                if let tmdbEp = allTmdbEpisodes[epNum] {
+                    return AniListEpisode(
+                        number: epNum,
+                        title: tmdbEp.name,
+                        description: tmdbEp.overview,
+                        seasonNumber: seasonIndex,
+                        stillPath: tmdbEp.stillPath,
+                        airDate: tmdbEp.airDate,
+                        runtime: tmdbEp.runtime
+                    )
+                } else {
+                    return AniListEpisode(
+                        number: epNum,
+                        title: "Episode \(epNum)",
+                        description: nil,
+                        seasonNumber: seasonIndex,
+                        stillPath: nil,
+                        airDate: nil,
+                        runtime: nil
+                    )
                 }
-                
-                seasons.append(AniListSeasonWithPoster(
-                    seasonNumber: seasonIndex,
-                    episodes: seasonEpisodes,
-                    posterUrl: posterUrl
-                ))
-                
-                currentEpisodeNumber += episodesThisSeason
-                episodeIndex += episodesThisSeason
-                seasonIndex += 1
             }
+            
+            seasons.append(AniListSeasonWithPoster(
+                seasonNumber: seasonIndex,
+                episodes: seasonEpisodes,
+                posterUrl: posterUrl
+            ))
+            
+            currentEpisodeNumber += totalEpisodesInAnime
+            seasonIndex += 1
         }
         
         let totalEpisodes = allAnimeToProcess.reduce(0) { $0 + ($1.anime.episodes ?? 12) }
@@ -338,22 +329,36 @@ class AniListService {
     // MARK: - Catalog Mapping Helpers
 
     private func mapAniListCatalogToTMDB(_ animeList: [AniListAnime], tmdbService: TMDBService) async -> [TMDBSearchResult] {
-        await withTaskGroup(of: TMDBSearchResult?.self) { group in
+        await withTaskGroup(of: (TMDBSearchResult?, AniListAnime).self) { group in
             for anime in animeList {
                 group.addTask {
                     let titleCandidates = AniListTitlePicker.titleCandidates(from: anime.title)
                     for candidate in titleCandidates where !candidate.isEmpty {
                         if let match = try? await tmdbService.searchTVShows(query: candidate).first {
-                            return match.asSearchResult
+                            return (match.asSearchResult, anime)
                         }
                     }
-                    return nil
+                    // Fallback: return AniList data as TMDBSearchResult when no TMDB match found
+                    let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
+                    let posterPath = anime.coverImage?.large ?? anime.coverImage?.medium
+                    let fallback = TMDBSearchResult(
+                        id: anime.id,
+                        title: title,
+                        overview: nil,
+                        posterPath: posterPath,
+                        backdropPath: nil,
+                        releaseDate: nil,
+                        mediaType: .tv,
+                        voteAverage: 0,
+                        voteCount: 0
+                    )
+                    return (fallback, anime)
                 }
             }
 
             var results: [TMDBSearchResult] = []
             var seenIds = Set<Int>()
-            for await match in group {
+            for await (match, _) in group {
                 if let match = match, !seenIds.contains(match.id) {
                     seenIds.insert(match.id)
                     results.append(match)
