@@ -11,6 +11,10 @@ class JikanService {
     static let shared = JikanService()
     
     private let baseURL = "https://api.jikan.moe/v4"
+
+    // In-memory caches to avoid repeated lookups
+    private var tmdbToMalCache: [Int: Int] = [:]
+    private let cacheQueue = DispatchQueue(label: "JikanService.cache")
     
     enum JikanCatalogKind {
         case trending
@@ -184,10 +188,71 @@ class JikanService {
 }
 
 // MARK: - Jikan Response Models
+    }
+    
+    // MARK: - Find Anime by Title
+    
+    /// Find anime by title (and year, if available) and return the best match with episodes
+    func findAnimeByTitle(_ title: String, year: Int?, tmdbId: Int?) async throws -> JikanAnimeWithEpisodes? {
+        Logger.shared.log("JikanService: Searching for anime: \(title)\(year.map { " (\($0))" } ?? "")", type: "Jikan")
 
-struct JikanCatalogResponse: Codable {
-    let data: [JikanAnime]
+        // If we have a cached MAL ID for this TMDB ID, use it directly
+        if let tmdbId = tmdbId, let cachedMal = cacheQueue.sync(execute: { tmdbToMalCache[tmdbId] }) {
+            Logger.shared.log("JikanService: Using cached MAL ID \(cachedMal) for TMDB ID \(tmdbId)", type: "Jikan")
+            return try await fetchAnimeDetailsWithEpisodes(malId: cachedMal)
+        }
+
+        // Search for the anime
+        let results = try await searchAnime(query: title)
+        
+        guard !results.isEmpty else {
+            Logger.shared.log("JikanService: No anime found for: \(title)", type: "Jikan")
+            return nil
+        }
+
+        // Pick best candidate by year proximity then score/popularity
+        let best = pickBestMatch(from: results, targetYear: year)
+        Logger.shared.log("JikanService: Selected anime: \(best.title ?? "Unknown") (MAL ID: \(best.id))", type: "Jikan")
+
+        // Cache mapping
+        if let tmdbId = tmdbId {
+            cacheQueue.sync { tmdbToMalCache[tmdbId] = best.id }
+        }
+
+        // Fetch full details with episodes
+        return try await fetchAnimeDetailsWithEpisodes(malId: best.id)
+    }
+
+    private func pickBestMatch(from results: [TMDBSearchResult], targetYear: Int?) -> TMDBSearchResult {
+        guard let targetYear = targetYear else {
+            // No year — pick highest score then popularity
+            return results.sorted { (lhs, rhs) in
+                (lhs.voteAverage ?? 0, lhs.popularity) > (rhs.voteAverage ?? 0, rhs.popularity)
+            }.first ?? results[0]
+        }
+
+        // Rank by year distance, then score, then popularity
+        return results.sorted { lhs, rhs in
+            let ly = year(from: lhs.firstAirDate ?? lhs.releaseDate)
+            let ry = year(from: rhs.firstAirDate ?? rhs.releaseDate)
+            let ldist = ly.map { abs($0 - targetYear) } ?? Int.max
+            let rdist = ry.map { abs($0 - targetYear) } ?? Int.max
+            if ldist != rdist { return ldist < rdist }
+            if (lhs.voteAverage ?? 0) != (rhs.voteAverage ?? 0) {
+                return (lhs.voteAverage ?? 0) > (rhs.voteAverage ?? 0)
+            }
+            return lhs.popularity > rhs.popularity
+        }.first ?? results[0]
+    }
+
+    private func year(from dateString: String?) -> Int? {
+        guard let dateString = dateString, dateString.count >= 4 else { return nil }
+        if let y = Int(dateString.prefix(4)) { return y }
+        return nil
+    }
 }
+
+// MARK: - Jikan Response Models
 
 struct JikanAnimeDetailResponse: Codable {
     let data: JikanAnimeDetail

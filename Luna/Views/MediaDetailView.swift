@@ -431,10 +431,10 @@ struct MediaDetailView: View {
 
     private func detectAnime(from detail: TMDBTVShowWithSeasons) -> Bool {
         let genreAnime = detail.genres.contains { $0.id == 16 }
-        let originJP = detail.originCountry?.contains("JP") ?? false
-        let originCN = detail.originCountry?.contains("CN") ?? false
-        // Require animation genre AND (Japanese OR Chinese origin) to avoid misclassifying western animation
-        return genreAnime && (originJP || originCN)
+        let asianCountries: Set<String> = ["JP", "CN", "KR", "TW"]
+        let hasAsianOrigin = (detail.originCountry ?? []).contains { asianCountries.contains($0) }
+        // Require animation genre AND Asian origin to avoid misclassifying western animation
+        return genreAnime && hasAsianOrigin
     }
     
     private func toggleBookmark() {
@@ -498,7 +498,8 @@ struct MediaDetailView: View {
 
                     if animeFlag {
                         // Use Jikan (MyAnimeList) for anime data
-                        let jikanDetails = try? await JikanService.shared.fetchAnimeDetailsWithEpisodes(malId: searchResult.id)
+                        let firstYear = detail.firstAirDate.flatMap { Int($0.prefix(4)) }
+                        let jikanDetails = try? await JikanService.shared.findAnimeByTitle(detail.name, year: firstYear, tmdbId: detail.id)
                         
                         // Cache AniList ID for tracking (convert MAL ID → AniList ID) - must be done outside MainActor
                         var anilistId: Int? = nil
