@@ -133,7 +133,7 @@ final class PlayerViewController: UIViewController {
         let b = UIButton(type: .system)
         b.translatesAutoresizingMaskIntoConstraints = false
         let cfg = UIImage.SymbolConfiguration(pointSize: 28, weight: .semibold)
-        let img = UIImage(systemName: "gobackward.15", withConfiguration: cfg)
+        let img = UIImage(systemName: "gobackward.10", withConfiguration: cfg)
         b.setImage(img, for: .normal)
         b.tintColor = .white
         b.alpha = 0.0
@@ -144,10 +144,12 @@ final class PlayerViewController: UIViewController {
         let b = UIButton(type: .system)
         b.translatesAutoresizingMaskIntoConstraints = false
         let cfg = UIImage.SymbolConfiguration(pointSize: 28, weight: .semibold)
-        let img = UIImage(systemName: "goforward.15", withConfiguration: cfg)
+        let img = UIImage(systemName: "goforward.10", withConfiguration: cfg)
         b.setImage(img, for: .normal)
         b.tintColor = .white
         b.alpha = 0.0
+        return b
+    }()
         return b
     }()
     
@@ -169,6 +171,31 @@ final class PlayerViewController: UIViewController {
         b.translatesAutoresizingMaskIntoConstraints = false
         let cfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
         let img = UIImage(systemName: "captions.bubble", withConfiguration: cfg)
+        b.setImage(img, for: .normal)
+        b.tintColor = .white
+        b.alpha = 0.0
+        b.isHidden = true
+        b.showsMenuAsPrimaryAction = true
+        return b
+    }()
+    
+    private let speedButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        let cfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        let img = UIImage(systemName: "hare.fill", withConfiguration: cfg)
+        b.setImage(img, for: .normal)
+        b.tintColor = .white
+        b.alpha = 0.0
+        b.showsMenuAsPrimaryAction = true
+        return b
+    }()
+    
+    private let audioButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        let cfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        let img = UIImage(systemName: "speaker.wave.2", withConfiguration: cfg)
         b.setImage(img, for: .normal)
         b.tintColor = .white
         b.alpha = 0.0
@@ -307,11 +334,15 @@ final class PlayerViewController: UIViewController {
         setupLayout()
         setupActions()
         setupHoldGesture()
+        setupDoubleTapSkipGestures()
         
         NotificationCenter.default.addObserver(self, selector: #selector(handleLoggerNotification(_:)), name: NSNotification.Name("LoggerNotification"), object: nil)
         
         do {
             try renderer.start()
+            
+            let audioStabilizationEnabled = UserDefaults.standard.bool(forKey: "audioStabilizationMPV")
+            renderer.setAudioStabilization(audioStabilizationEnabled)
         } catch {
             Logger.shared.log("Failed to start MPV renderer: \(error)", type: "Error")
             presentErrorAlert(title: "Playback Error", message: "Failed to start renderer: \(error)")
@@ -327,6 +358,7 @@ final class PlayerViewController: UIViewController {
         }
         
         updateProgressHostingController()
+        updateSpeedMenu()
         
         NotificationCenter.default.addObserver(self, selector: #selector(appDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(appWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
@@ -404,6 +436,11 @@ final class PlayerViewController: UIViewController {
         if let subs = initialSubtitles, !subs.isEmpty {
             loadSubtitles(subs)
         }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.updateAudioTracksMenu()
+            self?.updateSubtitleTracksMenu()
+        }
     }
     
     private func prepareSeekToLastPosition(for mediaInfo: MediaInfo) {
@@ -466,6 +503,8 @@ final class PlayerViewController: UIViewController {
         videoContainer.addSubview(skipForwardButton)
         videoContainer.addSubview(speedIndicatorLabel)
         videoContainer.addSubview(subtitleButton)
+        videoContainer.addSubview(speedButton)
+        videoContainer.addSubview(audioButton)
         
         NSLayoutConstraint.activate([
             videoContainer.topAnchor.constraint(equalTo: view.topAnchor),
@@ -526,7 +565,17 @@ final class PlayerViewController: UIViewController {
             subtitleButton.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor, constant: 0),
             subtitleButton.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: -8),
             subtitleButton.widthAnchor.constraint(equalToConstant: 32),
-            subtitleButton.heightAnchor.constraint(equalToConstant: 32)
+            subtitleButton.heightAnchor.constraint(equalToConstant: 32),
+            
+            speedButton.trailingAnchor.constraint(equalTo: subtitleButton.leadingAnchor, constant: -8),
+            speedButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
+            speedButton.widthAnchor.constraint(equalToConstant: 32),
+            speedButton.heightAnchor.constraint(equalToConstant: 32),
+            
+            audioButton.trailingAnchor.constraint(equalTo: speedButton.leadingAnchor, constant: -8),
+            audioButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
+            audioButton.widthAnchor.constraint(equalToConstant: 32),
+            audioButton.heightAnchor.constraint(equalToConstant: 32)
         ])
     }
     
@@ -546,6 +595,38 @@ final class PlayerViewController: UIViewController {
         if let holdGesture = holdGesture {
             videoContainer.addGestureRecognizer(holdGesture)
         }
+    }
+    
+    private func setupDoubleTapSkipGestures() {
+        let leftDoubleTap = UITapGestureRecognizer(target: self, action: #selector(leftSideDoubleTapped))
+        leftDoubleTap.numberOfTapsRequired = 2
+        videoContainer.addGestureRecognizer(leftDoubleTap)
+        
+        let rightDoubleTap = UITapGestureRecognizer(target: self, action: #selector(rightSideDoubleTapped))
+        rightDoubleTap.numberOfTapsRequired = 2
+        videoContainer.addGestureRecognizer(rightDoubleTap)
+    }
+    
+    @objc private func leftSideDoubleTapped(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: videoContainer)
+        let isLeftSide = location.x < videoContainer.bounds.width / 2
+        
+        guard isLeftSide else { return }
+        
+        renderer.seek(by: -10)
+        animateButtonTap(skipBackwardButton)
+        showControlsTemporarily()
+    }
+    
+    @objc private func rightSideDoubleTapped(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: videoContainer)
+        let isRightSide = location.x >= videoContainer.bounds.width / 2
+        
+        guard isRightSide else { return }
+        
+        renderer.seek(by: 10)
+        animateButtonTap(skipForwardButton)
+        showControlsTemporarily()
     }
     
     @objc private func handleHoldGesture(_ gesture: UILongPressGestureRecognizer) {
@@ -599,13 +680,13 @@ final class PlayerViewController: UIViewController {
     }
     
     @objc private func skipBackwardTapped() {
-        renderer.seek(by: -15)
+        renderer.seek(by: -10)
         animateButtonTap(skipBackwardButton)
         showControlsTemporarily()
     }
     
     @objc private func skipForwardTapped() {
-        renderer.seek(by: 15)
+        renderer.seek(by: 10)
         animateButtonTap(skipForwardButton)
         showControlsTemporarily()
     }
@@ -752,6 +833,100 @@ final class PlayerViewController: UIViewController {
         let imageName = subtitleModel.isVisible ? "captions.bubble.fill" : "captions.bubble"
         let img = UIImage(systemName: imageName, withConfiguration: cfg)
         subtitleButton.setImage(img, for: .normal)
+    }
+    
+    private func updateSpeedMenu() {
+        let currentSpeed = renderer.getSpeed()
+        let speeds: [(String, Double)] = [
+            ("0.25x", 0.25),
+            ("0.5x", 0.5),
+            ("0.75x", 0.75),
+            ("1.0x", 1.0),
+            ("1.25x", 1.25),
+            ("1.5x", 1.5),
+            ("1.75x", 1.75),
+            ("2.0x", 2.0)
+        ]
+        
+        let speedActions = speeds.map { (name, speed) in
+            UIAction(
+                title: name,
+                state: abs(currentSpeed - speed) < 0.01 ? .on : .off
+            ) { [weak self] _ in
+                self?.renderer.setSpeed(speed)
+                self?.speedIndicatorLabel.text = String(format: "%.2fx", speed)
+                DispatchQueue.main.async {
+                    UIView.animate(withDuration: 0.2) {
+                        self?.speedIndicatorLabel.alpha = 1.0
+                    } completion: { _ in
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            UIView.animate(withDuration: 0.2) {
+                                self?.speedIndicatorLabel.alpha = 0.0
+                            }
+                        }
+                    }
+                }
+                self?.updateSpeedMenu()
+            }
+        }
+        
+        let speedMenu = UIMenu(title: "Playback Speed", image: UIImage(systemName: "hare.fill"), children: speedActions)
+        speedButton.menu = speedMenu
+    }
+    
+    private func updateAudioTracksMenu() {
+        let tracks = renderer.getAudioTracks()
+        
+        guard !tracks.isEmpty else {
+            audioButton.isHidden = true
+            return
+        }
+        
+        audioButton.isHidden = false
+        
+        let trackActions = tracks.map { (id, name) in
+            UIAction(
+                title: name,
+                state: .off
+            ) { [weak self] _ in
+                self?.renderer.setAudioTrack(id: id)
+                self?.updateAudioTracksMenu()
+            }
+        }
+        
+        let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: trackActions)
+        audioButton.menu = audioMenu
+    }
+    
+    private func updateSubtitleTracksMenu() {
+        let tracks = renderer.getSubtitleTracks()
+        
+        var trackActions: [UIAction] = []
+        
+        let disableAction = UIAction(
+            title: "Disable Subtitles",
+            image: UIImage(systemName: "xmark"),
+            state: .off
+        ) { [weak self] _ in
+            self?.renderer.disableSubtitles()
+            self?.updateSubtitleTracksMenu()
+        }
+        trackActions.append(disableAction)
+        
+        for (id, name) in tracks {
+            let action = UIAction(
+                title: name,
+                image: UIImage(systemName: "captions.bubble"),
+                state: .off
+            ) { [weak self] _ in
+                self?.renderer.setSubtitleTrack(id: id)
+                self?.updateSubtitleTracksMenu()
+            }
+            trackActions.append(action)
+        }
+        
+        let subtitleMenu = UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: trackActions)
+        subtitleButton.menu = subtitleMenu
     }
     
     private func loadSubtitles(_ urls: [String]) {

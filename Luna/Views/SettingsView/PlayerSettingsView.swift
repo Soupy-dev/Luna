@@ -66,6 +66,10 @@ final class PlayerSettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(inAppPlayer.rawValue, forKey: "inAppPlayer") }
     }
     
+    @Published var audioStabilization: Bool {
+        didSet { UserDefaults.standard.set(audioStabilization, forKey: "audioStabilizationMPV") }
+    }
+    
     init() {
         let savedSpeed = UserDefaults.standard.double(forKey: "holdSpeedPlayer")
         self.holdSpeed = savedSpeed > 0 ? savedSpeed : 2.0
@@ -77,6 +81,8 @@ final class PlayerSettingsStore: ObservableObject {
         
         let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? InAppPlayer.normal.rawValue
         self.inAppPlayer = InAppPlayer(rawValue: inAppRaw) ?? .normal
+        
+        self.audioStabilization = UserDefaults.standard.bool(forKey: "audioStabilizationMPV")
     }
 }
 
@@ -164,6 +170,26 @@ struct PlayerSettingsView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                }
+                
+                if store.inAppPlayer == .mpv {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Audio Stabilization")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            
+                            Text("Normalize audio levels to prevent sudden volume spikes.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        
+                        Spacer()
+                        
+                        Toggle("", isOn: $store.audioStabilization)
+                            .tint(accentColorManager.currentAccentColor)
+                    }
                 }
             }
         }

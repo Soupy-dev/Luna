@@ -1222,4 +1222,146 @@ final class MPVSoftwareRenderer {
         getProperty(handle: handle, name: "speed", format: MPV_FORMAT_DOUBLE, value: &speed)
         return speed
     }
+    
+    // MARK: - Audio Stabilization
+    func setAudioStabilization(_ enabled: Bool) {
+        setProperty(name: "audio-normalize", value: enabled ? "yes" : "no")
+    }
+    
+    func getAudioStabilization() -> Bool {
+        guard let handle = mpv else { return false }
+        var result = Int32(0)
+        getProperty(handle: handle, name: "audio-normalize", format: MPV_FORMAT_FLAG, value: &result)
+        return result != 0
+    }
+    
+    // MARK: - Audio Track Controls
+    func getAudioTracks() -> [(Int, String)] {
+        guard let handle = mpv else { return [] }
+        
+        var result: [(Int, String)] = []
+        
+        var node = mpv_node()
+        let status = mpv_get_property(handle, "track-list", MPV_FORMAT_NODE, &node)
+        guard status >= 0 else { return [] }
+        
+        defer { mpv_free_node_contents(&node) }
+        
+        guard node.format == MPV_FORMAT_NODE_ARRAY else { return [] }
+        
+        let count = Int(node.u.list?.num ?? 0)
+        guard let listPtr = node.u.list?.values else { return [] }
+        
+        for i in 0..<count {
+            let trackNode = listPtr[i]
+            guard trackNode.format == MPV_FORMAT_NODE_MAP else { continue }
+            
+            var trackId: Int = -1
+            var trackType: String = ""
+            var trackLang: String = ""
+            
+            let mapCount = Int(trackNode.u.list?.num ?? 0)
+            guard let keysPtr = trackNode.u.list?.keys,
+                  let valuesPtr = trackNode.u.list?.values else { continue }
+            
+            for j in 0..<mapCount {
+                if let keyStr = keysPtr[j], let key = String(cString: keyStr, encoding: .utf8) {
+                    let value = valuesPtr[j]
+                    
+                    if key == "id", value.format == MPV_FORMAT_INT64 {
+                        trackId = Int(value.u.int64)
+                    } else if key == "type", value.format == MPV_FORMAT_STRING,
+                              let typeStr = String(cString: value.u.string ?? "", encoding: .utf8) {
+                        trackType = typeStr
+                    } else if key == "lang", value.format == MPV_FORMAT_STRING,
+                              let langStr = String(cString: value.u.string ?? "", encoding: .utf8) {
+                        trackLang = langStr
+                    }
+                }
+            }
+            
+            if trackType == "audio" && trackId >= 0 {
+                let displayName = !trackLang.isEmpty ? trackLang : "Audio Track \(trackId)"
+                result.append((trackId, displayName))
+            }
+        }
+        
+        return result
+    }
+    
+    func setAudioTrack(id: Int) {
+        setProperty(name: "aid", value: String(id))
+    }
+    
+    // MARK: - Subtitle Track Controls
+    func getSubtitleTracks() -> [(Int, String)] {
+        guard let handle = mpv else { return [] }
+        
+        var result: [(Int, String)] = []
+        
+        var node = mpv_node()
+        let status = mpv_get_property(handle, "track-list", MPV_FORMAT_NODE, &node)
+        guard status >= 0 else { return [] }
+        
+        defer { mpv_free_node_contents(&node) }
+        
+        guard node.format == MPV_FORMAT_NODE_ARRAY else { return [] }
+        
+        let count = Int(node.u.list?.num ?? 0)
+        guard let listPtr = node.u.list?.values else { return [] }
+        
+        for i in 0..<count {
+            let trackNode = listPtr[i]
+            guard trackNode.format == MPV_FORMAT_NODE_MAP else { continue }
+            
+            var trackId: Int = -1
+            var trackType: String = ""
+            var trackLang: String = ""
+            var trackTitle: String = ""
+            
+            let mapCount = Int(trackNode.u.list?.num ?? 0)
+            guard let keysPtr = trackNode.u.list?.keys,
+                  let valuesPtr = trackNode.u.list?.values else { continue }
+            
+            for j in 0..<mapCount {
+                if let keyStr = keysPtr[j], let key = String(cString: keyStr, encoding: .utf8) {
+                    let value = valuesPtr[j]
+                    
+                    if key == "id", value.format == MPV_FORMAT_INT64 {
+                        trackId = Int(value.u.int64)
+                    } else if key == "type", value.format == MPV_FORMAT_STRING,
+                              let typeStr = String(cString: value.u.string ?? "", encoding: .utf8) {
+                        trackType = typeStr
+                    } else if key == "lang", value.format == MPV_FORMAT_STRING,
+                              let langStr = String(cString: value.u.string ?? "", encoding: .utf8) {
+                        trackLang = langStr
+                    } else if key == "title", value.format == MPV_FORMAT_STRING,
+                              let titleStr = String(cString: value.u.string ?? "", encoding: .utf8) {
+                        trackTitle = titleStr
+                    }
+                }
+            }
+            
+            if trackType == "sub" && trackId >= 0 {
+                var displayName = "Subtitle Track \(trackId)"
+                if !trackTitle.isEmpty {
+                    displayName = trackTitle
+                } else if !trackLang.isEmpty {
+                    displayName = trackLang
+                }
+                result.append((trackId, displayName))
+            }
+        }
+        
+        return result
+    }
+    
+    func setSubtitleTrack(id: Int) {
+        setProperty(name: "sid", value: String(id))
+    }
+    
+    func disableSubtitles() {
+        setProperty(name: "sid", value: "no")
+    }
 }
+
