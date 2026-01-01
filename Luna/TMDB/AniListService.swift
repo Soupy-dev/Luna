@@ -183,7 +183,7 @@ class AniListService {
         var anime = result.data.Media
 
         // Fetch TMDB show info early for hinting (episode count, first air year) and reuse later.
-        let tvShowDetail: TMDBTVShowWithSeasons? = {
+        let tvShowDetail: TMDBTVShowWithSeasons? = await {
             do {
                 return try await tmdbService.getTVShowWithSeasons(id: tmdbShowId)
             } catch {
@@ -309,7 +309,7 @@ class AniListService {
         var currentAbsoluteEpisode = 1
         var seasonIndex = 1
         
-        for (currentAnime, seasonOffset, posterUrl) in allAnimeToProcess {
+        for (currentAnime, _, _) in allAnimeToProcess {
             // Get the full AniList title for this season/sequel
             let seasonTitle = AniListTitlePicker.title(from: currentAnime.title, preferredLanguageCode: preferredLanguageCode)
             
@@ -752,6 +752,15 @@ class AniListService {
                 + formatScore(for: anime)
                 + seasonYearScore(for: anime)
                 + episodesHintScore(for: anime)
+                - penalty(for: anime)
+        }
+
+        let best = results.max { lhs, rhs in
+            return score(for: lhs) < score(for: rhs)
+        }
+
+        if let best = best {
+            let pickedTitle = AniListTitlePicker.title(from: best.title, preferredLanguageCode: preferredLanguageCode)
             Logger.shared.log("AniListService: Picked TV candidate ID \(best.id) (score: \(score(for: best))) title: \(pickedTitle)", type: "AniList")
         }
 
