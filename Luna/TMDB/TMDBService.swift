@@ -128,10 +128,14 @@ class TMDBService: ObservableObject {
             let (data, _) = try await URLSession.shared.data(from: url)
             var tvShowDetail = try JSONDecoder().decode(TMDBTVShowWithSeasons.self, from: data)
             
+            Logger.shared.log("TMDB returned \(tvShowDetail.seasons.count) seasons for show \(id), numberOfSeasons: \(tvShowDetail.numberOfSeasons ?? 0)", type: "TMDB")
+            
             // Fetch all seasons if numberOfSeasons is greater than returned seasons
             if let numberOfSeasons = tvShowDetail.numberOfSeasons, numberOfSeasons > tvShowDetail.seasons.count {
+                Logger.shared.log("Fetching \(numberOfSeasons - tvShowDetail.seasons.count) missing seasons", type: "TMDB")
                 for seasonNum in 0...numberOfSeasons - 1 {
                     if !tvShowDetail.seasons.contains(where: { $0.seasonNumber == seasonNum }) {
+                        Logger.shared.log("Fetching season \(seasonNum)", type: "TMDB")
                         do {
                             let seasonDetail = try await getSeasonDetails(tvShowId: id, seasonNumber: seasonNum)
                             let season = TMDBSeason(

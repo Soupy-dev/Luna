@@ -141,7 +141,6 @@ struct ModulesSearchResultsSheet: View {
                             Text(overview)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                                .lineLimit(3)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }

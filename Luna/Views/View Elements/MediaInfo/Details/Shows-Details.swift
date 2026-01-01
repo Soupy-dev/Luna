@@ -357,10 +357,13 @@ struct TVShowSeasonsSection: View {
         seasonDetail = nil
         selectedEpisodeForSearch = nil
         
+        Logger.shared.log("Loading season \(season.seasonNumber) for show \(tvShowId)", type: "Shows")
+        
         Task {
             do {
                 let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShowId, seasonNumber: season.seasonNumber)
                 await MainActor.run {
+                    Logger.shared.log("Loaded season \(season.seasonNumber): \(detail.episodes.count) episodes", type: "Shows")
                     self.seasonDetail = detail
                     self.isLoadingSeason = false
 
