@@ -437,7 +437,7 @@ struct AniListSeasonWithPoster: AniListSeasonProtocol {
 struct AniListAnimeWithSeasons {
     let id: Int
     let title: String
-    let seasons: [any AniListSeasonProtocol]
+    let seasons: [AniListSeasonWithPoster]
     let totalEpisodes: Int
     let status: String
 }

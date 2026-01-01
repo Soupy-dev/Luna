@@ -488,8 +488,17 @@ final class TrackerManager: NSObject, ObservableObject {
     // MARK: - Sync Methods
 
     func syncMangaProgress(title: String, chapterNumber: Int) {
-        guard trackerState.syncEnabled else { return }
-        guard let account = trackerState.getAccount(for: .anilist), account.isConnected else { return }
+        guard trackerState.syncEnabled else {
+            Logger.shared.log("Skipping manga sync (sync disabled) for \(title) ch \(chapterNumber)", type: "Tracker")
+            return
+        }
+
+        guard let account = trackerState.getAccount(for: .anilist), account.isConnected else {
+            Logger.shared.log("Skipping manga sync (no connected AniList account) for \(title) ch \(chapterNumber)", type: "Tracker")
+            return
+        }
+
+        Logger.shared.log("Starting manga sync to AniList for \(title) ch \(chapterNumber)", type: "Tracker")
 
         Task {
             guard let mediaId = await getAniListMangaId(title: title) else {
@@ -541,10 +550,22 @@ final class TrackerManager: NSObject, ObservableObject {
     }
     
     func syncWatchProgress(showId: Int, seasonNumber: Int, episodeNumber: Int, progress: Double, isMovie: Bool = false) {
-        guard trackerState.syncEnabled else { return }
+        guard trackerState.syncEnabled else {
+            Logger.shared.log("Skipping watch sync (sync disabled) for TMDB \(showId) S\(seasonNumber)E\(episodeNumber) \(Int(progress))%", type: "Tracker")
+            return
+        }
+
+        let connectedAccounts = trackerState.accounts.filter { $0.isConnected }
+        guard !connectedAccounts.isEmpty else {
+            Logger.shared.log("Skipping watch sync (no connected tracker accounts) for TMDB \(showId) S\(seasonNumber)E\(episodeNumber) \(Int(progress))%", type: "Tracker")
+            return
+        }
+
+        Logger.shared.log("Starting watch sync for TMDB \(showId) S\(seasonNumber)E\(episodeNumber) \(Int(progress))% across \(connectedAccounts.count) account(s)", type: "Tracker")
         
         Task {
-            for account in trackerState.accounts where account.isConnected {
+            for account in connectedAccounts {
+                Logger.shared.log("Syncing \(account.service) account \(account.username) for TMDB \(showId) S\(seasonNumber)E\(episodeNumber)", type: "Tracker")
                 switch account.service {
                 case .anilist:
                     // Sync to AniList
