@@ -137,6 +137,10 @@ struct SettingsView: View {
                     Text("Appearance")
                 }
                 
+                NavigationLink(destination: CatalogsSettingsView()) {
+                    Text("Catalogs")
+                }
+                
                 NavigationLink(destination: ServicesView()) {
                     Text("Services")
                 }
@@ -175,11 +179,7 @@ struct SettingsView: View {
             .scrollClipDisabled()
         #endif
     }
-                
-                NavigationLink(destination: CatalogsSettingsView()) {
-                    Text("Catalogs")
-                }
-            }
+}
 
 struct LanguageSelectionView: View {
     @StateObject private var accentColorManager = AccentColorManager.shared

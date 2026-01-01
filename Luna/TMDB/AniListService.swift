@@ -229,7 +229,6 @@ class AniListService {
                     let epNum = currentEpisodeNumber + offset
                     // Try to get TMDB episode data, fallback to basic info
                     if let tmdbEp = allTmdbEpisodes[epNum] {
-                        return AliListEpisodeWithDetails(
                         return AniListEpisodeWithDetails(
                             number: epNum,
                             title: tmdbEp.name,
