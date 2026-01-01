@@ -640,12 +640,12 @@ class AniListService {
         }
 
         let best = results.max { lhs, rhs in
-            return score(lhs) < score(rhs)
+            return score(for: lhs) < score(for: rhs)
         }
 
         if let best = best {
             let pickedTitle = AniListTitlePicker.title(from: best.title, preferredLanguageCode: preferredLanguageCode)
-            Logger.shared.log("AniListService: Picked TV candidate ID \(best.id) (score: \(score(best))) title: \(pickedTitle)", type: "AniList")
+            Logger.shared.log("AniListService: Picked TV candidate ID \(best.id) (score: \(score(for: best))) title: \(pickedTitle)", type: "AniList")
         }
 
         return best
