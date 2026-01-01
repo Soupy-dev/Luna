@@ -120,6 +120,7 @@
 		13FAA1022FFF010200AAAAAA /* TrackerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0022FFF000200AAAAAA /* TrackerModels.swift */; };
 		13FAA1032FFF010300AAAAAA /* TrackersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0032FFF000300AAAAAA /* TrackersSettingsView.swift */; };
 		13FAA1042FFF010400AAAAAA /* AniListService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0042FFF000400AAAAAA /* AniListService.swift */; };
+		13FAA1052FFF010500AAAAAA /* JikanService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0052FFF000500AAAAAA /* JikanService.swift */; };
 		14AAA0023FFF000200AAAAAA /* CatalogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AAA0013FFF000100AAAAAA /* CatalogManager.swift */; };
 		14AAA0043FFF000400AAAAAA /* CatalogsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */; };
 /* End PBXBuildFile section */
@@ -252,6 +253,7 @@
 		13FAA0022FFF000200AAAAAA /* TrackerModels.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackerModels.swift; sourceTree = "<group>"; };
 		13FAA0032FFF000300AAAAAA /* TrackersSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackersSettingsView.swift; sourceTree = "<group>"; };
 		13FAA0042FFF000400AAAAAA /* AniListService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AniListService.swift; sourceTree = "<group>"; };
+		13FAA0052FFF000500AAAAAA /* JikanService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = JikanService.swift; sourceTree = "<group>"; };
 		14AAA0013FFF000100AAAAAA /* CatalogManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogManager.swift; sourceTree = "<group>"; };
 		14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogsSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -689,6 +691,7 @@
 				13F0729A2E4B2D9200EF90EB /* TMDBService.swift */,
 				13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */,
 				13FAA0042FFF000400AAAAAA /* AniListService.swift */,
+				13FAA0052FFF000500AAAAAA /* JikanService.swift */,
 			);
 			path = TMDB;
 			sourceTree = "<group>";
@@ -886,6 +889,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				13FAA1042FFF010400AAAAAA /* AniListService.swift in Sources */,
+				13FAA1052FFF010500AAAAAA /* JikanService.swift in Sources */,
 				13FAA1012FFF010100AAAAAA /* TrackerManager.swift in Sources */,
 				13FAA1022FFF010200AAAAAA /* TrackerModels.swift in Sources */,
 				12E7AF602EB80775003B7664 /* Platform.swift in Sources */,
