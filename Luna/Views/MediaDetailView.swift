@@ -432,7 +432,9 @@ struct MediaDetailView: View {
     private func detectAnime(from detail: TMDBTVShowWithSeasons) -> Bool {
         let genreAnime = detail.genres.contains { $0.id == 16 }
         let originJP = detail.originCountry?.contains("JP") ?? false
-        return genreAnime || originJP
+        let originCN = detail.originCountry?.contains("CN") ?? false
+        // Require animation genre AND (Japanese OR Chinese origin) to avoid misclassifying western animation
+        return genreAnime && (originJP || originCN)
     }
     
     private func toggleBookmark() {
