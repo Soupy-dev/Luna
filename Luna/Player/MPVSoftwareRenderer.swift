@@ -104,6 +104,7 @@ final class MPVSoftwareRenderer {
     private var subtitleRenderCache: SubtitleRenderCache?
     private var lastRenderDimensions: CGSize = .zero
     private let subtitleUpdateInterval: Double = 0.5
+    private var audioStabilizationEnabled: Bool = false
     
     var isPausedState: Bool {
         return isPaused
@@ -1053,6 +1054,14 @@ final class MPVSoftwareRenderer {
             mpv_command_async(handle, 0, pointer)
         }
     }
+
+    @discardableResult
+    private func commandSync(_ handle: OpaquePointer, _ args: [String]) -> Int32 {
+        guard !args.isEmpty else { return 0 }
+        return withCStringArray(args) { pointer in
+            mpv_command(handle, pointer)
+        }
+    }
     
     private func processEvents() {
         eventQueueGroup.enter()
@@ -1225,14 +1234,27 @@ final class MPVSoftwareRenderer {
     
     // MARK: - Audio Stabilization
     func setAudioStabilization(_ enabled: Bool) {
-        setProperty(name: "audio-normalize", value: enabled ? "yes" : "no")
+        guard let handle = mpv else { return }
+        renderQueue.async { [weak self] in
+            guard let self else { return }
+
+            self.audioStabilizationEnabled = enabled
+
+            // Always clear any previous filter tag to avoid stacking.
+            _ = self.commandSync(handle, ["af", "remove", "@audio-stab"])
+
+            if enabled {
+                // Use FFmpeg's dynamic audio normalizer with conservative defaults.
+                let status = self.commandSync(handle, ["af", "add", "@audio-stab:lavfi=[dynaudnorm=f=75:g=10:p=0.5]"])
+                if status < 0 {
+                    Logger.shared.log("Audio stabilization failed to enable (\(status))", type: "Warn")
+                }
+            }
+        }
     }
     
     func getAudioStabilization() -> Bool {
-        guard let handle = mpv else { return false }
-        var result = Int32(0)
-        getProperty(handle: handle, name: "audio-normalize", format: MPV_FORMAT_FLAG, value: &result)
-        return result != 0
+        return audioStabilizationEnabled
     }
     
     // MARK: - Audio Track Controls

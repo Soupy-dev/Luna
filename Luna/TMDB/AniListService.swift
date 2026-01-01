@@ -600,10 +600,53 @@ class AniListService {
         Logger.shared.log("AniListService: TV search found \(decoded.data.Page.media.count) results", type: "AniList")
         for (idx, result) in decoded.data.Page.media.prefix(3).enumerated() {
             let resultTitle = AniListTitlePicker.title(from: result.title, preferredLanguageCode: preferredLanguageCode)
-            Logger.shared.log("  [\(idx+1)] ID: \(result.id), Format: \(result.format ?? "nil"), Episodes: \(result.episodes ?? 0), Title: \(resultTitle)", type: "AniList")
+            Logger.shared.log("  [\(idx+1)] ID: \(result.id), Format: \(result.format ?? \"nil\"), Episodes: \(result.episodes ?? 0), Title: \(resultTitle)", type: "AniList")
         }
-        
-        return decoded.data.Page.media.first
+
+        let results = decoded.data.Page.media
+        guard !results.isEmpty else { return nil }
+
+        func normalized(_ value: String) -> String {
+            return value.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+        }
+
+        let queryKey = normalized(title)
+
+        func titleMatchScore(for anime: AniListAnime) -> Int {
+            let candidates = AniListTitlePicker.titleCandidates(from: anime.title)
+            for candidate in candidates {
+                let candidateKey = normalized(candidate)
+                if candidateKey.contains(queryKey) || queryKey.contains(candidateKey) {
+                    return 120
+                }
+            }
+            return 0
+        }
+
+        func statusScore(_ status: String?) -> Int {
+            switch status ?? "" {
+            case "FINISHED": return 200
+            case "RELEASING": return 150
+            case "NOT_YET_RELEASED": return -50
+            default: return 0
+            }
+        }
+
+        func score(for anime: AniListAnime) -> Int {
+            let episodesScore = (anime.episodes ?? 0) * 4
+            return episodesScore + statusScore(anime.status) + titleMatchScore(for: anime)
+        }
+
+        let best = results.max { lhs, rhs in
+            return score(lhs) < score(rhs)
+        }
+
+        if let best = best {
+            let pickedTitle = AniListTitlePicker.title(from: best.title, preferredLanguageCode: preferredLanguageCode)
+            Logger.shared.log("AniListService: Picked TV candidate ID \(best.id) (score: \(score(best))) title: \(pickedTitle)", type: "AniList")
+        }
+
+        return best
     }
 }
 
