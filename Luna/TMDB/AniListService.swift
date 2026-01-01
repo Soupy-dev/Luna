@@ -278,28 +278,34 @@ class AniListService {
         var seasonIndex = 1
         
         for (currentAnime, seasonOffset, posterUrl) in allAnimeToProcess {
-            // Prefer AniList episode count; if missing/zero, use remaining TMDB episodes if we have them, else default 12
-            let remainingTmdb = max(0, tmdbEpisodesByAbsolute.count - (currentAbsoluteEpisode - 1))
-            let inferredCount = remainingTmdb > 0 ? remainingTmdb : 12
-            let totalEpisodesInAnime = (currentAnime.episodes ?? 0) > 0 ? (currentAnime.episodes ?? 0) : inferredCount
-            Logger.shared.log("AniListService: Processing anime with \(totalEpisodesInAnime) episodes, season offset: \(seasonOffset), poster: \(posterUrl ?? "none")", type: "AniList")
+            // Use AniList episode count - this is authoritative
+            let anilistEpisodeCount = currentAnime.episodes ?? 0
+            
+            // Only fall back to remaining TMDB episodes if AniList has no data
+            let totalEpisodesInAnime: Int
+            if anilistEpisodeCount > 0 {
+                totalEpisodesInAnime = anilistEpisodeCount
+                Logger.shared.log("AniListService: Season \(seasonIndex) using AniList count: \(totalEpisodesInAnime) episodes", type: "AniList")
+            } else {
+                let remainingTmdb = max(0, tmdbEpisodesByAbsolute.count - (currentAbsoluteEpisode - 1))
+                totalEpisodesInAnime = remainingTmdb > 0 ? remainingTmdb : 12
+                Logger.shared.log("AniListService: Season \(seasonIndex) AniList has no count, falling back to: \(totalEpisodesInAnime) episodes (TMDB remaining: \(remainingTmdb))", type: "AniList")
+            }
             
             // Each anime (original or sequel) is its own season with episodes numbered from 1
+            // Use AniList S/E for service search, but pull metadata from TMDB using absolute index
             let seasonEpisodes: [AniListEpisode] = (0..<totalEpisodesInAnime).map { offset in
                 let absoluteEp = currentAbsoluteEpisode + offset
                 let localEp = offset + 1
                 if let tmdbEp = tmdbEpisodesByAbsolute[absoluteEp] {
                     return AniListEpisode(
-                        number: localEp,
-                        title: tmdbEp.name,
-                        description: tmdbEp.overview,
-                        seasonNumber: seasonIndex,
-                        stillPath: tmdbEp.stillPath,
-                        airDate: tmdbEp.airDate,
-                        runtime: tmdbEp.runtime,
-                        absoluteEpisodeIndex: absoluteEp,
-                        tmdbSeasonNumber: tmdbEp.seasonNumber,
-                        tmdbEpisodeNumber: tmdbEp.episodeNumber
+                        number: localEp,              // AniList episode (1-12) for search
+                        title: tmdbEp.name,           // TMDB metadata
+                        description: tmdbEp.overview, // TMDB metadata
+                        seasonNumber: seasonIndex,    // AniList season for search
+                        stillPath: tmdbEp.stillPath,  // TMDB metadata
+                        airDate: tmdbEp.airDate,      // TMDB metadata
+                        runtime: tmdbEp.runtime       // TMDB metadata
                     )
                 } else {
                     return AniListEpisode(
@@ -309,10 +315,7 @@ class AniListService {
                         seasonNumber: seasonIndex,
                         stillPath: nil,
                         airDate: nil,
-                        runtime: nil,
-                        absoluteEpisodeIndex: absoluteEp,
-                        tmdbSeasonNumber: seasonIndex,
-                        tmdbEpisodeNumber: localEp
+                        runtime: nil
                     )
                 }
             }
@@ -610,16 +613,13 @@ protocol AniListEpisodeProtocol {
 }
 
 struct AniListEpisode: AniListEpisodeProtocol {
-    let number: Int
+    let number: Int                // AniList local episode number (1-12 per season) - used for search
     let title: String
     let description: String?
-    let seasonNumber: Int
-    let stillPath: String?
+    let seasonNumber: Int          // AniList season number - used for search
+    let stillPath: String?         // From TMDB for metadata
     let airDate: String?
     let runtime: Int?
-    let absoluteEpisodeIndex: Int  // TMDB absolute episode index for tracking
-    let tmdbSeasonNumber: Int      // Actual TMDB season number for playback
-    let tmdbEpisodeNumber: Int     // Actual TMDB episode number for playback
 }
 
 struct AniListSeasonWithPoster {

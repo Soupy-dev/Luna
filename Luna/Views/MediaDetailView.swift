@@ -592,6 +592,7 @@ struct MediaDetailView: View {
                                 )
                                 
                                 // Build cache for all anime seasons upfront
+                                // Use AniList S/E for service search, TMDB provides metadata only
                                 var seasonCache: [Int: [TMDBEpisode]] = [:]
                                 for season in aniDetails?.seasons ?? [] {
                                     let seasonEpisodes: [TMDBEpisode] = season.episodes.map { aniEp in
@@ -599,18 +600,18 @@ struct MediaDetailView: View {
                                             id: detail.id * 1000 + season.seasonNumber * 100 + aniEp.number,
                                             name: aniEp.title,
                                             overview: aniEp.description,
-                                            stillPath: aniEp.stillPath,
-                                            episodeNumber: aniEp.tmdbEpisodeNumber,  // Use actual TMDB episode number
-                                            seasonNumber: aniEp.tmdbSeasonNumber,     // Use actual TMDB season number
+                                            stillPath: aniEp.stillPath,       // TMDB metadata
+                                            episodeNumber: aniEp.number,      // AniList local episode (1-12) for search
+                                            seasonNumber: aniEp.seasonNumber, // AniList season for search
                                             airDate: aniEp.airDate,
                                             runtime: aniEp.runtime ?? detail.episodeRunTime?.first,
                                             voteAverage: 0,
                                             voteCount: 0
                                         )
                                     }
-                                    Logger.shared.log("Mapped Season \(season.seasonNumber) episodes to TMDB:", type: "Anime")
+                                    Logger.shared.log("Season \(season.seasonNumber): \(seasonEpisodes.count) episodes with AniList numbering", type: "Anime")
                                     for (idx, ep) in seasonEpisodes.prefix(3).enumerated() {
-                                        Logger.shared.log("  AniList S\(season.seasonNumber)E\(idx+1) → TMDB S\(ep.seasonNumber)E\(ep.episodeNumber)", type: "Anime")
+                                        Logger.shared.log("  S\(ep.seasonNumber)E\(ep.episodeNumber): \(ep.name)", type: "Anime")
                                     }
                                     seasonCache[season.seasonNumber] = seasonEpisodes
                                 }
