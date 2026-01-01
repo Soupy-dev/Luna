@@ -27,14 +27,7 @@ struct HomeView: View {
 
     @State private var hasLoadedContent = false
     
-    @AppStorage("homeSections") private var homeSectionsData: Data = {
-        if let data = try? JSONEncoder().encode(HomeSection.defaultSections) {
-            return data
-        }
-        return Data()
-    }()
-    @State private var homeSections: [HomeSection] = []
-    
+    @StateObject private var catalogManager = CatalogManager.shared
     @StateObject private var tmdbService = TMDBService.shared
     @StateObject private var contentFilter = TMDBContentFilter.shared
     @StateObject private var continueVM = ContinueWatchingViewModel()
@@ -48,9 +41,8 @@ struct HomeView: View {
 #endif
     }
 
-    private var enabledCatalogs: [HomeSection] {
-        // Access the homeSections directly and filter enabled ones
-        return homeSections.filter { $0.isEnabled }.sorted { $0.order < $1.order }
+    private var enabledCatalogs: [Catalog] {
+        return catalogManager.getEnabledCatalogs()
     }
     
     var body: some View {
@@ -84,7 +76,6 @@ struct HomeView: View {
         .navigationBarHidden(true)
         .onAppear {
             if !hasLoadedContent {
-                loadSections()
                 loadContent()
             }
         }
@@ -366,10 +357,15 @@ struct HomeView: View {
                     let displayItems = catalog.id == "trending"
                         ? limitedItems.filter { $0.id != heroContent?.id }
                         : limitedItems
+                    
+                    let _ = Logger.shared.log("Rendering catalog: \(catalog.id) with \(displayItems.count) items", type: "HomeView")
+                    
                     MediaSection(
-                        title: catalog.title,
+                        title: catalog.name,
                         items: displayItems
                     )
+                } else {
+                    let _ = Logger.shared.log("Skipping catalog \(catalog.id): items=\(catalogResults[catalog.id]?.count ?? 0)", type: "HomeView")
                 }
             }
             
@@ -458,7 +454,7 @@ struct HomeView: View {
                             Logger.shared.log("  \(catalogId): \(items.count) items", type: "HomeView")
                         }
                         
-                        Logger.shared.log("Enabled catalogs: \(self.enabledCatalogs.map { $0.id }.joined(separator: ", "))", type: "HomeView")
+                        Logger.shared.log("Enabled catalogs: \(self.catalogManager.getEnabledCatalogs().map { $0.id }.joined(separator: ", "))", type: "HomeView")
 
                         let heroPool = !(updated["trending"] ?? []).isEmpty ? (updated["trending"] ?? []) : updated.values.flatMap { $0 }
                         self.heroContent = heroPool.first { $0.backdropPath != nil } ?? heroPool.first
@@ -473,14 +469,6 @@ struct HomeView: View {
                     Logger.shared.log("Error loading content: \(error)", type: "Error")
                 }
             }
-        }
-    }
-    
-    private func loadSections() {
-        if let decoded = try? JSONDecoder().decode([HomeSection].self, from: homeSectionsData) {
-            homeSections = decoded.sorted { $0.order < $1.order }
-        } else {
-            homeSections = HomeSection.defaultSections
         }
     }
 }

@@ -39,19 +39,6 @@ struct AlternativeUIView: View {
             }
             
             Section {
-                NavigationLink(destination: HomeSectionsView()) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Home Sections")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        
-                        Text("Customize which sections appear on the home screen and reorder them")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                    }
-                }
-                
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Alternative Season Menu")

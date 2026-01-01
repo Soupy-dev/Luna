@@ -1123,6 +1123,13 @@ final class MPVSoftwareRenderer {
                 let component = String(cString: logMessagePointer.pointee.prefix)
                 let text = String(cString: logMessagePointer.pointee.text)
                 let lower = text.lowercased()
+                
+                // Filter out specific known non-critical filter messages
+                if (lower.contains("dynaudnorm") || lower.contains("loudnorm")) && lower.contains("error") {
+                    // Skip these specific filter errors - they're expected if not available
+                    break
+                }
+                
                 if lower.contains("error") {
                     Logger.shared.log("mpv[\(component)] \(text)", type: "Error")
                 } else if lower.contains("warn") || lower.contains("warning") || lower.contains("deprecated") {
@@ -1261,9 +1268,29 @@ final class MPVSoftwareRenderer {
             _ = self.commandSync(handle, ["af", "del", "@audio-stab"])
 
             if enabled {
-                // Audio stabilization filters (loudnorm, dynaudnorm, volume) fail with error -4 in current libmpv
-                // This appears to be a libmpv version compatibility issue. Skipping filters for now.
-                Logger.shared.log("Audio stabilization filters skipped (libmpv compatibility issue)", type: "Info")
+                // Try multiple audio normalization approaches
+                // 1. First try acompressor (audio compressor - widely available)
+                var result = self.commandSync(handle, ["af", "add", "@audio-stab:lavfi=[acompressor=threshold=-20dB:ratio=4:attack=5:release=50]"])
+                
+                if result == 0 {
+                    Logger.shared.log("Audio stabilization enabled (acompressor)", type: "Info")
+                } else {
+                    // 2. Try simple volume normalization
+                    result = self.commandSync(handle, ["af", "add", "@audio-stab:volume=2.0"])
+                    
+                    if result == 0 {
+                        Logger.shared.log("Audio stabilization enabled (volume boost)", type: "Info")
+                    } else {
+                        // 3. Try drc (dynamic range compression)
+                        result = self.commandSync(handle, ["af", "add", "@audio-stab:drc"])
+                        
+                        if result == 0 {
+                            Logger.shared.log("Audio stabilization enabled (drc)", type: "Info")
+                        } else {
+                            Logger.shared.log("Audio stabilization not available (no compatible filters found)", type: "Warn")
+                        }
+                    }
+                }
             }
 
             self.audioStabilizationEnabled = enabled
@@ -1398,7 +1425,7 @@ final class MPVSoftwareRenderer {
             "pus": "Pashto",
             "tur": "Turkish",
             "pol": "Polish",
-            "dup": "Dutch",
+            "dut": "Dutch",
             "nld": "Dutch",
             "swe": "Swedish",
             "nor": "Norwegian",
@@ -1425,7 +1452,7 @@ final class MPVSoftwareRenderer {
             "cat": "Catalan",
             "eus": "Basque",
             "glg": "Galician",
-            "isk": "Icelandic",
+            "isl": "Icelandic",
             "bul": "Bulgarian",
             "hrv": "Croatian",
             "srp": "Serbian",
