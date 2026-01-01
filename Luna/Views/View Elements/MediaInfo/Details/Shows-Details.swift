@@ -381,16 +381,7 @@ struct TVShowSeasonsSection: View {
     }
 
     private func setAnimeSeasonDetail(for season: TMDBSeason, tvShow: TMDBTVShowWithSeasons) {
-        // For anime, check if seasonDetail is already populated with AniList episodes
-        // If so, fetch TMDB details for posters and descriptions
-        if let existingDetail = seasonDetail, existingDetail.seasonNumber == season.seasonNumber {
-            // Already have the right season loaded, just update selected episode
-            if selectedEpisodeForSearch == nil, let firstEpisode = existingDetail.episodes.first {
-                self.selectedEpisodeForSearch = firstEpisode
-            }
-            return
-        }
-        
+        // Always fetch TMDB season details so episode descriptions/posters come from TMDB
         isLoadingSeason = true
         seasonDetail = nil
         selectedEpisodeForSearch = nil

@@ -577,11 +577,11 @@ struct MediaDetailView: View {
                                         id: detail.id * 1000 + firstSeason.seasonNumber * 100 + aniEp.number,
                                         name: aniEp.title,
                                         overview: aniEp.description,
-                                        stillPath: nil,
+                                        stillPath: aniEp.stillPath,
                                         episodeNumber: aniEp.number,
                                         seasonNumber: firstSeason.seasonNumber,
-                                        airDate: nil,
-                                        runtime: detail.episodeRunTime?.first,
+                                        airDate: aniEp.airDate,
+                                        runtime: aniEp.runtime ?? detail.episodeRunTime?.first,
                                         voteAverage: 0,
                                         voteCount: 0
                                     )

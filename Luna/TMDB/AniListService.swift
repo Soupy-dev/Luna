@@ -212,6 +212,7 @@ class AniListService {
         // Build all seasons from AniList structure + TMDB episode details
         var seasons: [AniListSeasonWithPoster] = []
         var currentEpisodeNumber = 1
+        var seasonIndex = 1 // ensure seasons across sequels increment globally
         
         for (currentAnime, seasonOffset, posterUrl) in allAnimeToProcess {
             let totalEpisodesInAnime = currentAnime.episodes ?? 12
@@ -219,7 +220,6 @@ class AniListService {
             
             let episodesPerSeason = 12
             var episodeIndex = 0
-            var seasonNum = seasonOffset + 1
             
             while episodeIndex < totalEpisodesInAnime {
                 let remainingEpisodes = totalEpisodesInAnime - episodeIndex
@@ -229,40 +229,37 @@ class AniListService {
                     let epNum = currentEpisodeNumber + offset
                     // Try to get TMDB episode data, fallback to basic info
                     if let tmdbEp = allTmdbEpisodes[epNum] {
-                        let details = AniListEpisodeWithDetails(
+                        return AniListEpisode(
                             number: epNum,
                             title: tmdbEp.name,
                             description: tmdbEp.overview,
-                            seasonNumber: seasonNum,
+                            seasonNumber: seasonIndex,
                             stillPath: tmdbEp.stillPath,
                             airDate: tmdbEp.airDate,
                             runtime: tmdbEp.runtime
-                        )
-                        return AniListEpisode(
-                            number: details.number,
-                            title: details.title,
-                            description: details.description,
-                            seasonNumber: details.seasonNumber
                         )
                     } else {
                         return AniListEpisode(
                             number: epNum,
                             title: "Episode \(epNum)",
                             description: nil,
-                            seasonNumber: seasonNum
+                            seasonNumber: seasonIndex,
+                            stillPath: nil,
+                            airDate: nil,
+                            runtime: nil
                         )
                     }
                 }
                 
                 seasons.append(AniListSeasonWithPoster(
-                    seasonNumber: seasonNum,
+                    seasonNumber: seasonIndex,
                     episodes: seasonEpisodes,
                     posterUrl: posterUrl
                 ))
                 
                 currentEpisodeNumber += episodesThisSeason
                 episodeIndex += episodesThisSeason
-                seasonNum += 1
+                seasonIndex += 1
             }
         }
         
@@ -400,13 +397,6 @@ protocol AniListEpisodeProtocol {
 }
 
 struct AniListEpisode: AniListEpisodeProtocol {
-    let number: Int
-    let title: String
-    let description: String?
-    let seasonNumber: Int
-}
-
-struct AniListEpisodeWithDetails: AniListEpisodeProtocol {
     let number: Int
     let title: String
     let description: String?
