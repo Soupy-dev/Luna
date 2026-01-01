@@ -180,7 +180,15 @@ class AniListService {
         }
         
         let result = try JSONDecoder().decode(Response.self, from: response)
-        let anime = result.data.Media
+        var anime = result.data.Media
+
+        // If the first hit is not a TV/TV_SHORT (e.g., picked an OVA), try to find a TV entry by search
+        if let fmt = anime.format, !(fmt == "TV" || fmt == "TV_SHORT") {
+            if let tvCandidate = try? await fetchAniListAnimeBySearch(title, formats: ["TV", "TV_SHORT"]) {
+                anime = tvCandidate
+                Logger.shared.log("AniListService: Swapped to TV entry for title \(title)", type: "AniList")
+            }
+        }
         let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
         
         Logger.shared.log("AniListService: Raw response - episodes: \(anime.episodes ?? 0), seasonYear: \(anime.seasonYear ?? 0), season: \(anime.season ?? "UNKNOWN")", type: "AniList")
@@ -231,7 +239,9 @@ class AniListService {
         
         // Fetch all TMDB season data (excluding Season 0 specials)
         // Build an absolute episode index so we can map stills/runtime even when seasons reset numbering
+        // Also build a map of TMDB season numbers to poster paths
         var tmdbEpisodesByAbsolute: [Int: TMDBEpisode] = [:]
+        var tmdbSeasonPosters: [Int: String] = [:]
         do {
             let tvShowDetail = try await tmdbService.getTVShowWithSeasons(id: tmdbShowId)
 
@@ -239,6 +249,11 @@ class AniListService {
             // Sort seasons by seasonNumber to keep ordering consistent
             let realSeasons = tvShowDetail.seasons.filter { $0.seasonNumber > 0 }.sorted { $0.seasonNumber < $1.seasonNumber }
             for season in realSeasons {
+                // Store TMDB season poster if available
+                if let posterPath = season.posterPath {
+                    tmdbSeasonPosters[season.seasonNumber] = posterPath
+                }
+                
                 do {
                     let seasonDetail = try await tmdbService.getSeasonDetails(tvShowId: tmdbShowId, seasonNumber: season.seasonNumber)
                     for episode in seasonDetail.episodes.sorted(by: { $0.episodeNumber < $1.episodeNumber }) {
@@ -292,10 +307,18 @@ class AniListService {
                 }
             }
             
+            // Prefer TMDB season poster if available for this season number, otherwise use AniList poster
+            let finalPosterUrl: String?
+            if let tmdbPoster = tmdbSeasonPosters[seasonIndex] {
+                finalPosterUrl = "https://image.tmdb.org/t/p/original" + tmdbPoster
+            } else {
+                finalPosterUrl = posterUrl
+            }
+            
             seasons.append(AniListSeasonWithPoster(
                 seasonNumber: seasonIndex,
                 episodes: seasonEpisodes,
-                posterUrl: posterUrl
+                posterUrl: finalPosterUrl
             ))
             
             currentAbsoluteEpisode += totalEpisodesInAnime
@@ -504,6 +527,58 @@ class AniListService {
         let data = try await executeGraphQLQuery(query, token: nil)
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         return decoded.data.Media
+    }
+
+    /// Search for a TV/TV_SHORT anime by title, preferring those formats
+    private func fetchAniListAnimeBySearch(_ title: String, formats: [String]) async throws -> AniListAnime? {
+        let formatList = formats.map { "\"\($0)\"" }.joined(separator: ",")
+        let query = """
+        query {
+            Page(perPage: 5) {
+                media(search: \"\(title.replacingOccurrences(of: "\"", with: "\\\""))\", type: ANIME, format_in: [\(formatList)]) {
+                    id
+                    title { romaji english native }
+                    episodes
+                    status
+                    seasonYear
+                    season
+                    format
+                    type
+                    coverImage { large medium }
+                    relations {
+                        edges {
+                            relationType
+                            node {
+                                id
+                                title { romaji english native }
+                                episodes
+                                status
+                                seasonYear
+                                season
+                                format
+                                type
+                                coverImage { large medium }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+
+        struct Response: Codable {
+            let data: DataWrapper
+            struct DataWrapper: Codable {
+                let Page: PageData
+                struct PageData: Codable {
+                    let media: [AniListAnime]
+                }
+            }
+        }
+
+        let data = try await executeGraphQLQuery(query, token: nil)
+        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        return decoded.data.Page.media.first
     }
 }
 
