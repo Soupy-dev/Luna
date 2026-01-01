@@ -309,7 +309,7 @@ class AniListService {
         var currentAbsoluteEpisode = 1
         var seasonIndex = 1
         
-        for (currentAnime, _, _) in allAnimeToProcess {
+        for (currentAnime, _, posterUrl) in allAnimeToProcess {
             // Get the full AniList title for this season/sequel
             let seasonTitle = AniListTitlePicker.title(from: currentAnime.title, preferredLanguageCode: preferredLanguageCode)
             
