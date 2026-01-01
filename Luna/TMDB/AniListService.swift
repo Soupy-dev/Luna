@@ -329,7 +329,9 @@ class AniListService {
     // MARK: - Catalog Mapping Helpers
 
     private func mapAniListCatalogToTMDB(_ animeList: [AniListAnime], tmdbService: TMDBService) async -> [TMDBSearchResult] {
-        await withTaskGroup(of: TMDBSearchResult?.self) { group in
+        let preferredLang = preferredLanguageCode
+        
+        return await withTaskGroup(of: TMDBSearchResult?.self) { group in
             for anime in animeList {
                 group.addTask {
                     let titleCandidates = AniListTitlePicker.titleCandidates(from: anime.title)
@@ -339,7 +341,7 @@ class AniListService {
                         }
                     }
                     // Fallback: return AniList data as TMDBSearchResult when no TMDB match found
-                    let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
+                    let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLang)
                     let fallback = TMDBSearchResult(
                         id: anime.id,
                         mediaType: "tv",
