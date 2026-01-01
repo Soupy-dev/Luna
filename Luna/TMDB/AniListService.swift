@@ -210,7 +210,7 @@ class AniListService {
         }
         
         // Build all seasons from AniList structure + TMDB episode details
-        var seasons: [AniListSeason] = []
+        var seasons: [AniListSeasonProtocol] = []
         var currentEpisodeNumber = 1
         
         for (currentAnime, seasonOffset, posterUrl) in allAnimeToProcess {
@@ -225,11 +225,11 @@ class AniListService {
                 let remainingEpisodes = totalEpisodesInAnime - episodeIndex
                 let episodesThisSeason = min(episodesPerSeason, remainingEpisodes)
                 
-                let seasonEpisodes: [AniListEpisode] = (0..<episodesThisSeason).map { offset in
+                let seasonEpisodes: [AniListEpisodeProtocol] = (0..<episodesThisSeason).map { offset in
                     let epNum = currentEpisodeNumber + offset
                     // Try to get TMDB episode data, fallback to basic info
                     if let tmdbEp = allTmdbEpisodes[epNum] {
-                        return AniListEpisodeWithDetails(
+                        let details = AniListEpisodeWithDetails(
                             number: epNum,
                             title: tmdbEp.name,
                             description: tmdbEp.overview,
@@ -237,6 +237,12 @@ class AniListService {
                             stillPath: tmdbEp.stillPath,
                             airDate: tmdbEp.airDate,
                             runtime: tmdbEp.runtime
+                        )
+                        return AniListEpisode(
+                            number: details.number,
+                            title: details.title,
+                            description: details.description,
+                            seasonNumber: details.seasonNumber
                         )
                     } else {
                         return AniListEpisode(
@@ -386,14 +392,21 @@ class AniListService {
 
 // MARK: - Helper Models
 
-struct AniListEpisode {
+protocol AniListEpisodeProtocol {
+    var number: Int { get }
+    var title: String { get }
+    var description: String? { get }
+    var seasonNumber: Int { get }
+}
+
+struct AniListEpisode: AniListEpisodeProtocol {
     let number: Int
     let title: String
     let description: String?
     let seasonNumber: Int
 }
 
-struct AniListEpisodeWithDetails {
+struct AniListEpisodeWithDetails: AniListEpisodeProtocol {
     let number: Int
     let title: String
     let description: String?
@@ -403,12 +416,19 @@ struct AniListEpisodeWithDetails {
     let runtime: Int?
 }
 
-struct AniListSeason {
-    let seasonNumber: Int
-    let episodes: [AniListEpisode]
+protocol AniListSeasonProtocol {
+    var seasonNumber: Int { get }
+    var episodes: [AniListEpisode] { get }
+    var posterUrl: String? { get }
 }
 
-struct AniListSeasonWithPoster {
+struct AniListSeason: AniListSeasonProtocol {
+    let seasonNumber: Int
+    let episodes: [AniListEpisode]
+    var posterUrl: String? { return nil }
+}
+
+struct AniListSeasonWithPoster: AniListSeasonProtocol {
     let seasonNumber: Int
     let episodes: [AniListEpisode]
     let posterUrl: String?
@@ -417,7 +437,7 @@ struct AniListSeasonWithPoster {
 struct AniListAnimeWithSeasons {
     let id: Int
     let title: String
-    let seasons: [AniListSeason]
+    let seasons: [any AniListSeasonProtocol]
     let totalEpisodes: Int
     let status: String
 }
