@@ -650,13 +650,20 @@ class AniListService {
             }
 
             if !queryHasDigits {
-                let digitMatches = title.matches(for: "\\d+")
+                let regex = try? NSRegularExpression(pattern: "\\d+", options: [])
+                let range = NSRange(location: 0, length: title.utf16.count)
+                let digitMatches = regex?.matches(in: title, options: [], range: range) ?? []
+
                 let nonYearDigits = digitMatches.contains { match in
-                    if match.count == 4, let year = Int(match), (1980...2050).contains(year) {
+                    let matchRange = match.range
+                    guard let swiftRange = Range(matchRange, in: title) else { return false }
+                    let chunk = String(title[swiftRange])
+                    if chunk.count == 4, let year = Int(chunk), (1980...2050).contains(year) {
                         return false
                     }
                     return true
                 }
+
                 if nonYearDigits {
                     total += 80
                 }
