@@ -278,6 +278,9 @@ class AniListService {
         var seasonIndex = 1
         
         for (currentAnime, seasonOffset, posterUrl) in allAnimeToProcess {
+            // Get the full AniList title for this season/sequel
+            let seasonTitle = AniListTitlePicker.title(from: currentAnime.title, preferredLanguageCode: preferredLanguageCode)
+            
             // Use AniList episode count - this is authoritative
             let anilistEpisodeCount = currentAnime.episodes ?? 0
             
@@ -285,11 +288,11 @@ class AniListService {
             let totalEpisodesInAnime: Int
             if anilistEpisodeCount > 0 {
                 totalEpisodesInAnime = anilistEpisodeCount
-                Logger.shared.log("AniListService: Season \(seasonIndex) using AniList count: \(totalEpisodesInAnime) episodes", type: "AniList")
+                Logger.shared.log("AniListService: Season \(seasonIndex) '\(seasonTitle)' using AniList count: \(totalEpisodesInAnime) episodes", type: "AniList")
             } else {
                 let remainingTmdb = max(0, tmdbEpisodesByAbsolute.count - (currentAbsoluteEpisode - 1))
                 totalEpisodesInAnime = remainingTmdb > 0 ? remainingTmdb : 12
-                Logger.shared.log("AniListService: Season \(seasonIndex) AniList has no count, falling back to: \(totalEpisodesInAnime) episodes (TMDB remaining: \(remainingTmdb))", type: "AniList")
+                Logger.shared.log("AniListService: Season \(seasonIndex) '\(seasonTitle)' AniList has no count, falling back to: \(totalEpisodesInAnime) episodes", type: "AniList")
             }
             
             // Each anime (original or sequel) is its own season with episodes numbered from 1
@@ -330,6 +333,7 @@ class AniListService {
             
             seasons.append(AniListSeasonWithPoster(
                 seasonNumber: seasonIndex,
+                title: seasonTitle,
                 episodes: seasonEpisodes,
                 posterUrl: finalPosterUrl
             ))
@@ -624,6 +628,7 @@ struct AniListEpisode: AniListEpisodeProtocol {
 
 struct AniListSeasonWithPoster {
     let seasonNumber: Int
+    let title: String              // Full AniList title for this season (e.g., "SPY×FAMILY Season 2")
     let episodes: [AniListEpisode]
     let posterUrl: String?
 }

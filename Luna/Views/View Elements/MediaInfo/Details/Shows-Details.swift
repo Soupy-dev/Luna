@@ -16,6 +16,7 @@ struct TVShowSeasonsSection: View {
     @Binding var seasonDetail: TMDBSeasonDetail?
     @Binding var selectedEpisodeForSearch: TMDBEpisode?
     var animeSeasonCache: [Int: [TMDBEpisode]]? = nil  // For anime: pre-built episodes for all seasons
+    var animeSeasonTitles: [Int: String]? = nil  // For anime: AniList title for each season
     @Binding var pendingEpisodeSelection: (Int, Int)?
     let tmdbService: TMDBService
     
@@ -23,6 +24,7 @@ struct TVShowSeasonsSection: View {
     @State private var showingSearchResults = false
     @State private var showingNoServicesAlert = false
     @State private var romajiTitle: String?
+    @State private var currentSeasonTitle: String?  // AniList title for current season
     
     @StateObject private var serviceManager = ServiceManager.shared
     @AppStorage("horizontalEpisodeList") private var horizontalEpisodeList: Bool = false
@@ -131,7 +133,7 @@ struct TVShowSeasonsSection: View {
         }
         .sheet(isPresented: $showingSearchResults) {
             ModulesSearchResultsSheet(
-                mediaTitle: tvShow?.name ?? "Unknown Show",
+                mediaTitle: (isAnime && currentSeasonTitle != nil) ? currentSeasonTitle! : (tvShow?.name ?? "Unknown Show"),
                 originalTitle: romajiTitle,
                 isMovie: false,
                 selectedEpisode: selectedEpisodeForSearch,
@@ -390,6 +392,14 @@ struct TVShowSeasonsSection: View {
         // This cache is authoritative and already has correct TMDB episode mappings
         let cacheKeys = animeSeasonCache?.keys.map { String($0) }.joined(separator: ", ") ?? "empty"
         Logger.shared.log("setAnimeSeasonDetail: Looking for season \(season.seasonNumber) in cache (available: \(cacheKeys))", type: "Anime")
+        
+        // Update current season title for service search
+        if let seasonTitle = animeSeasonTitles?[season.seasonNumber] {
+            currentSeasonTitle = seasonTitle
+            Logger.shared.log("Season \(season.seasonNumber) title: \(seasonTitle)", type: "Anime")
+        } else {
+            currentSeasonTitle = nil
+        }
         
         guard let cachedEpisodes = animeSeasonCache?[season.seasonNumber] else {
             Logger.shared.log("ERROR: No cache for season \(season.seasonNumber)! This indicates a bug in MediaDetailView cache building.", type: "Anime")

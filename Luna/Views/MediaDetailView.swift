@@ -48,7 +48,8 @@ struct MediaDetailView: View {
     @State private var shouldAutoPlay = false
     @State private var isAnimeShow = false
     @State private var animeEpisodeCount: Int? = nil
-    @State private var animeSeasonEpisodeCache: [Int: [TMDBEpisode]]? = nil  // Maps seasonNumber to episodes
+    @State private var animeSeasonEpisodeCache: [Int: [TMDBEpisode]]? = nil
+    @State private var animeSeasonTitles: [Int: String]? = nil  // Maps season number to AniList title  // Maps seasonNumber to episodes
 
     init(searchResult: TMDBSearchResult, resumeHint: EpisodeResumeHint? = nil, autoPlay: Bool = false) {
         self.searchResult = searchResult
@@ -423,6 +424,7 @@ struct MediaDetailView: View {
                 seasonDetail: $seasonDetail,
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
                 animeSeasonCache: animeSeasonEpisodeCache,
+                animeSeasonTitles: animeSeasonTitles,
                 pendingEpisodeSelection: $pendingEpisodeSelection,
                 tmdbService: tmdbService
             )
@@ -521,16 +523,26 @@ struct MediaDetailView: View {
                                 Logger.shared.log("Cached AniList ID \(anilistId) for TMDB ID \(detail.id)", type: "Anime")
                             }
 
-                            // Build AniList seasons array with unique IDs, using AniList season posters
+                            // Build AniList seasons array with unique IDs, using season posters
                             let aniSeasons: [TMDBSeason] = aniDetails?.seasons.map { aniSeason in
-                                // Extract posterPath from posterUrl if it exists
-                                var posterPath: String? = detail.posterPath
+                                // posterUrl is already a full URL (either TMDB or AniList CDN)
+                                // For TMDB compatibility, we need to extract just the path portion
+                                var posterPath: String?
+                                
                                 if let posterUrl = aniSeason.posterUrl {
-                                    if posterUrl.contains("/original/") {
-                                        posterPath = posterUrl.components(separatedBy: "/original/").last.flatMap { "/" + $0 }
-                                    } else if posterUrl.contains("/original") {
-                                        posterPath = posterUrl.components(separatedBy: "/original").last
+                                    if posterUrl.contains("image.tmdb.org") {
+                                        // TMDB URL - extract path after /original/
+                                        if let range = posterUrl.range(of: "/original") {
+                                            posterPath = String(posterUrl[range.lowerBound...]).replacingOccurrences(of: "/original", with: "")
+                                        }
+                                    } else {
+                                        // AniList CDN or other - store full URL as-is
+                                        // TMDBSeason.fullPosterURL will handle this
+                                        posterPath = posterUrl
                                     }
+                                } else {
+                                    // No poster from AniList, use show poster
+                                    posterPath = detail.posterPath
                                 }
                                 
                                 return TMDBSeason(
@@ -594,7 +606,9 @@ struct MediaDetailView: View {
                                 // Build cache for all anime seasons upfront
                                 // Use AniList S/E for service search, TMDB provides metadata only
                                 var seasonCache: [Int: [TMDBEpisode]] = [:]
+                                var titleCache: [Int: String] = [:]
                                 for season in aniDetails?.seasons ?? [] {
+                                    titleCache[season.seasonNumber] = season.title
                                     let seasonEpisodes: [TMDBEpisode] = season.episodes.map { aniEp in
                                         TMDBEpisode(
                                             id: detail.id * 1000 + season.seasonNumber * 100 + aniEp.number,
@@ -616,18 +630,26 @@ struct MediaDetailView: View {
                                     seasonCache[season.seasonNumber] = seasonEpisodes
                                 }
                                 self.animeSeasonEpisodeCache = seasonCache
+                                self.animeSeasonTitles = titleCache
                                 
                                 // Set detail for first season
                                 if let firstSeason = aniDetails?.seasons.first,
                                    let firstSeasonEpisodes = seasonCache[firstSeason.seasonNumber] {
-                                    // Extract posterPath from posterUrl if it exists
-                                    var seasonPosterPath: String? = detail.posterPath
+                                    // Use the same poster logic as above
+                                    var seasonPosterPath: String?
+                                    
                                     if let posterUrl = firstSeason.posterUrl {
-                                        if posterUrl.contains("/original/") {
-                                            seasonPosterPath = posterUrl.components(separatedBy: "/original/").last.flatMap { "/" + $0 }
-                                        } else if posterUrl.contains("/original") {
-                                            seasonPosterPath = posterUrl.components(separatedBy: "/original").last
+                                        if posterUrl.contains("image.tmdb.org") {
+                                            // TMDB URL - extract path
+                                            if let range = posterUrl.range(of: "/original") {
+                                                seasonPosterPath = String(posterUrl[range.lowerBound...]).replacingOccurrences(of: "/original", with: "")
+                                            }
+                                        } else {
+                                            // AniList CDN - use full URL
+                                            seasonPosterPath = posterUrl
                                         }
+                                    } else {
+                                        seasonPosterPath = detail.posterPath
                                     }
                                     
                                     self.seasonDetail = TMDBSeasonDetail(
