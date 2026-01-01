@@ -150,8 +150,6 @@ final class PlayerViewController: UIViewController {
         b.alpha = 0.0
         return b
     }()
-        return b
-    }()
     
     private let speedIndicatorLabel: UILabel = {
         let label = UILabel()
