@@ -441,7 +441,7 @@ final class MPVSoftwareRenderer {
         guard let context = renderContext else { return }
         let videoSize = currentVideoSize()
         guard videoSize.width > 0, videoSize.height > 0 else {
-            Logger.shared.log("MPVSoftwareRenderer: Invalid video size \(videoSize.width)x\(videoSize.height)", type: "Warn")
+            Logger.shared.log("MPVSoftwareRenderer: Skipping render - video size not ready (\(videoSize.width)x\(videoSize.height))", type: "Debug")
             return
         }
         
