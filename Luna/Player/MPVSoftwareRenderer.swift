@@ -1249,8 +1249,8 @@ final class MPVSoftwareRenderer {
         
         guard node.format == MPV_FORMAT_NODE_ARRAY else { return [] }
         
-        let count = Int(node.u.list?.num ?? 0)
-        guard let listPtr = node.u.list?.values else { return [] }
+        let count = Int(node.u.list?.pointee.num ?? 0)
+        guard let listPtr = node.u.list?.pointee.values else { return [] }
         
         for i in 0..<count {
             let trackNode = listPtr[i]
@@ -1260,9 +1260,9 @@ final class MPVSoftwareRenderer {
             var trackType: String = ""
             var trackLang: String = ""
             
-            let mapCount = Int(trackNode.u.list?.num ?? 0)
-            guard let keysPtr = trackNode.u.list?.keys,
-                  let valuesPtr = trackNode.u.list?.values else { continue }
+            let mapCount = Int(trackNode.u.list?.pointee.num ?? 0)
+            guard let keysPtr = trackNode.u.list?.pointee.keys,
+                  let valuesPtr = trackNode.u.list?.pointee.values else { continue }
             
             for j in 0..<mapCount {
                 if let keyStr = keysPtr[j], let key = String(cString: keyStr, encoding: .utf8) {
@@ -1307,8 +1307,8 @@ final class MPVSoftwareRenderer {
         
         guard node.format == MPV_FORMAT_NODE_ARRAY else { return [] }
         
-        let count = Int(node.u.list?.num ?? 0)
-        guard let listPtr = node.u.list?.values else { return [] }
+        let count = Int(node.u.list?.pointee.num ?? 0)
+        guard let listPtr = node.u.list?.pointee.values else { return [] }
         
         for i in 0..<count {
             let trackNode = listPtr[i]
@@ -1319,9 +1319,9 @@ final class MPVSoftwareRenderer {
             var trackLang: String = ""
             var trackTitle: String = ""
             
-            let mapCount = Int(trackNode.u.list?.num ?? 0)
-            guard let keysPtr = trackNode.u.list?.keys,
-                  let valuesPtr = trackNode.u.list?.values else { continue }
+            let mapCount = Int(trackNode.u.list?.pointee.num ?? 0)
+            guard let keysPtr = trackNode.u.list?.pointee.keys,
+                  let valuesPtr = trackNode.u.list?.pointee.values else { continue }
             
             for j in 0..<mapCount {
                 if let keyStr = keysPtr[j], let key = String(cString: keyStr, encoding: .utf8) {
