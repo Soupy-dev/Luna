@@ -48,6 +48,7 @@ struct MediaDetailView: View {
     @State private var shouldAutoPlay = false
     @State private var isAnimeShow = false
     @State private var animeEpisodeCount: Int? = nil
+    @State private var animeSeasonEpisodeCache: [Int: [TMDBEpisode]]? = nil  // Maps seasonNumber to episodes
 
     init(searchResult: TMDBSearchResult, resumeHint: EpisodeResumeHint? = nil, autoPlay: Bool = false) {
         self.searchResult = searchResult
@@ -422,6 +423,7 @@ struct MediaDetailView: View {
                 seasonDetail: $seasonDetail,
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
                 pendingEpisodeSelection: $pendingEpisodeSelection,
+                animeSeasonCache: animeSeasonEpisodeCache,
                 tmdbService: tmdbService
             )
         }
@@ -511,10 +513,10 @@ struct MediaDetailView: View {
                                 }
                             }
                             
-                            // Build AniList seasons array
+                            // Build AniList seasons array with unique IDs
                             let aniSeasons = aniDetails?.seasons.map { aniSeason in
                                 TMDBSeason(
-                                    id: detail.id,
+                                    id: detail.id * 1000 + aniSeason.seasonNumber,  // Unique ID per season
                                     name: "Season \(aniSeason.seasonNumber)",
                                     overview: "",
                                     posterPath: detail.posterPath,
@@ -562,7 +564,7 @@ struct MediaDetailView: View {
                             // Set the first season as selected
                             if let firstSeason = aniDetails?.seasons.first {
                                 self.selectedSeason = TMDBSeason(
-                                    id: detail.id,
+                                    id: detail.id * 1000 + firstSeason.seasonNumber,  // Unique ID per season
                                     name: "Season \(firstSeason.seasonNumber)",
                                     overview: "",
                                     posterPath: (firstSeason as? AnyObject) != nil ? detail.posterPath : detail.posterPath,
@@ -571,32 +573,41 @@ struct MediaDetailView: View {
                                     airDate: nil
                                 )
                                 
-                                // Convert AniList episodes (which already have TMDB data) to TMDBEpisode format
-                                let tmdbEpisodes: [TMDBEpisode] = firstSeason.episodes.map { aniEp in
-                                    TMDBEpisode(
-                                        id: detail.id * 1000 + firstSeason.seasonNumber * 100 + aniEp.number,
-                                        name: aniEp.title,
-                                        overview: aniEp.description,
-                                        stillPath: aniEp.stillPath,
-                                        episodeNumber: aniEp.number,
-                                        seasonNumber: firstSeason.seasonNumber,
-                                        airDate: aniEp.airDate,
-                                        runtime: aniEp.runtime ?? detail.episodeRunTime?.first,
-                                        voteAverage: 0,
-                                        voteCount: 0
-                                    )
+                                    // Build cache for all anime seasons upfront
+                                var seasonCache: [Int: [TMDBEpisode]] = [:]
+                                for season in aniDetails?.seasons ?? [] {
+                                    let seasonEpisodes: [TMDBEpisode] = season.episodes.map { aniEp in
+                                        TMDBEpisode(
+                                            id: detail.id * 1000 + season.seasonNumber * 100 + aniEp.number,
+                                            name: aniEp.title,
+                                            overview: aniEp.description,
+                                            stillPath: aniEp.stillPath,
+                                            episodeNumber: aniEp.number,
+                                            seasonNumber: season.seasonNumber,
+                                            airDate: aniEp.airDate,
+                                            runtime: aniEp.runtime ?? detail.episodeRunTime?.first,
+                                            voteAverage: 0,
+                                            voteCount: 0
+                                        )
+                                    }
+                                    seasonCache[season.seasonNumber] = seasonEpisodes
                                 }
+                                self.animeSeasonEpisodeCache = seasonCache
                                 
-                                self.seasonDetail = TMDBSeasonDetail(
-                                    id: detail.id,
-                                    name: "Season \(firstSeason.seasonNumber)",
-                                    overview: "",
-                                    posterPath: detail.posterPath,
-                                    seasonNumber: firstSeason.seasonNumber,
-                                    airDate: nil,
-                                    episodes: tmdbEpisodes
-                                )
-                                self.selectedEpisodeForSearch = self.seasonDetail?.episodes.first
+                                // Set detail for first season
+                                if let firstSeason = aniDetails?.seasons.first,
+                                   let firstSeasonEpisodes = seasonCache[firstSeason.seasonNumber] {
+                                    self.seasonDetail = TMDBSeasonDetail(
+                                        id: detail.id,
+                                        name: "Season \(firstSeason.seasonNumber)",
+                                        overview: "",
+                                        posterPath: detail.posterPath,
+                                        seasonNumber: firstSeason.seasonNumber,
+                                        airDate: nil,
+                                        episodes: firstSeasonEpisodes
+                                    )
+                                    self.selectedEpisodeForSearch = self.seasonDetail?.episodes.first
+                                }
                             }
                             self.isLoading = false
                         }
@@ -605,6 +616,11 @@ struct MediaDetailView: View {
                             self.tvShowDetail = detail
                             self.synopsis = detail.overview ?? ""
                             self.romajiTitle = romaji
+                            
+                            Logger.shared.log("Non-anime show loaded: \(detail.name), seasons: \(detail.seasons.count)", type: "MediaDetail")
+                            for season in detail.seasons.filter({ $0.seasonNumber > 0 }) {
+                                Logger.shared.log("  Season \(season.seasonNumber): \(season.episodeCount) episodes", type: "MediaDetail")
+                            }
 
                             if let resume = resume {
                                 if let matchedSeason = detail.seasons.first(where: { $0.seasonNumber == resume.seasonNumber }) {

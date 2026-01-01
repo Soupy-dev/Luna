@@ -15,6 +15,7 @@ struct TVShowSeasonsSection: View {
     @Binding var selectedSeason: TMDBSeason?
     @Binding var seasonDetail: TMDBSeasonDetail?
     @Binding var selectedEpisodeForSearch: TMDBEpisode?
+    var animeSeasonCache: [Int: [TMDBEpisode]]? = nil  // For anime: pre-built episodes for all seasons
     @Binding var pendingEpisodeSelection: (Int, Int)?
     let tmdbService: TMDBService
     
@@ -381,7 +382,29 @@ struct TVShowSeasonsSection: View {
     }
 
     private func setAnimeSeasonDetail(for season: TMDBSeason, tvShow: TMDBTVShowWithSeasons) {
-        // Always fetch TMDB season details so episode descriptions/posters come from TMDB
+        // For anime, use pre-built episode cache from MediaDetailView
+        if let cachedEpisodes = animeSeasonCache?[season.seasonNumber] {
+            seasonDetail = TMDBSeasonDetail(
+                id: tvShow.id,
+                name: season.name,
+                overview: season.overview ?? "",
+                posterPath: season.posterPath,
+                seasonNumber: season.seasonNumber,
+                airDate: season.airDate,
+                episodes: cachedEpisodes
+            )
+            if let pending = pendingEpisodeSelection,
+               pending.0 == season.seasonNumber,
+               let match = cachedEpisodes.first(where: { $0.episodeNumber == pending.1 }) {
+                self.selectedEpisodeForSearch = match
+                self.pendingEpisodeSelection = nil
+            } else if let firstEpisode = cachedEpisodes.first {
+                self.selectedEpisodeForSearch = firstEpisode
+            }
+            return
+        }
+        
+        // Fallback: fetch from TMDB
         isLoadingSeason = true
         seasonDetail = nil
         selectedEpisodeForSearch = nil

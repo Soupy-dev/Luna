@@ -126,7 +126,33 @@ class TMDBService: ObservableObject {
         
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            let tvShowDetail = try JSONDecoder().decode(TMDBTVShowWithSeasons.self, from: data)
+            var tvShowDetail = try JSONDecoder().decode(TMDBTVShowWithSeasons.self, from: data)
+            
+            // Fetch all seasons if numberOfSeasons is greater than returned seasons
+            if let numberOfSeasons = tvShowDetail.numberOfSeasons, numberOfSeasons > tvShowDetail.seasons.count {
+                for seasonNum in 0...numberOfSeasons - 1 {
+                    if !tvShowDetail.seasons.contains(where: { $0.seasonNumber == seasonNum }) {
+                        do {
+                            let seasonDetail = try await getSeasonDetails(tvShowId: id, seasonNumber: seasonNum)
+                            let season = TMDBSeason(
+                                id: id * 1000 + seasonNum,
+                                name: seasonDetail.name,
+                                overview: seasonDetail.overview,
+                                posterPath: seasonDetail.posterPath,
+                                seasonNumber: seasonDetail.seasonNumber,
+                                episodeCount: seasonDetail.episodes.count,
+                                airDate: seasonDetail.airDate
+                            )
+                            tvShowDetail.seasons.append(season)
+                        } catch {
+                            // Skip seasons that can't be fetched
+                            continue
+                        }
+                    }
+                }
+                tvShowDetail.seasons.sort { $0.seasonNumber < $1.seasonNumber }
+            }
+            
             return tvShowDetail
         } catch {
             throw TMDBError.networkError(error)
