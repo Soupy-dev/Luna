@@ -195,21 +195,37 @@ class AniListService {
 
         appendAnime(anime)
 
-        // BFS over sequels/prequels to gather full chain (format must be TV/TV_SHORT)
+        // Allowed relation types we treat as season/continuation
+        let allowedRelationTypes: Set<String> = ["SEQUEL", "PREQUEL", "SEASON"]
+
+        // BFS over sequels/prequels/seasons, recursively fetching relations when needed (format must be TV/TV_SHORT)
         var queue: [AniListAnime] = [anime]
         var seenIds = Set<Int>([anime.id])
+
         while let current = queue.first {
             queue.removeFirst()
-            if let rels = current.relations?.edges {
-                for edge in rels {
-                    guard (edge.relationType == "SEQUEL" || edge.relationType == "PREQUEL"), edge.node.type == "ANIME" else { continue }
-                    // Filter to TV or TV_SHORT to avoid movies/OVAs blending into seasons
-                    if let format = edge.node.format, !(format == "TV" || format == "TV_SHORT") { continue }
-                    if !seenIds.insert(edge.node.id).inserted { continue }
-                    Logger.shared.log("AniListService: Found sequel: \(AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode))", type: "AniList")
-                    appendAnime(edge.node)
-                    queue.append(edge.node)
+
+            let edges = current.relations?.edges ?? []
+            for edge in edges {
+                guard allowedRelationTypes.contains(edge.relationType), edge.node.type == "ANIME" else { continue }
+                if let format = edge.node.format, !(format == "TV" || format == "TV_SHORT") { continue }
+                if !seenIds.insert(edge.node.id).inserted { continue }
+
+                let titleStr = AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode)
+                Logger.shared.log("AniListService: Found sequel: \(titleStr)", type: "AniList")
+
+                // Ensure we have this node's relations for deeper traversal
+                let fullNode: AniListAnime
+                if edge.node.relations != nil {
+                    fullNode = edge.node
+                } else if let fetched = try? await fetchAniListAnimeNode(id: edge.node.id) {
+                    fullNode = fetched
+                } else {
+                    fullNode = edge.node
                 }
+
+                appendAnime(fullNode)
+                queue.append(fullNode)
             }
         }
         
@@ -286,7 +302,7 @@ class AniListService {
             seasonIndex += 1
         }
         
-        let totalEpisodes = allAnimeToProcess.reduce(0) { $0 + ($1.anime.episodes ?? 12) }
+        let totalEpisodes = seasons.reduce(0) { $0 + $1.episodes.count }
         Logger.shared.log("AniListService: Fetched \(title) with \(totalEpisodes) total episodes grouped into \(seasons.count) seasons", type: "AniList")
         for season in seasons {
             Logger.shared.log("  Season \(season.seasonNumber): \(season.episodes.count) episodes, poster: \(season.posterUrl ?? "none")", type: "AniList")
@@ -442,6 +458,52 @@ class AniListService {
         }
         
         return data
+    }
+
+    /// Fetch a single anime node with relations for deeper traversal
+    private func fetchAniListAnimeNode(id: Int) async throws -> AniListAnime {
+        let query = """
+        query {
+            Media(id: \(id), type: ANIME) {
+                id
+                title { romaji english native }
+                episodes
+                status
+                seasonYear
+                season
+                format
+                type
+                coverImage { large medium }
+                relations {
+                    edges {
+                        relationType
+                        node {
+                            id
+                            title { romaji english native }
+                            episodes
+                            status
+                            seasonYear
+                            season
+                            format
+                            type
+                            coverImage { large medium }
+                        }
+                    }
+                }
+            }
+        }
+        """
+
+        struct Response: Codable {
+            let data: DataWrapper
+            struct DataWrapper: Codable {
+                let Media: AniListAnime
+            }
+        }
+
+        let data = try await executeGraphQLQuery(query, token: nil)
+        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        return decoded.data.Media
     }
 }
 
