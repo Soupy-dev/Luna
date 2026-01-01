@@ -336,9 +336,6 @@ final class PlayerViewController: UIViewController {
         
         do {
             try renderer.start()
-            
-            let audioStabilizationEnabled = UserDefaults.standard.bool(forKey: "audioStabilizationMPV")
-            renderer.setAudioStabilization(audioStabilizationEnabled)
         } catch {
             Logger.shared.log("Failed to start MPV renderer: \(error)", type: "Error")
             presentErrorAlert(title: "Playback Error", message: "Failed to start renderer: \(error)")

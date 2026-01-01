@@ -104,7 +104,6 @@ final class MPVSoftwareRenderer {
     private var subtitleRenderCache: SubtitleRenderCache?
     private var lastRenderDimensions: CGSize = .zero
     private let subtitleUpdateInterval: Double = 0.5
-    private var audioStabilizationEnabled: Bool = false
     
     var isPausedState: Bool {
         return isPaused
@@ -1256,49 +1255,6 @@ final class MPVSoftwareRenderer {
         var speed: Double = 1.0
         getProperty(handle: handle, name: "speed", format: MPV_FORMAT_DOUBLE, value: &speed)
         return speed
-    }
-    
-    // MARK: - Audio Stabilization
-    func setAudioStabilization(_ enabled: Bool) {
-        guard let handle = mpv else { return }
-        renderQueue.async { [weak self] in
-            guard let self else { return }
-
-            // Always clear any previous filter tag to avoid stacking.
-            _ = self.commandSync(handle, ["af", "del", "@audio-stab"])
-
-            if enabled {
-                // Try multiple audio normalization approaches
-                // 1. First try acompressor (audio compressor - widely available)
-                var result = self.commandSync(handle, ["af", "add", "@audio-stab:lavfi=[acompressor=threshold=-20dB:ratio=4:attack=5:release=50]"])
-                
-                if result == 0 {
-                    Logger.shared.log("Audio stabilization enabled (acompressor)", type: "Info")
-                } else {
-                    // 2. Try simple volume normalization
-                    result = self.commandSync(handle, ["af", "add", "@audio-stab:volume=2.0"])
-                    
-                    if result == 0 {
-                        Logger.shared.log("Audio stabilization enabled (volume boost)", type: "Info")
-                    } else {
-                        // 3. Try drc (dynamic range compression)
-                        result = self.commandSync(handle, ["af", "add", "@audio-stab:drc"])
-                        
-                        if result == 0 {
-                            Logger.shared.log("Audio stabilization enabled (drc)", type: "Info")
-                        } else {
-                            Logger.shared.log("Audio stabilization not available (no compatible filters found)", type: "Warn")
-                        }
-                    }
-                }
-            }
-
-            self.audioStabilizationEnabled = enabled
-        }
-    }
-    
-    func getAudioStabilization() -> Bool {
-        return audioStabilizationEnabled
     }
     
     // MARK: - Audio Track Controls
