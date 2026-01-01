@@ -322,6 +322,7 @@ struct HomeView: View {
     
     @ViewBuilder
     private var contentSections: some View {
+        let catalogs = enabledCatalogs  // Convert computed property to local variable
         VStack(spacing: 0) {
             // Continue Watching unified section
             if !continueVM.entries.isEmpty {
@@ -351,7 +352,7 @@ struct HomeView: View {
                 .padding(.top, isTvOS ? 40 : 24)
                 .opacity(continueVM.entries.isEmpty ? 0 : 1)
             }
-            ForEach(enabledCatalogs) { catalog in
+            ForEach(catalogs) { catalog in
                 if let items = catalogResults[catalog.id], !items.isEmpty {
                     let limitedItems = Array(items.prefix(15))
                     let displayItems = catalog.id == "trending"
