@@ -600,7 +600,9 @@ class AniListService {
         Logger.shared.log("AniListService: TV search found \(decoded.data.Page.media.count) results", type: "AniList")
         for (idx, result) in decoded.data.Page.media.prefix(3).enumerated() {
             let resultTitle = AniListTitlePicker.title(from: result.title, preferredLanguageCode: preferredLanguageCode)
-            Logger.shared.log("  [\(idx+1)] ID: \(result.id), Format: \(result.format ?? \"nil\"), Episodes: \(result.episodes ?? 0), Title: \(resultTitle)", type: "AniList")
+            let formatText = result.format ?? "nil"
+            let episodeText = result.episodes ?? 0
+            Logger.shared.log("  [\(idx+1)] ID: \(result.id), Format: \(formatText), Episodes: \(episodeText), Title: \(resultTitle)", type: "AniList")
         }
 
         let results = decoded.data.Page.media

@@ -591,9 +591,12 @@ final class MPVSoftwareRenderer {
         }
         
         let highRes = bufferWidth >= 3840 || bufferHeight >= 2160
-        let renderScale: CGFloat = highRes ? 0.5 : 1.0
-        let effectiveWidth = Int(CGFloat(bufferWidth) * renderScale)
-        let effectiveHeight = Int(CGFloat(bufferHeight) * renderScale)
+        // Cap subtitle render resolution to reduce thermal load while keeping visuals crisp on mobile screens.
+        let baseScale: CGFloat = highRes ? 0.5 : 1.0
+        let cappedWidth = min(CGFloat(bufferWidth) * baseScale, 1920)
+        let cappedHeight = min(CGFloat(bufferHeight) * baseScale, 1080)
+        let effectiveWidth = Int(max(cappedWidth, 1))
+        let effectiveHeight = Int(max(cappedHeight, 1))
         
         guard let subtitleImage = makeSubtitleImage(from: attributedText, style: style, maxWidth: CGFloat(effectiveWidth) * 0.9) else {
             return
@@ -624,7 +627,7 @@ final class MPVSoftwareRenderer {
         }
         
         context.saveGState()
-        context.interpolationQuality = .high
+        context.interpolationQuality = .medium
         context.setAllowsAntialiasing(true)
         context.setShouldAntialias(true)
         
