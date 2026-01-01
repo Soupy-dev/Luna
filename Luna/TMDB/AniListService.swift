@@ -190,16 +190,20 @@ class AniListService {
         }
         
         // Fetch all TMDB season data (excluding Season 0 specials)
-        var allTmdbEpisodes: [Int: TMDBEpisode] = [:]
+        // Build an absolute episode index so we can map stills/runtime even when seasons reset numbering
+        var tmdbEpisodesByAbsolute: [Int: TMDBEpisode] = [:]
         do {
             let tvShowDetail = try await tmdbService.getTVShowWithSeasons(id: tmdbShowId)
-            
-            // Fetch details for each real season (skip season 0)
-            for season in tvShowDetail.seasons where season.seasonNumber > 0 {
+
+            var absoluteIndex = 1
+            // Sort seasons by seasonNumber to keep ordering consistent
+            let realSeasons = tvShowDetail.seasons.filter { $0.seasonNumber > 0 }.sorted { $0.seasonNumber < $1.seasonNumber }
+            for season in realSeasons {
                 do {
                     let seasonDetail = try await tmdbService.getSeasonDetails(tvShowId: tmdbShowId, seasonNumber: season.seasonNumber)
-                    for episode in seasonDetail.episodes {
-                        allTmdbEpisodes[episode.episodeNumber] = episode
+                    for episode in seasonDetail.episodes.sorted(by: { $0.episodeNumber < $1.episodeNumber }) {
+                        tmdbEpisodesByAbsolute[absoluteIndex] = episode
+                        absoluteIndex += 1
                     }
                 } catch {
                     Logger.shared.log("AniListService: Failed to fetch TMDB season \(season.seasonNumber): \(error.localizedDescription)", type: "AniList")
@@ -211,19 +215,20 @@ class AniListService {
         
         // Build all seasons from AniList structure + TMDB episode details
         var seasons: [AniListSeasonWithPoster] = []
-        var currentEpisodeNumber = 1
+        var currentAbsoluteEpisode = 1
         var seasonIndex = 1
         
         for (currentAnime, seasonOffset, posterUrl) in allAnimeToProcess {
             let totalEpisodesInAnime = currentAnime.episodes ?? 12
             Logger.shared.log("AniListService: Processing anime with \(totalEpisodesInAnime) episodes, season offset: \(seasonOffset), poster: \(posterUrl ?? "none")", type: "AniList")
             
-            // Each anime (original or sequel) is its own season with all its episodes
+            // Each anime (original or sequel) is its own season with episodes numbered from 1
             let seasonEpisodes: [AniListEpisode] = (0..<totalEpisodesInAnime).map { offset in
-                let epNum = currentEpisodeNumber + offset
-                if let tmdbEp = allTmdbEpisodes[epNum] {
+                let absoluteEp = currentAbsoluteEpisode + offset
+                let localEp = offset + 1
+                if let tmdbEp = tmdbEpisodesByAbsolute[absoluteEp] {
                     return AniListEpisode(
-                        number: epNum,
+                        number: localEp,
                         title: tmdbEp.name,
                         description: tmdbEp.overview,
                         seasonNumber: seasonIndex,
@@ -233,8 +238,8 @@ class AniListService {
                     )
                 } else {
                     return AniListEpisode(
-                        number: epNum,
-                        title: "Episode \(epNum)",
+                        number: localEp,
+                        title: "Episode \(localEp)",
                         description: nil,
                         seasonNumber: seasonIndex,
                         stillPath: nil,
@@ -250,7 +255,7 @@ class AniListService {
                 posterUrl: posterUrl
             ))
             
-            currentEpisodeNumber += totalEpisodesInAnime
+            currentAbsoluteEpisode += totalEpisodesInAnime
             seasonIndex += 1
         }
         
