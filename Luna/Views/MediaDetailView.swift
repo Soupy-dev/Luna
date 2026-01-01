@@ -422,8 +422,8 @@ struct MediaDetailView: View {
                 selectedSeason: $selectedSeason,
                 seasonDetail: $seasonDetail,
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
-                pendingEpisodeSelection: $pendingEpisodeSelection,
                 animeSeasonCache: animeSeasonEpisodeCache,
+                pendingEpisodeSelection: $pendingEpisodeSelection,
                 tmdbService: tmdbService
             )
         }

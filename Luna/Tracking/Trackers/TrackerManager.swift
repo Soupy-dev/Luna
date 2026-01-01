@@ -27,7 +27,7 @@ final class TrackerManager: NSObject, ObservableObject {
     
     // Cache for TMDB ID -> AniList ID mappings to support anime syncing
     private var anilistIdCache: [Int: Int] = [:]
-    private let anilistIdCacheLock = NSLock()
+    private let anilistIdCacheQueue = DispatchQueue(label: "com.luna.anilistIdCache")
     
     // OAuth config (redirects can be overridden via Info.plist keys AniListRedirectUri / TraktRedirectUri)
     private let anilistClientId = "33908"
@@ -492,9 +492,9 @@ final class TrackerManager: NSObject, ObservableObject {
     // MARK: - Sync Methods
 
     func cacheAniListId(tmdbId: Int, anilistId: Int) {
-        anilistIdCacheLock.lock()
-        defer { anilistIdCacheLock.unlock() }
-        anilistIdCache[tmdbId] = anilistId
+        anilistIdCacheQueue.sync {
+            anilistIdCache[tmdbId] = anilistId
+        }
     }
 
     func syncMangaProgress(title: String, chapterNumber: Int) {
@@ -774,12 +774,11 @@ final class TrackerManager: NSObject, ObservableObject {
     
     private func getAniListMediaId(tmdbId: Int) async -> Int? {
         // Check cache first
-        anilistIdCacheLock.lock()
-        defer { anilistIdCacheLock.unlock() }
-        if let cachedId = anilistIdCache[tmdbId] {
-            return cachedId
+        var cachedId: Int? = nil
+        anilistIdCacheQueue.sync {
+            cachedId = anilistIdCache[tmdbId]
         }
-        return nil
+        return cachedId
     }
 
     private func getAniListMangaId(title: String) async -> Int? {
