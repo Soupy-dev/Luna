@@ -594,7 +594,6 @@
 			isa = PBXGroup;
 			children = (
 				12DF1FC12F040D6500E80375 /* AdaptiveConfirmationDialog.swift */,
-						14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */,
 				13F187A32E6F38CE00747F7E /* Library */,
 				13F072802E4B2D9000EF90EB /* MediaInfo */,
 				13F072882E4B2D9000EF90EB /* SearchResultCard.swift */,
@@ -723,6 +722,7 @@
 				13830AF12E55F51300B3CDE4 /* AlternativeUIView.swift */,
 				13F5B5962E730CDB00565E75 /* TMDBFiltersView.swift */,
 				13F072792E4B2D9000EF90EB /* ServicesView.swift */,
+				14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */,
 				13F518422EBCE42B00DEF778 /* StorageView.swift */,
 				13F0727E2E4B2D9000EF90EB /* LoggerView.swift */,
 				13FAA0032FFF000300AAAAAA /* TrackersSettingsView.swift */,
