@@ -627,16 +627,58 @@ class AniListService {
 
         func statusScore(_ status: String?) -> Int {
             switch status ?? "" {
-            case "FINISHED": return 200
-            case "RELEASING": return 150
-            case "NOT_YET_RELEASED": return -50
+            case "FINISHED": return 60
+            case "RELEASING": return 40
+            case "NOT_YET_RELEASED": return -30
             default: return 0
             }
         }
 
+        func penalty(for anime: AniListAnime) -> Int {
+            let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode).lowercased()
+            var total = 0
+
+            let queryHasPart = queryKey.contains("part")
+            let queryHasSeason = queryKey.contains("season")
+            let queryHasDigits = queryKey.rangeOfCharacter(from: .decimalDigits) != nil
+
+            if !queryHasPart && title.contains("part") {
+                total += 200
+            }
+            if !queryHasSeason && title.contains("season") {
+                total += 120
+            }
+
+            if !queryHasDigits {
+                let digitMatches = title.matches(for: "\\d+")
+                let nonYearDigits = digitMatches.contains { match in
+                    if match.count == 4, let year = Int(match), (1980...2050).contains(year) {
+                        return false
+                    }
+                    return true
+                }
+                if nonYearDigits {
+                    total += 80
+                }
+            }
+
+            return total
+        }
+
         func score(for anime: AniListAnime) -> Int {
-            let episodesScore = (anime.episodes ?? 0) * 4
-            return episodesScore + statusScore(anime.status) + titleMatchScore(for: anime)
+            let episodesScore = (anime.episodes ?? 0) * 6
+            let titleScore = titleMatchScore(for: anime)
+
+            let exactMatchBonus: Int = {
+                let candidateKey = normalized(AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode))
+                return candidateKey == queryKey ? 200 : 0
+            }()
+
+            return episodesScore
+                + statusScore(anime.status)
+                + titleScore
+                + exactMatchBonus
+                - penalty(for: anime)
         }
 
         let best = results.max { lhs, rhs in
