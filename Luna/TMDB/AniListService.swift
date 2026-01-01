@@ -182,15 +182,49 @@ class AniListService {
         let result = try JSONDecoder().decode(Response.self, from: response)
         var anime = result.data.Media
 
+        // Fetch TMDB show info early for hinting (episode count, first air year) and reuse later.
+        let tvShowDetail: TMDBTVShowWithSeasons? = {
+            do {
+                return try await tmdbService.getTVShowWithSeasons(id: tmdbShowId)
+            } catch {
+                Logger.shared.log("AniListService: Failed to prefetch TMDB show details: \(error.localizedDescription)", type: "TMDB")
+                return nil
+            }
+        }()
+
+        let expectedEpisodeCountHint: Int? = {
+            if let total = tvShowDetail?.numberOfEpisodes, total > 0 { return total }
+            let seasonSum = tvShowDetail?.seasons.filter { $0.seasonNumber > 0 }.reduce(0) { $0 + $1.episodeCount }
+            return (seasonSum ?? 0) > 0 ? seasonSum : nil
+        }()
+        let preferredSeasonYearHint: Int? = {
+            guard let yearString = tvShowDetail?.firstAirDate?.prefix(4), let year = Int(yearString) else { return nil }
+            return year
+        }()
+
         // If the first hit is not a TV/TV_SHORT (e.g., picked an OVA/Movie), try to find a TV entry by search
         let isNotTV = anime.format.map { !($0 == "TV" || $0 == "TV_SHORT") } ?? false
         if isNotTV {
             Logger.shared.log("AniListService: Initial result for '\(title)' is format \(anime.format ?? "UNKNOWN"), searching for TV version...", type: "AniList")
-            if let tvCandidate = try? await fetchAniListAnimeBySearch(title, formats: ["TV", "TV_SHORT"]) {
+            if let tvCandidate = try? await fetchAniListAnimeBySearch(title, formats: ["TV", "TV_SHORT"], expectedEpisodeCount: expectedEpisodeCountHint, preferredSeasonYear: preferredSeasonYearHint) {
                 anime = tvCandidate
                 Logger.shared.log("AniListService: Swapped to TV entry (ID: \(anime.id), format: \(anime.format ?? "UNKNOWN"))", type: "AniList")
             } else {
                 Logger.shared.log("AniListService: No TV version found, using original result", type: "AniList")
+            }
+        } else if let expected = expectedEpisodeCountHint {
+            let candidateEpisodes = anime.episodes ?? 0
+            let episodeGap = expected > 0 ? expected - candidateEpisodes : 0
+            let yearGap: Int = {
+                guard let preferredYear = preferredSeasonYearHint, let year = anime.seasonYear else { return 0 }
+                return abs(preferredYear - year)
+            }()
+            if episodeGap > max(12, expected / 2) || yearGap > 2 {
+                Logger.shared.log("AniListService: Re-scoring AniList search to find closer match (expected episodes: \(expected), current: \(candidateEpisodes), year gap: \(yearGap))", type: "AniList")
+                if let better = try? await fetchAniListAnimeBySearch(title, formats: ["TV", "TV_SHORT"], expectedEpisodeCount: expectedEpisodeCountHint, preferredSeasonYear: preferredSeasonYearHint), better.id != anime.id {
+                    anime = better
+                    Logger.shared.log("AniListService: Swapped to closer AniList match (ID: \(anime.id), format: \(anime.format ?? "UNKNOWN"), episodes: \(anime.episodes ?? 0))", type: "AniList")
+                }
             }
         }
         let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
@@ -246,9 +280,7 @@ class AniListService {
         // Also build a map of TMDB season numbers to poster paths
         var tmdbEpisodesByAbsolute: [Int: TMDBEpisode] = [:]
         var tmdbSeasonPosters: [Int: String] = [:]
-        do {
-            let tvShowDetail = try await tmdbService.getTVShowWithSeasons(id: tmdbShowId)
-
+        if let tvShowDetail {
             var absoluteIndex = 1
             // Sort seasons by seasonNumber to keep ordering consistent
             let realSeasons = tvShowDetail.seasons.filter { $0.seasonNumber > 0 }.sorted { $0.seasonNumber < $1.seasonNumber }
@@ -268,8 +300,8 @@ class AniListService {
                     Logger.shared.log("AniListService: Failed to fetch TMDB season \(season.seasonNumber): \(error.localizedDescription)", type: "AniList")
                 }
             }
-        } catch {
-            Logger.shared.log("AniListService: Failed to fetch TMDB show details: \(error.localizedDescription)", type: "AniList")
+        } else {
+            Logger.shared.log("AniListService: Missing TMDB show detail; skipping TMDB episode mapping", type: "AniList")
         }
         
         // Build all seasons from AniList structure + TMDB episode details
@@ -547,7 +579,12 @@ class AniListService {
     }
 
     /// Search for a TV/TV_SHORT anime by title, preferring those formats
-    private func fetchAniListAnimeBySearch(_ title: String, formats: [String]) async throws -> AniListAnime? {
+    private func fetchAniListAnimeBySearch(
+        _ title: String,
+        formats: [String],
+        expectedEpisodeCount: Int?,
+        preferredSeasonYear: Int?
+    ) async throws -> AniListAnime? {
         let formatList = formats.map { "\"\($0)\"" }.joined(separator: ",")
         let query = """
         query {
@@ -606,19 +643,17 @@ class AniListService {
         }
 
         let results = decoded.data.Page.media
-        let minSeasonYear = results.compactMap { $0.seasonYear }.min()
         guard !results.isEmpty else { return nil }
-
+ 
         func normalized(_ value: String) -> String {
             return value.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
         }
-
+ 
         let queryKey = normalized(title)
         let queryHasPart = queryKey.contains("part")
         let queryHasSeason = queryKey.contains("season")
         let queryHasDigits = queryKey.rangeOfCharacter(from: .decimalDigits) != nil
         let queryHasQualifier = queryHasPart || queryHasSeason || queryHasDigits
-
         func titleMatchScore(for anime: AniListAnime) -> Int {
             let candidates = AniListTitlePicker.titleCandidates(from: anime.title)
             for candidate in candidates {
@@ -639,22 +674,46 @@ class AniListService {
             }
         }
 
+        func formatScore(for anime: AniListAnime) -> Int {
+            switch anime.format ?? "" {
+            case "TV": return 120
+            case "TV_SHORT": return 60
+            case "ONA": return -40
+            default: return -20
+            }
+        }
+ 
+        func seasonYearScore(for anime: AniListAnime) -> Int {
+            guard let expectedYear = preferredSeasonYear, let year = anime.seasonYear else { return 0 }
+            let diff = abs(expectedYear - year)
+            return 180 - min(diff, 10) * 20
+        }
+ 
+        func episodesHintScore(for anime: AniListAnime) -> Int {
+            guard let expected = expectedEpisodeCount, expected > 0 else { return 0 }
+            let candidate = anime.episodes ?? 0
+            if candidate == 0 { return -180 }
+            let diff = abs(expected - candidate)
+            let closeness = max(0, 240 - min(diff, expected) * 3)
+            return closeness
+        }
+ 
         func penalty(for anime: AniListAnime) -> Int {
             let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode).lowercased()
             var total = 0
-
+ 
             if !queryHasPart && title.contains("part") {
                 total += 260
             }
             if !queryHasSeason && title.contains("season") {
                 total += 160
             }
-
+ 
             if !queryHasDigits {
                 let regex = try? NSRegularExpression(pattern: "\\d+", options: [])
                 let range = NSRange(location: 0, length: title.utf16.count)
                 let digitMatches = regex?.matches(in: title, options: [], range: range) ?? []
-
+ 
                 let nonYearDigits = digitMatches.contains { match in
                     let matchRange = match.range
                     guard let swiftRange = Range(matchRange, in: title) else { return false }
@@ -664,45 +723,35 @@ class AniListService {
                     }
                     return true
                 }
-
+ 
                 if nonYearDigits {
                     total += 80
                 }
             }
-
-            if let minYear = minSeasonYear, let year = anime.seasonYear, !queryHasQualifier, year > minYear {
-                total += (year - minYear) * 40
-            }
-
+ 
             if !queryHasQualifier, let status = anime.status, status == "NOT_YET_RELEASED" {
                 total += 220
             }
-
+ 
             return total
         }
-
+ 
         func score(for anime: AniListAnime) -> Int {
             let episodesScore = (anime.episodes ?? 0) * 6
             let titleScore = titleMatchScore(for: anime)
-
+ 
             let exactMatchBonus: Int = {
                 let candidateKey = normalized(AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode))
                 return candidateKey == queryKey ? 200 : 0
             }()
-
+ 
             return episodesScore
                 + statusScore(anime.status)
                 + titleScore
                 + exactMatchBonus
-                - penalty(for: anime)
-        }
-
-        let best = results.max { lhs, rhs in
-            return score(for: lhs) < score(for: rhs)
-        }
-
-        if let best = best {
-            let pickedTitle = AniListTitlePicker.title(from: best.title, preferredLanguageCode: preferredLanguageCode)
+                + formatScore(for: anime)
+                + seasonYearScore(for: anime)
+                + episodesHintScore(for: anime)
             Logger.shared.log("AniListService: Picked TV candidate ID \(best.id) (score: \(score(for: best))) title: \(pickedTitle)", type: "AniList")
         }
 

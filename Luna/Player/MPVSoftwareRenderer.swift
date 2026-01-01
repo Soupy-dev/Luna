@@ -1241,18 +1241,20 @@ final class MPVSoftwareRenderer {
         renderQueue.async { [weak self] in
             guard let self else { return }
 
-            self.audioStabilizationEnabled = enabled
-
             // Always clear any previous filter tag to avoid stacking.
-            _ = self.commandSync(handle, ["af", "remove", "@audio-stab"])
+            _ = self.commandSync(handle, ["af", "del", "@audio-stab"])
 
             if enabled {
-                // Use FFmpeg's dynamic audio normalizer with conservative defaults.
-                let status = self.commandSync(handle, ["af", "add", "@audio-stab:lavfi=[dynaudnorm=f=75:g=10:p=0.5]"])
+                // Use FFmpeg's dynamic audio normalizer with conservative defaults. Keep syntax simple to avoid AVFilterGraph errors.
+                let status = self.commandSync(handle, ["af", "add", "@audio-stab", "dynaudnorm=f=75:g=10:p=0.5"])
                 if status < 0 {
+                    self.audioStabilizationEnabled = false
                     Logger.shared.log("Audio stabilization failed to enable (\(status))", type: "Warn")
+                    return
                 }
             }
+
+            self.audioStabilizationEnabled = enabled
         }
     }
     
