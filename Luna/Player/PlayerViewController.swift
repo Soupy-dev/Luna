@@ -900,6 +900,14 @@ final class PlayerViewController: UIViewController {
         let tracks = renderer.getSubtitleTracks()
         
         var trackActions: [UIAction] = []
+
+        if tracks.isEmpty {
+            subtitleButton.isHidden = true
+            subtitleButton.menu = nil
+            return
+        }
+
+        subtitleButton.isHidden = false
         
         let disableAction = UIAction(
             title: "Disable Subtitles",
@@ -1205,6 +1213,10 @@ final class PlayerViewController: UIViewController {
                 if !self.subtitleButton.isHidden {
                     self.subtitleButton.alpha = 1.0
                 }
+                self.speedButton.alpha = 1.0
+                if !self.audioButton.isHidden {
+                    self.audioButton.alpha = 1.0
+                }
             }
         }
         
@@ -1229,6 +1241,8 @@ final class PlayerViewController: UIViewController {
                 self.skipBackwardButton.alpha = 0.0
                 self.skipForwardButton.alpha = 0.0
                 self.subtitleButton.alpha = 0.0
+                self.speedButton.alpha = 0.0
+                self.audioButton.alpha = 0.0
             }
         }
     }

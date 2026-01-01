@@ -606,6 +606,7 @@ class AniListService {
         }
 
         let results = decoded.data.Page.media
+        let minSeasonYear = results.compactMap { $0.seasonYear }.min()
         guard !results.isEmpty else { return nil }
 
         func normalized(_ value: String) -> String {
@@ -613,6 +614,10 @@ class AniListService {
         }
 
         let queryKey = normalized(title)
+        let queryHasPart = queryKey.contains("part")
+        let queryHasSeason = queryKey.contains("season")
+        let queryHasDigits = queryKey.rangeOfCharacter(from: .decimalDigits) != nil
+        let queryHasQualifier = queryHasPart || queryHasSeason || queryHasDigits
 
         func titleMatchScore(for anime: AniListAnime) -> Int {
             let candidates = AniListTitlePicker.titleCandidates(from: anime.title)
@@ -629,7 +634,7 @@ class AniListService {
             switch status ?? "" {
             case "FINISHED": return 60
             case "RELEASING": return 40
-            case "NOT_YET_RELEASED": return -30
+            case "NOT_YET_RELEASED": return queryHasQualifier ? -60 : -120
             default: return 0
             }
         }
@@ -638,15 +643,11 @@ class AniListService {
             let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode).lowercased()
             var total = 0
 
-            let queryHasPart = queryKey.contains("part")
-            let queryHasSeason = queryKey.contains("season")
-            let queryHasDigits = queryKey.rangeOfCharacter(from: .decimalDigits) != nil
-
             if !queryHasPart && title.contains("part") {
-                total += 200
+                total += 260
             }
             if !queryHasSeason && title.contains("season") {
-                total += 120
+                total += 160
             }
 
             if !queryHasDigits {
@@ -667,6 +668,14 @@ class AniListService {
                 if nonYearDigits {
                     total += 80
                 }
+            }
+
+            if let minYear = minSeasonYear, let year = anime.seasonYear, !queryHasQualifier, year > minYear {
+                total += (year - minYear) * 40
+            }
+
+            if !queryHasQualifier, let status = anime.status, status == "NOT_YET_RELEASED" {
+                total += 220
             }
 
             return total
