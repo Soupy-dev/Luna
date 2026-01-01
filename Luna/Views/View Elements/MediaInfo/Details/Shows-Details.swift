@@ -246,7 +246,7 @@ struct TVShowSeasonsSection: View {
                                     Text(season.name)
                                         .font(.caption)
                                         .fontWeight(.medium)
-                                        .lineLimit(1)
+                                        .lineLimit(2)  // Allow 2 lines for longer anime titles
                                         .multilineTextAlignment(.center)
                                         .frame(width: 80)
                                         .foregroundColor(selectedSeason?.id == season.id ? .accentColor : .white)

@@ -547,7 +547,7 @@ struct MediaDetailView: View {
                                 
                                 return TMDBSeason(
                                     id: detail.id * 1000 + aniSeason.seasonNumber,
-                                    name: "Season \(aniSeason.seasonNumber)",
+                                    name: aniSeason.title,  // Use full AniList title for display
                                     overview: "",
                                     posterPath: posterPath,
                                     seasonNumber: aniSeason.seasonNumber,
@@ -595,7 +595,7 @@ struct MediaDetailView: View {
                             if let firstSeason = aniDetails?.seasons.first {
                                 self.selectedSeason = TMDBSeason(
                                     id: detail.id * 1000 + firstSeason.seasonNumber,
-                                    name: "Season \(firstSeason.seasonNumber)",
+                                    name: firstSeason.title,  // Use full AniList title
                                     overview: "",
                                     posterPath: detail.posterPath,
                                     seasonNumber: firstSeason.seasonNumber,
