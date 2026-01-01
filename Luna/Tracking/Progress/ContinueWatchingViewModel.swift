@@ -158,6 +158,38 @@ final class ContinueWatchingViewModel: ObservableObject {
     func resume(_ entry: ContinueWatchingEntry) {
         let canonicalTitle = entry.showTitle ?? entry.title
 
+        func postDetail(autoPlay: Bool) {
+            var userInfo: [String: Any] = ["title": canonicalTitle, "autoPlay": autoPlay]
+            switch entry.type {
+            case .movie:
+                if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
+                    userInfo["tmdbId"] = movieId
+                    userInfo["isMovie"] = true
+                }
+            case .episode:
+                if let showId = entry.showId {
+                    userInfo["tmdbId"] = showId
+                    userInfo["isMovie"] = false
+                    userInfo["seasonNumber"] = entry.seasonNumber
+                    userInfo["episodeNumber"] = entry.episodeNumber
+                }
+            }
+            NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: userInfo)
+        }
+
+        func recordProgressSnapshot() {
+            switch entry.type {
+            case .movie:
+                if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
+                    ProgressManager.shared.updateMovieProgress(movieId: movieId, title: canonicalTitle, currentTime: entry.currentTime, totalDuration: entry.totalDuration)
+                }
+            case .episode:
+                if let showId = entry.showId, let season = entry.seasonNumber, let ep = entry.episodeNumber {
+                    ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: season, episodeNumber: ep, currentTime: entry.currentTime, totalDuration: entry.totalDuration)
+                }
+            }
+        }
+
         // Try to resume using the last recorded service/href when available
         if let serviceId = entry.lastServiceId, let href = entry.lastHref {
             // Attempt to find the service
@@ -260,26 +292,17 @@ final class ContinueWatchingViewModel: ObservableObject {
                 }
                 return
             }
+
+            // Service reference missing locally; fall back to opening details so user can pick a stream
+            recordProgressSnapshot()
+            postDetail(autoPlay: true)
+            return
         }
 
         // Fallback: open detail or update progress only (no known service)
-        switch entry.type {
-        case .movie:
-            if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
-                ProgressManager.shared.updateMovieProgress(movieId: movieId, title: canonicalTitle, currentTime: entry.currentTime, totalDuration: entry.totalDuration)
-                    // Open MediaDetailView for this movie
-                    DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": movieId, "isMovie": true, "title": canonicalTitle, "autoPlay": true])
-                    }
-            }
-        case .episode:
-            if let showId = entry.showId, let season = entry.seasonNumber, let ep = entry.episodeNumber {
-                ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: season, episodeNumber: ep, currentTime: entry.currentTime, totalDuration: entry.totalDuration)
-                    // Open MediaDetailView for this show
-                    DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: ["tmdbId": showId, "isMovie": false, "title": canonicalTitle, "seasonNumber": season, "episodeNumber": ep, "autoPlay": true])
-                    }
-            }
+        recordProgressSnapshot()
+        DispatchQueue.main.async {
+            postDetail(autoPlay: true)
         }
     }
 

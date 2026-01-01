@@ -87,6 +87,7 @@
 		13F072A72E4B2D9200EF90EB /* MediaDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F0727C2E4B2D9000EF90EB /* MediaDetailView.swift */; };
 		13F072A82E4B2D9200EF90EB /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F0727D2E4B2D9000EF90EB /* ContentView.swift */; };
 		13F072A92E4B2D9200EF90EB /* LoggerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F0727E2E4B2D9000EF90EB /* LoggerView.swift */; };
+		14BBB0023FFF111100AAAAAA /* ScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14BBB0013FFF111100AAAAAA /* ScheduleView.swift */; };
 		13F072AA2E4B2D9200EF90EB /* CircularProgressBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F072812E4B2D9000EF90EB /* CircularProgressBar.swift */; };
 		13F072AB2E4B2D9200EF90EB /* Movie-Details.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F072832E4B2D9000EF90EB /* Movie-Details.swift */; };
 		13F072AC2E4B2D9200EF90EB /* Shows-Details.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F072842E4B2D9000EF90EB /* Shows-Details.swift */; };
@@ -219,6 +220,7 @@
 		13F0727C2E4B2D9000EF90EB /* MediaDetailView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MediaDetailView.swift; sourceTree = "<group>"; };
 		13F0727D2E4B2D9000EF90EB /* ContentView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		13F0727E2E4B2D9000EF90EB /* LoggerView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LoggerView.swift; sourceTree = "<group>"; };
+		14BBB0013FFF111100AAAAAA /* ScheduleView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ScheduleView.swift; sourceTree = "<group>"; };
 		13F072812E4B2D9000EF90EB /* CircularProgressBar.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CircularProgressBar.swift; sourceTree = "<group>"; };
 		13F072832E4B2D9000EF90EB /* Movie-Details.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "Movie-Details.swift"; sourceTree = "<group>"; };
 		13F072842E4B2D9000EF90EB /* Shows-Details.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "Shows-Details.swift"; sourceTree = "<group>"; };
@@ -584,6 +586,7 @@
 				13F0727A2E4B2D9000EF90EB /* HomeView.swift */,
 				13F0727B2E4B2D9000EF90EB /* LibraryView.swift */,
 				13F0727C2E4B2D9000EF90EB /* MediaDetailView.swift */,
+				14BBB0013FFF111100AAAAAA /* ScheduleView.swift */,
 				13F072C42E4B364B00EF90EB /* SettingsView */,
 				13F0727F2E4B2D9000EF90EB /* View Elements */,
 			);
@@ -972,6 +975,7 @@
 				1324E7BB2E940BD70036B5F5 /* PlayerPreset.swift in Sources */,
 				12DF1FC22F040D6700E80375 /* AdaptiveConfirmationDialog.swift in Sources */,
 				13F072A82E4B2D9200EF90EB /* ContentView.swift in Sources */,
+				14BBB0023FFF111100AAAAAA /* ScheduleView.swift in Sources */,
 				13F072B72E4B2D9200EF90EB /* Logger.swift in Sources */,
 				13E1EDD72ED9E65F00087629 /* favouriteManager.swift in Sources */,
 				13B2E5742E7597B9009F3271 /* JSController-NetworkFetch.swift in Sources */,

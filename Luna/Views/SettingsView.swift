@@ -11,6 +11,8 @@ struct SettingsView: View {
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
     @StateObject private var algorithmManager = AlgorithmManager.shared
     @AppStorage("showKanzen") private var showKanzen: Bool = false
+    @AppStorage("showScheduleTab") private var showScheduleTab = false
+    @AppStorage("showLocalScheduleTime") private var showLocalScheduleTime = true
     
     let languages = [
         ("en-US", "English (US)"),
@@ -160,6 +162,15 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("MICS")
+            }
+
+            Section {
+                Toggle("Show Schedule tab", isOn: $showScheduleTab)
+                Toggle("Use local time for schedule", isOn: $showLocalScheduleTime)
+                    .disabled(!showScheduleTab)
+                    .opacity(showScheduleTab ? 1 : 0.5)
+            } header: {
+                Text("Schedule")
             }
             
             Section{

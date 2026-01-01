@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var accentColorManager = AccentColorManager.shared
+    @AppStorage("showScheduleTab") private var showScheduleTab = false
     
     var body: some View {
 #if compiler(>=6.0)
@@ -24,6 +25,12 @@ struct ContentView: View {
                 
                 Tab("Search", systemImage: "magnifyingglass", role: .search) {
                     SearchView()
+                }
+
+                if showScheduleTab {
+                    Tab("Schedule", systemImage: "calendar") {
+                        ScheduleView()
+                    }
                 }
                 
                 Tab("Settings", systemImage: "gear") {
@@ -62,6 +69,14 @@ struct ContentView: View {
                     Image(systemName: "magnifyingglass")
                     Text("Search")
                 }
+
+            if showScheduleTab {
+                ScheduleView()
+                    .tabItem {
+                        Image(systemName: "calendar")
+                        Text("Schedule")
+                    }
+            }
             
             SettingsView()
                 .tabItem {

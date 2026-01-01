@@ -92,6 +92,63 @@ class AniListService {
         let animeList = decoded.data.Page.media
         return await mapAniListCatalogToTMDB(animeList, tmdbService: tmdbService)
     }
+
+    // MARK: - Airing Schedule
+
+    /// Fetch upcoming airing episodes for the next `daysAhead` days (default 7).
+    func fetchAiringSchedule(daysAhead: Int = 7, perPage: Int = 50) async throws -> [AniListAiringScheduleEntry] {
+        let now = Int(Date().timeIntervalSince1970)
+        let until = now + (max(daysAhead, 1) * 86_400)
+
+        let query = """
+        query {
+            Page(perPage: \(perPage)) {
+                airingSchedules(airingAt_greater: \(now), airingAt_lesser: \(until), sort: TIME) {
+                    id
+                    airingAt
+                    episode
+                    media {
+                        id
+                        title { romaji english native }
+                        coverImage { large medium }
+                    }
+                }
+            }
+        }
+        """
+
+        struct Response: Codable {
+            let data: DataWrapper
+            struct DataWrapper: Codable {
+                let Page: PageData
+            }
+            struct PageData: Codable {
+                let airingSchedules: [AiringSchedule]
+            }
+            struct AiringSchedule: Codable {
+                let id: Int
+                let airingAt: Int
+                let episode: Int
+                let media: AniListAnime
+            }
+        }
+
+        let data = try await executeGraphQLQuery(query, token: nil)
+        let decoded = try JSONDecoder().decode(Response.self, from: data)
+
+        return decoded.data.Page.airingSchedules.map { schedule in
+            let title = AniListTitlePicker.title(from: schedule.media.title, preferredLanguageCode: preferredLanguageCode)
+            let cover = schedule.media.coverImage?.large ?? schedule.media.coverImage?.medium
+            return AniListAiringScheduleEntry(
+                id: schedule.id,
+                mediaId: schedule.media.id,
+                title: title,
+                airingAt: Date(timeIntervalSince1970: TimeInterval(schedule.airingAt)),
+                episode: schedule.episode,
+                coverImage: cover
+            )
+        }
+    }
     
     // MARK: - Fetch Anime Details
     
@@ -826,6 +883,15 @@ struct AniListEpisode: AniListEpisodeProtocol {
     let stillPath: String?         // From TMDB for metadata
     let airDate: String?
     let runtime: Int?
+}
+
+struct AniListAiringScheduleEntry: Identifiable {
+    let id: Int
+    let mediaId: Int
+    let title: String
+    let airingAt: Date
+    let episode: Int
+    let coverImage: String?
 }
 
 struct AniListSeasonWithPoster {
