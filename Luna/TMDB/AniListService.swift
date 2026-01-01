@@ -611,11 +611,10 @@ class AniListService {
         expectedEpisodeCount: Int?,
         preferredSeasonYear: Int?
     ) async throws -> AniListAnime? {
-        let formatList = formats.map { "\"\($0)\"" }.joined(separator: ",")
         let query = """
         query {
-            Page(perPage: 10) {
-                media(search: \"\(title.replacingOccurrences(of: "\"", with: "\\\""))\", type: ANIME, format_in: [\(formatList)], sort: POPULARITY_DESC) {
+            Page(perPage: 25) {
+                media(search: \"\(title.replacingOccurrences(of: "\"", with: "\\\""))\", type: ANIME, sort: POPULARITY_DESC) {
                     id
                     title { romaji english native }
                     episodes
@@ -659,9 +658,13 @@ class AniListService {
         let data = try await executeGraphQLQuery(query, token: nil)
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         
+        // Filter results to only those with the requested formats
+        let allowedFormats = Set(formats)
+        var results = decoded.data.Page.media.filter { allowedFormats.contains($0.format ?? "") }
+        
         // Log all found results for debugging
-        Logger.shared.log("AniListService: TV search found \(decoded.data.Page.media.count) results", type: "AniList")
-        for (idx, result) in decoded.data.Page.media.prefix(3).enumerated() {
+        Logger.shared.log("AniListService: TV search found \(results.count) results (from \(decoded.data.Page.media.count) total)", type: "AniList")
+        for (idx, result) in results.prefix(3).enumerated() {
             let resultTitle = AniListTitlePicker.title(from: result.title, preferredLanguageCode: preferredLanguageCode)
             let formatText = result.format ?? "nil"
             let episodeText = result.episodes ?? 0

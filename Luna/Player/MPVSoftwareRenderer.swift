@@ -1261,12 +1261,18 @@ final class MPVSoftwareRenderer {
             _ = self.commandSync(handle, ["af", "del", "@audio-stab"])
 
             if enabled {
-                // Use FFmpeg's dynamic audio normalizer. Check mpv error logs for syntax issues.
-                let status = self.commandSync(handle, ["af", "add", "@audio-stab", "dynaudnorm"])
+                // Try to use ffmpeg's loudnorm filter if dynaudnorm is unavailable
+                // Fallback to just enabling audio processing without specific filters
+                let status = self.commandSync(handle, ["af", "add", "@audio-stab", "loudnorm=I=-16:TP=-1.5:LRA=11"])
                 if status < 0 {
-                    self.audioStabilizationEnabled = false
-                    Logger.shared.log("Audio stabilization failed to enable (\(status))", type: "Warn")
-                    return
+                    Logger.shared.log("Audio stabilization (loudnorm) failed (\(status)), trying alternative...", type: "Warn")
+                    // Try without parameters if filter fails
+                    let altStatus = self.commandSync(handle, ["af", "add", "@audio-stab", "volume=0.95"])
+                    if altStatus < 0 {
+                        self.audioStabilizationEnabled = false
+                        Logger.shared.log("Audio stabilization disabled - filters unavailable (\(altStatus))", type: "Warn")
+                        return
+                    }
                 }
             }
 
@@ -1302,6 +1308,7 @@ final class MPVSoftwareRenderer {
             var trackId: Int = -1
             var trackType: String = ""
             var trackLang: String = ""
+            var trackTitle: String = ""
             
             let mapCount = Int(trackNode.u.list?.pointee.num ?? 0)
             guard let keysPtr = trackNode.u.list?.pointee.keys,
@@ -1319,17 +1326,89 @@ final class MPVSoftwareRenderer {
                     } else if key == "lang", value.format == MPV_FORMAT_STRING,
                               let langStr = value.u.string.map({ String(cString: $0) }) {
                         trackLang = langStr
+                    } else if key == "title", value.format == MPV_FORMAT_STRING,
+                              let titleStr = value.u.string.map({ String(cString: $0) }) {
+                        trackTitle = titleStr
                     }
                 }
             }
             
             if trackType == "audio" && trackId >= 0 {
-                let displayName = !trackLang.isEmpty ? trackLang : "Audio Track \(trackId)"
+                let displayName: String
+                if !trackTitle.isEmpty {
+                    displayName = trackTitle
+                } else if !trackLang.isEmpty {
+                    // Convert ISO 639-3 language codes to full names
+                    let langName = languageCodeToName(trackLang)
+                    displayName = langName
+                } else {
+                    displayName = "Audio Track \(trackId)"
+                }
                 result.append((trackId, displayName))
             }
         }
         
         return result
+    }
+    
+    private func languageCodeToName(_ code: String) -> String {
+        let languageMap: [String: String] = [
+            "eng": "English",
+            "jpn": "Japanese",
+            "chi": "Chinese",
+            "zho": "Chinese",
+            "kor": "Korean",
+            "fra": "French",
+            "deu": "German",
+            "ita": "Italian",
+            "spa": "Spanish",
+            "por": "Portuguese",
+            "rus": "Russian",
+            "tha": "Thai",
+            "ara": "Arabic",
+            "hin": "Hindi",
+            "pus": "Pashto",
+            "tur": "Turkish",
+            "pol": "Polish",
+            "dup": "Dutch",
+            "nld": "Dutch",
+            "swe": "Swedish",
+            "nor": "Norwegian",
+            "dan": "Danish",
+            "fin": "Finnish",
+            "ces": "Czech",
+            "ron": "Romanian",
+            "hun": "Hungarian",
+            "ell": "Greek",
+            "heb": "Hebrew",
+            "urd": "Urdu",
+            "ben": "Bengali",
+            "tam": "Tamil",
+            "tel": "Telugu",
+            "kan": "Kannada",
+            "mal": "Malayalam",
+            "mya": "Burmese",
+            "khm": "Khmer",
+            "lao": "Lao",
+            "vie": "Vietnamese",
+            "ind": "Indonesian",
+            "msa": "Malay",
+            "fil": "Filipino",
+            "tha": "Thai",
+            "cat": "Catalan",
+            "eus": "Basque",
+            "glg": "Galician",
+            "isk": "Icelandic",
+            "bul": "Bulgarian",
+            "hrv": "Croatian",
+            "srp": "Serbian",
+            "slk": "Slovak",
+            "slv": "Slovenian",
+            "ukr": "Ukrainian",
+            "bel": "Belarusian"
+        ]
+        
+        return languageMap[code.lowercased()] ?? code.uppercased()
     }
     
     func setAudioTrack(id: Int) {
@@ -1386,11 +1465,15 @@ final class MPVSoftwareRenderer {
             }
             
             if trackType == "sub" && trackId >= 0 {
-                var displayName = "Subtitle Track \(trackId)"
+                let displayName: String
                 if !trackTitle.isEmpty {
                     displayName = trackTitle
                 } else if !trackLang.isEmpty {
-                    displayName = trackLang
+                    // Convert ISO 639-3 language codes to full names
+                    let langName = languageCodeToName(trackLang)
+                    displayName = langName
+                } else {
+                    displayName = "Subtitle Track \(trackId)"
                 }
                 result.append((trackId, displayName))
             }

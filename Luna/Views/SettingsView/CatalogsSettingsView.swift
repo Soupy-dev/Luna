@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct CatalogsSettingsView: View {
-    @StateObject private var catalogManager = CatalogManager.shared
+    @ObservedObject var catalogManager = CatalogManager.shared
     @Environment(\.dismiss) var dismiss
     
     var body: some View {

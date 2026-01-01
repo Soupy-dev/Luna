@@ -64,22 +64,23 @@ class CatalogManager: ObservableObject {
     }
     
     func saveCatalogs() {
-        objectWillChange.send()
         if let data = try? JSONEncoder().encode(catalogs) {
             userDefaults.set(data, forKey: catalogsKey)
+            // Force publish the change to ensure SwiftUI updates
+            DispatchQueue.main.async {
+                self.objectWillChange.send()
+            }
         }
     }
     
     func toggleCatalog(id: String) {
         if let index = catalogs.firstIndex(where: { $0.id == id }) {
-            objectWillChange.send()
             catalogs[index].isEnabled.toggle()
             saveCatalogs()
         }
     }
     
     func moveCatalog(from: IndexSet, to: Int) {
-        objectWillChange.send()
         catalogs.move(fromOffsets: from, toOffset: to)
         for (index, _) in catalogs.enumerated() {
             catalogs[index].order = index
