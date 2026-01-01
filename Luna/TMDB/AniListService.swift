@@ -393,19 +393,6 @@ struct AniListEpisode {
     let seasonNumber: Int
 }
 
-struct AniListEpisodeWithDetails: AniListEpisode {
-    let stillPath: String?
-    let airDate: String?
-    let runtime: Int?
-    
-    init(number: Int, title: String, description: String?, seasonNumber: Int, stillPath: String?, airDate: String?, runtime: Int?) {
-        self.stillPath = stillPath
-        self.airDate = airDate
-        self.runtime = runtime
-        super.init(number: number, title: title, description: description, seasonNumber: seasonNumber)
-    }
-}
-
 struct AniListEpisodeWithDetails {
     let number: Int
     let title: String
@@ -421,13 +408,10 @@ struct AniListSeason {
     let episodes: [AniListEpisode]
 }
 
-struct AniListSeasonWithPoster: AniListSeason {
+struct AniListSeasonWithPoster {
+    let seasonNumber: Int
+    let episodes: [AniListEpisode]
     let posterUrl: String?
-    
-    init(seasonNumber: Int, episodes: [AniListEpisode], posterUrl: String?) {
-        self.posterUrl = posterUrl
-        super.init(seasonNumber: seasonNumber, episodes: episodes)
-    }
 }
 
 struct AniListAnimeWithSeasons {
