@@ -639,6 +639,7 @@ struct ModulesSearchResultsSheet: View {
         } else {
             searchQuery = mediaTitle
         }
+        Logger.shared.log("ModulesSearch query: '\(searchQuery)' (selectedEpisode=\(selectedEpisode != nil), seasonNum=\(selectedEpisode?.seasonNumber ?? -1))", type: "Stream")
         let baseTitleQuery = searchQuery.caseInsensitiveCompare(mediaTitle) == .orderedSame ? nil : mediaTitle
         
         Task {
@@ -1196,7 +1197,10 @@ struct ModulesSearchResultsSheet: View {
                 if isMovie {
                     pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle)
                 } else if let episode = selectedEpisode {
+                    Logger.shared.log("ModulesSearch playback: Setting mediaInfo to S\(episode.seasonNumber)E\(episode.episodeNumber)", type: "Stream")
                     pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber)
+                } else {
+                    Logger.shared.log("ModulesSearch playback: WARNING - selectedEpisode is nil! tvShow progress may be incorrect", type: "Error")
                 }
                 pvc.modalPresentationStyle = .fullScreen
                 
