@@ -70,9 +70,6 @@ final class PlayerSettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(mpvTwoFingerTapEnabled, forKey: "mpvTwoFingerTapEnabled") }
     }
 
-    @Published var mpvBrightnessControlEnabled: Bool {
-        didSet { UserDefaults.standard.set(mpvBrightnessControlEnabled, forKey: "mpvBrightnessControlEnabled") }
-    }
     
     init() {
         let savedSpeed = UserDefaults.standard.double(forKey: "holdSpeedPlayer")
@@ -91,10 +88,6 @@ final class PlayerSettingsStore: ObservableObject {
         }
         self.mpvTwoFingerTapEnabled = UserDefaults.standard.bool(forKey: "mpvTwoFingerTapEnabled")
 
-        if UserDefaults.standard.object(forKey: "mpvBrightnessControlEnabled") == nil {
-            UserDefaults.standard.set(false, forKey: "mpvBrightnessControlEnabled")
-        }
-        self.mpvBrightnessControlEnabled = UserDefaults.standard.bool(forKey: "mpvBrightnessControlEnabled")
     }
 }
 
@@ -200,20 +193,6 @@ struct PlayerSettingsView: View {
                         }
                         Spacer()
                         Toggle("", isOn: $store.mpvTwoFingerTapEnabled)
-                            .tint(accentColorManager.currentAccentColor)
-                    }
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Brightness Control")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                            Text("Show a left-side brightness slider in MPV (default off).")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.leading)
-                        }
-                        Spacer()
-                        Toggle("", isOn: $store.mpvBrightnessControlEnabled)
                             .tint(accentColorManager.currentAccentColor)
                     }
                 }

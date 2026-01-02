@@ -633,7 +633,13 @@ struct ModulesSearchResultsSheet: View {
             isSearching = false
             return
         }
-        let searchQuery = mediaTitle
+        let searchQuery: String
+        if let ep = selectedEpisode, ep.seasonNumber > 1 {
+            searchQuery = "\(mediaTitle) season \(ep.seasonNumber)"
+        } else {
+            searchQuery = mediaTitle
+        }
+        let baseTitleQuery = searchQuery.caseInsensitiveCompare(mediaTitle) == .orderedSame ? nil : mediaTitle
         
         Task {
             await serviceManager.searchInActiveServicesProgressively(
@@ -659,17 +665,19 @@ struct ModulesSearchResultsSheet: View {
                     }
                 },
                 onComplete: {
-                    if let originalTitle = self.originalTitle,
-                       !originalTitle.isEmpty,
-                       originalTitle.lowercased() != self.mediaTitle.lowercased() {
-                        
+                    let runOriginalTitleSearch = {
                         Task {
+                            guard let originalTitle = self.originalTitle,
+                                  !originalTitle.isEmpty,
+                                  originalTitle.lowercased() != self.mediaTitle.lowercased() else {
+                                await MainActor.run { self.isSearching = false }
+                                return
+                            }
                             await self.serviceManager.searchInActiveServicesProgressively(
                                 query: originalTitle,
                                 onResult: { service, additionalResults in
                                     Task { @MainActor in
                                         let additional = additionalResults ?? []
-                                        
                                         if let existingIndex = self.moduleResults.firstIndex(where: { $0.service.id == service.id }) {
                                             let existingResults = self.moduleResults[existingIndex].results
                                             let existingHrefs = Set(existingResults.map { $0.href })
@@ -694,10 +702,39 @@ struct ModulesSearchResultsSheet: View {
                                 }
                             )
                         }
-                    } else {
-                        Task { @MainActor in
-                            self.isSearching = false
+                    }
+
+                    if let baseTitleQuery = baseTitleQuery {
+                        Task {
+                            await self.serviceManager.searchInActiveServicesProgressively(
+                                query: baseTitleQuery,
+                                onResult: { service, additionalResults in
+                                    Task { @MainActor in
+                                        let additional = additionalResults ?? []
+                                        if let existingIndex = self.moduleResults.firstIndex(where: { $0.service.id == service.id }) {
+                                            let existingResults = self.moduleResults[existingIndex].results
+                                            let existingHrefs = Set(existingResults.map { $0.href })
+                                            let newResults = additional.filter { !existingHrefs.contains($0.href) }
+                                            let mergedResults = existingResults + newResults
+                                            self.moduleResults[existingIndex] = (service: service, results: mergedResults)
+                                        } else {
+                                            self.moduleResults.append((service: service, results: additional))
+                                        }
+                                        
+                                        if additionalResults == nil {
+                                            failedServices.insert(service.id)
+                                        } else {
+                                            failedServices.remove(service.id)
+                                        }
+                                    }
+                                },
+                                onComplete: {
+                                    runOriginalTitleSearch()
+                                }
+                            )
                         }
+                    } else {
+                        runOriginalTitleSearch()
                     }
                 }
             )

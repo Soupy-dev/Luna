@@ -229,9 +229,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }()
 
 #if !os(tvOS)
-    private var originalHardwareBrightness: CGFloat = UIScreen.main.brightness
-    private var didAdjustHardwareBrightness = false
-
     private let brightnessContainer: UIVisualEffectView = {
         let effect: UIBlurEffect
         if #available(iOS 15.0, *) {
@@ -289,7 +286,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
     private var brightnessLevel: Float = 1.0
     private let twoFingerSettingKey = "mpvTwoFingerTapEnabled"
-    private let brightnessSettingKey = "mpvBrightnessControlEnabled"
     private let brightnessLevelKey = "mpvBrightnessLevel"
     
     private lazy var renderer: MPVSoftwareRenderer = {
@@ -402,14 +398,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         return UserDefaults.standard.bool(forKey: twoFingerSettingKey)
     }
     private var isBrightnessControlEnabled: Bool {
-#if os(tvOS)
         return false
-#else
-        if UserDefaults.standard.object(forKey: brightnessSettingKey) == nil {
-            return false
-        }
-        return UserDefaults.standard.bool(forKey: brightnessSettingKey)
-#endif
     }
     
     private var originalSpeed: Double = 1.0
@@ -518,9 +507,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         renderer.stop()
         displayLayer.removeFromSuperlayer()
         NotificationCenter.default.removeObserver(self)
-#if !os(tvOS)
-        restoreHardwareBrightnessIfNeeded()
-#endif
     }
     
     convenience init(url: URL, preset: PlayerPreset, headers: [String: String]? = nil, subtitles: [String]? = nil) {
@@ -788,7 +774,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let stored = UserDefaults.standard.float(forKey: brightnessLevelKey)
         brightnessLevel = max(0.0, min(stored, 1.0))
         brightnessSlider.value = brightnessLevel
-        applyBrightnessLevel(brightnessLevel, applyHardware: isBrightnessControlEnabled)
+        applyBrightnessLevel(brightnessLevel)
     }
 
     @objc private func brightnessSliderChanged(_ sender: UISlider) {
@@ -796,7 +782,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         showControlsTemporarily()
     }
 
-    private func applyBrightnessLevel(_ value: Float, applyHardware: Bool = true) {
+    private func applyBrightnessLevel(_ value: Float) {
         if isClosing { return }
         let clamped = max(0.0, min(value, 1.0))
         brightnessLevel = clamped
@@ -804,36 +790,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if self.isClosing { return }
-            if applyHardware && self.isBrightnessControlEnabled {
-                UIScreen.main.brightness = CGFloat(clamped)
-                self.didAdjustHardwareBrightness = true
-            }
             self.dimmingView.alpha = 0.0
         }
     }
 
     private func updateBrightnessControlVisibility() {
         if isClosing { return }
-        let enabled = isBrightnessControlEnabled
-        brightnessContainer.isHidden = !enabled
-        brightnessContainer.alpha = enabled && controlsVisible ? 1.0 : 0.0
+        brightnessContainer.isHidden = true
+        brightnessContainer.alpha = 0.0
         dimmingView.alpha = 0.0
-
-        if enabled {
-            applyBrightnessLevel(brightnessLevel)
-        } else {
-            restoreHardwareBrightnessIfNeeded()
-        }
-    }
-    
-    private func restoreHardwareBrightnessIfNeeded() {
-        guard didAdjustHardwareBrightness else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            if self.isClosing { return }
-            UIScreen.main.brightness = self.originalHardwareBrightness
-            self.didAdjustHardwareBrightness = false
-        }
     }
 #else
     private func updateBrightnessControlVisibility() {
@@ -1622,6 +1587,18 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
         )
         return style
     }
+    
+    func renderer(_ renderer: MPVSoftwareRenderer, subtitleTrackDidChange trackId: Int) {
+        if isClosing { return }
+        // When an in-stream subtitle track is selected, enable subtitle display
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.subtitleModel.isVisible = true
+            self.updateSubtitleButtonAppearance()
+            // In-stream subtitles will render via mpv's internal rendering (sub-visibility is enabled)
+        }
+    }
+
 }
 
 // MARK: - PiP Support

@@ -18,6 +18,7 @@ protocol MPVSoftwareRendererDelegate: AnyObject {
     func renderer(_ renderer: MPVSoftwareRenderer, didBecomeReadyToSeek: Bool)
     func renderer(_ renderer: MPVSoftwareRenderer, getSubtitleForTime time: Double) -> NSAttributedString?
     func renderer(_ renderer: MPVSoftwareRenderer, getSubtitleStyle: Void) -> SubtitleStyle
+    func renderer(_ renderer: MPVSoftwareRenderer, subtitleTrackDidChange trackId: Int)
 }
 
 struct SubtitleStyle {
@@ -562,13 +563,21 @@ final class MPVSoftwareRenderer {
             let currentTime = cachedPosition
             let timeDelta = abs(currentTime - lastSubtitleCheckTime)
             
+            // Only check for new subtitle text periodically
             if timeDelta >= subtitleUpdateInterval {
                 lastSubtitleCheckTime = currentTime
                 cachedSubtitleText = delegate?.renderer(self, getSubtitleForTime: currentTime)
             }
             
+            // Burn cached subtitle image if text exists and hasn't expired from cache
             if let attributedText = cachedSubtitleText, attributedText.length > 0 {
-                burnSubtitles(into: buffer, attributedText: attributedText, style: style)
+                if let cache = subtitleRenderCache {
+                    // Quickly burn cached image without re-rendering
+                    burnCachedSubtitle(into: buffer, cache: cache, style: style)
+                } else {
+                    // First render: generate and burn image
+                    burnSubtitles(into: buffer, attributedText: attributedText, style: style)
+                }
             } else {
                 subtitleRenderCache = nil
             }
@@ -611,6 +620,73 @@ final class MPVSoftwareRenderer {
         let targetWidth = max(1, Int(videoSize.width / ratio))
         let targetHeight = max(1, Int(videoSize.height / ratio))
         return CGSize(width: CGFloat(targetWidth), height: CGFloat(targetHeight))
+    }
+    
+    private func burnCachedSubtitle(into pixelBuffer: CVPixelBuffer, cache: SubtitleRenderCache, style: SubtitleStyle) {
+        let bufferWidth = CVPixelBufferGetWidth(pixelBuffer)
+        let bufferHeight = CVPixelBufferGetHeight(pixelBuffer)
+        
+        guard bufferWidth > 0, bufferHeight > 0 else { return }
+        
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+        
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            return
+        }
+        
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        
+        guard let context = CGContext(
+            data: baseAddress,
+            width: bufferWidth,
+            height: bufferHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else {
+            return
+        }
+        
+        context.saveGState()
+        context.interpolationQuality = .low
+        
+        // Position cached image at bottom center of buffer
+        let imageSize = cache.size
+        let highRes = bufferWidth >= 3840 || bufferHeight >= 2160
+        let baseScale: CGFloat = highRes ? 0.5 : 1.0
+        let cappedWidth = min(CGFloat(bufferWidth) * baseScale, 1920)
+        let cappedHeight = min(CGFloat(bufferHeight) * baseScale, 1080)
+        let effectiveWidth = Int(max(cappedWidth, 1))
+        let effectiveHeight = Int(max(cappedHeight, 1))
+        
+        let bottomMargin = max(CGFloat(effectiveHeight) * 0.08, style.fontSize * 1.4)
+        let horizontalMargin = max(CGFloat(effectiveWidth) * 0.02, style.fontSize * 0.8)
+        let availableWidth = max(CGFloat(effectiveWidth) - horizontalMargin * 2.0, 1.0)
+        let scale = min(1.0, availableWidth / imageSize.width)
+        
+        let renderWidth = imageSize.width * scale
+        let renderHeight = imageSize.height * scale
+        
+        var xPosition = (CGFloat(effectiveWidth) - renderWidth) / 2.0
+        if xPosition < horizontalMargin {
+            xPosition = horizontalMargin
+        }
+        if xPosition + renderWidth > CGFloat(effectiveWidth) - horizontalMargin {
+            xPosition = max(horizontalMargin, CGFloat(effectiveWidth) - horizontalMargin - renderWidth)
+        }
+        
+        let topLimit = CGFloat(effectiveHeight) - renderHeight - bottomMargin
+        var yPosition = bottomMargin
+        if topLimit < bottomMargin {
+            yPosition = max(topLimit, 0)
+        }
+        let renderRect = CGRect(x: xPosition, y: yPosition, width: renderWidth, height: renderHeight)
+        
+        context.draw(cache.image, in: renderRect)
+        context.restoreGState()
     }
     
     private func burnSubtitles(into pixelBuffer: CVPixelBuffer, attributedText: NSAttributedString, style: SubtitleStyle) {
@@ -1512,10 +1588,17 @@ final class MPVSoftwareRenderer {
     
     func setSubtitleTrack(id: Int) {
         setProperty(name: "sid", value: String(id))
+        // Ensure subtitle rendering is enabled
+        setProperty(name: "sub-visibility", value: "yes")
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.renderer(self, subtitleTrackDidChange: id)
+        }
     }
     
     func disableSubtitles() {
         setProperty(name: "sid", value: "no")
+        setProperty(name: "sub-visibility", value: "no")
     }
 }
 
