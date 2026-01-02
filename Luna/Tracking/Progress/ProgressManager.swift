@@ -135,6 +135,19 @@ final class ProgressManager: ObservableObject {
         
         do {
             let data = try Data(contentsOf: progressFileURL)
+            let jsonString = String(data: data, encoding: .utf8) ?? "UNREADABLE"
+            Logger.shared.log("Raw JSON file size: \(data.count) bytes", type: "Progress")
+            
+            // Log just the episode section to see structure
+            if let jsonString = String(data: data, encoding: .utf8), jsonString.contains("\"episodeProgress\"") {
+                if let start = jsonString.range(of: "\"episodeProgress\""), 
+                   let end = jsonString.range(of: "]", range: start.upperBound..<jsonString.endIndex) {
+                    let section = String(jsonString[start.lowerBound..<end.upperBound])
+                    let preview = section.count > 500 ? String(section.prefix(500)) + "..." : section
+                    Logger.shared.log("Episode section: \(preview)", type: "Progress")
+                }
+            }
+            
             let decoded = try JSONDecoder().decode(ProgressData.self, from: data)
             Logger.shared.log("Loaded \(decoded.episodeProgress.count) episodes from JSON", type: "Progress")
             for ep in decoded.episodeProgress.prefix(5) {

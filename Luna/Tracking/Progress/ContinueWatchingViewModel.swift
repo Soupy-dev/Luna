@@ -37,6 +37,8 @@ struct ContinueWatchingEntry: Identifiable {
 final class ContinueWatchingViewModel: ObservableObject {
     @Published var entries: [ContinueWatchingEntry] = []
     private var cancellables = Set<AnyCancellable>()
+    // Cache AniList season titles per TMDB showId -> seasonNumber -> title
+    private var animeSeasonTitleCache: [Int: [Int: String]] = [:]
 
     // Progress filter thresholds
     private let minProgress: Double = 0.05
@@ -163,6 +165,37 @@ final class ContinueWatchingViewModel: ObservableObject {
 
     func resume(_ entry: ContinueWatchingEntry) {
         Task { await resumeAsync(entry) }
+    }
+
+    private func resolveAnimeSeasonTitle(showId: Int, seasonNumber: Int, fallbackTitle: String) async -> String {
+        // Check cache first
+        if let cached = animeSeasonTitleCache[showId]?[seasonNumber] {
+            return cached
+        }
+
+        // Try to fetch full AniList season data to get the exact season title (supports non-numeric names)
+        if let anilistId = TrackerManager.shared.cachedAniListId(for: showId) {
+            do {
+                // Use TMDB details only for ID; poster not needed here
+                let details = try await TMDBService.shared.getTVShowDetails(id: showId)
+                let ani = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
+                    title: details.name,
+                    tmdbShowId: showId,
+                    tmdbService: TMDBService.shared,
+                    tmdbShowPoster: details.posterPath,
+                    token: nil
+                )
+                if let title = ani.seasons.first(where: { $0.seasonNumber == seasonNumber })?.title {
+                    animeSeasonTitleCache[showId, default: [:]][seasonNumber] = title
+                    return title
+                }
+            } catch {
+                Logger.shared.log("CW AniList season title fetch failed for showId=\(showId) S\(seasonNumber): \(error.localizedDescription)", type: "ContinueWatching")
+            }
+        }
+
+        // Fallback to provided title if season-specific title not found
+        return fallbackTitle
     }
 
     private func resumeAsync(_ entry: ContinueWatchingEntry) async {
@@ -363,8 +396,18 @@ final class ContinueWatchingViewModel: ObservableObject {
         }
 
         // Prefer AniList metadata for anime (cached mapping from TMDB -> AniList ID)
-        if entry.type == .episode, let showId = entry.showId, let anilistId = TrackerManager.shared.cachedAniListId(for: showId) {
-            if let info = try? await AniListService.shared.fetchAnimeBasicInfo(anilistId: anilistId) {
+        if entry.type == .episode, let showId = entry.showId {
+            // If we have a season number, try to get the exact AniList season title (handles non-numeric sequels)
+            if let season = entry.seasonNumber {
+                let seasonTitle = await resolveAnimeSeasonTitle(showId: showId, seasonNumber: season, fallbackTitle: entry.showTitle ?? entry.title)
+                await MainActor.run {
+                    if let idx = self.entries.firstIndex(where: { $0.id == entry.id }) {
+                        self.entries[idx].showTitle = seasonTitle
+                    }
+                }
+                return seasonTitle
+            } else if let anilistId = TrackerManager.shared.cachedAniListId(for: showId),
+                      let info = try? await AniListService.shared.fetchAnimeBasicInfo(anilistId: anilistId) {
                 await MainActor.run {
                     if let idx = self.entries.firstIndex(where: { $0.id == entry.id }) {
                         self.entries[idx].showTitle = info.title
