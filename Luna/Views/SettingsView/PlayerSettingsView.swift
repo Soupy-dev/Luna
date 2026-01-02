@@ -65,6 +65,14 @@ final class PlayerSettingsStore: ObservableObject {
     @Published var inAppPlayer: InAppPlayer {
         didSet { UserDefaults.standard.set(inAppPlayer.rawValue, forKey: "inAppPlayer") }
     }
+
+    @Published var mpvTwoFingerTapEnabled: Bool {
+        didSet { UserDefaults.standard.set(mpvTwoFingerTapEnabled, forKey: "mpvTwoFingerTapEnabled") }
+    }
+
+    @Published var mpvBrightnessControlEnabled: Bool {
+        didSet { UserDefaults.standard.set(mpvBrightnessControlEnabled, forKey: "mpvBrightnessControlEnabled") }
+    }
     
     init() {
         let savedSpeed = UserDefaults.standard.double(forKey: "holdSpeedPlayer")
@@ -77,6 +85,16 @@ final class PlayerSettingsStore: ObservableObject {
         
         let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? InAppPlayer.normal.rawValue
         self.inAppPlayer = InAppPlayer(rawValue: inAppRaw) ?? .normal
+
+        if UserDefaults.standard.object(forKey: "mpvTwoFingerTapEnabled") == nil {
+            UserDefaults.standard.set(true, forKey: "mpvTwoFingerTapEnabled")
+        }
+        self.mpvTwoFingerTapEnabled = UserDefaults.standard.bool(forKey: "mpvTwoFingerTapEnabled")
+
+        if UserDefaults.standard.object(forKey: "mpvBrightnessControlEnabled") == nil {
+            UserDefaults.standard.set(false, forKey: "mpvBrightnessControlEnabled")
+        }
+        self.mpvBrightnessControlEnabled = UserDefaults.standard.bool(forKey: "mpvBrightnessControlEnabled")
     }
 }
 
@@ -166,6 +184,39 @@ struct PlayerSettingsView: View {
                     .pickerStyle(.menu)
                 }
                 
+            }
+
+            if store.inAppPlayer == .mpv {
+                Section(header: Text("MPV")) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Two Finger Tap Play/Pause")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Text("Enable two-finger tap to toggle playback (default on).")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $store.mpvTwoFingerTapEnabled)
+                            .tint(accentColorManager.currentAccentColor)
+                    }
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Brightness Control")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Text("Show a left-side brightness slider in MPV (default off).")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $store.mpvBrightnessControlEnabled)
+                            .tint(accentColorManager.currentAccentColor)
+                    }
+                }
             }
         }
         .navigationTitle("Media Player")

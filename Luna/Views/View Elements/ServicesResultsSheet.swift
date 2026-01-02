@@ -51,6 +51,7 @@ struct ModulesSearchResultsSheet: View {
     @State private var pendingEpisodes: [EpisodeLink] = []
     @State private var pendingResult: SearchItem?
     @State private var pendingJSController: JSController?
+    @State private var episodeDetail: TMDBEpisode?
     
     @StateObject private var serviceManager = ServiceManager.shared
     @StateObject private var algorithmManager = AlgorithmManager.shared
@@ -66,6 +67,10 @@ struct ModulesSearchResultsSheet: View {
             Logger.shared.log("ModulesSearchResultsSheet init: S\(ep.seasonNumber)E\(ep.episodeNumber)", type: "Debug")
         }
     }
+
+    private var effectiveEpisode: TMDBEpisode? {
+        episodeDetail ?? selectedEpisode
+    }
     
     private var servicesWithResults: [(service: Service, results: [SearchItem])] {
         moduleResults.filter { !$0.results.isEmpty }
@@ -77,7 +82,7 @@ struct ModulesSearchResultsSheet: View {
     }
     
     private var displayTitle: String {
-        if let episode = selectedEpisode {
+        if let episode = effectiveEpisode {
             let episodeLabel = "S\(episode.seasonNumber)E\(episode.episodeNumber)"
             let trimmedTitle = mediaTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             // Avoid duplicating the episode label if the mediaTitle already contains it
@@ -91,7 +96,7 @@ struct ModulesSearchResultsSheet: View {
     }
     
     private var episodeSeasonInfo: String {
-        if let episode = selectedEpisode {
+        if let episode = effectiveEpisode {
             return "S\(episode.seasonNumber)E\(episode.episodeNumber)"
         }
         return ""
@@ -135,7 +140,7 @@ struct ModulesSearchResultsSheet: View {
                     .font(.headline)
                     .fontWeight(.semibold)
                 
-                if let episode = selectedEpisode, !episode.name.isEmpty {
+                if let episode = effectiveEpisode, !episode.name.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text(episode.name)
@@ -149,7 +154,8 @@ struct ModulesSearchResultsSheet: View {
                                 .cornerRadius(8)
                         }
                         
-                        if let overview = episode.overview, !overview.isEmpty {
+                        let overview = episode.overview ?? selectedEpisode?.overview
+                        if let overview = overview, !overview.isEmpty {
                             Text(overview)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
@@ -259,6 +265,23 @@ struct ModulesSearchResultsSheet: View {
             Spacer()
         }
         .padding(.vertical, 8)
+    }
+
+    private func loadEpisodeDetailIfNeeded() {
+        guard !isMovie, let episode = selectedEpisode else { return }
+        if let overview = episode.overview, !overview.isEmpty { return }
+        Task {
+            do {
+                let seasonDetail = try await TMDBService.shared.getSeasonDetails(tvShowId: tmdbId, seasonNumber: episode.seasonNumber)
+                if let matched = seasonDetail.episodes.first(where: { $0.episodeNumber == episode.episodeNumber }) {
+                    await MainActor.run {
+                        self.episodeDetail = matched
+                    }
+                }
+            } catch {
+                Logger.shared.log("Failed to fetch episode details for S\(episode.seasonNumber)E\(episode.episodeNumber): \(error)", type: "Error")
+            }
+        }
     }
     
     @ViewBuilder
@@ -578,6 +601,7 @@ struct ModulesSearchResultsSheet: View {
         .onAppear {
             startProgressiveSearch()
             highQualityThreshold = UserDefaults.standard.object(forKey: "highQualityThreshold") as? Double ?? 0.9
+            loadEpisodeDetailIfNeeded()
         }
         .alert("Quality Threshold", isPresented: $showingFilterEditor) {
             qualityThresholdAlertContent
@@ -766,6 +790,10 @@ struct ModulesSearchResultsSheet: View {
         
         isFetchingStreams = true
         streamFetchProgress = "Fetching selected episode stream..."
+
+        if let ep = selectedEpisode {
+            ProgressManager.shared.recordEpisodeServiceInfo(showId: tmdbId, seasonNumber: ep.seasonNumber, episodeNumber: ep.episodeNumber, serviceId: service.id, href: episode.href)
+        }
         
         fetchStreamForEpisode(episode.href, jsController: jsController, service: service)
     }
@@ -856,6 +884,11 @@ struct ModulesSearchResultsSheet: View {
                         seasons.append(currentSeason)
                     }
                     
+                    Logger.shared.log("Episode parsing: Grouped \(episodes.count) episodes into \(seasons.count) seasons. Looking for S\(selectedEpisode.seasonNumber)E\(selectedEpisode.episodeNumber)", type: "Stream")
+                    for (idx, season) in seasons.enumerated() {
+                        Logger.shared.log("  Season \(idx): \(season.count) episodes, numbers: \(season.map { $0.number })", type: "Stream")
+                    }
+                    
                     let targetSeasonIndex = selectedEpisode.seasonNumber - 1
                     let targetEpisodeNumber = selectedEpisode.episodeNumber
                     
@@ -865,23 +898,36 @@ struct ModulesSearchResultsSheet: View {
                             targetHref = targetEpisode.href
                             Logger.shared.log("TV Show - S\(selectedEpisode.seasonNumber)E\(selectedEpisode.episodeNumber) - Using href: \(targetHref)", type: "Stream")
                             self.streamFetchProgress = "Found episode, fetching stream..."
+                            ProgressManager.shared.recordEpisodeServiceInfo(showId: tmdbId, seasonNumber: selectedEpisode.seasonNumber, episodeNumber: selectedEpisode.episodeNumber, serviceId: service.id, href: targetHref)
                         } else {
                             Logger.shared.log("Episode \(targetEpisodeNumber) not found in season \(selectedEpisode.seasonNumber). Available episodes: \(season.map { $0.number })", type: "Warning")
+                            self.pendingEpisodes = season
+                            self.pendingResult = result
+                            self.pendingJSController = jsController
+                            self.pendingService = service
+                            self.isFetchingStreams = false
                             
-                            var foundEpisode: EpisodeLink? = nil
-                            for otherSeason in seasons {
-                                if let episode = otherSeason.first(where: { $0.number == targetEpisodeNumber }) {
-                                    foundEpisode = episode
-                                    Logger.shared.log("Found episode \(targetEpisodeNumber) in a different season, auto-playing", type: "Stream")
-                                    break
-                                }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                self.showingEpisodePicker = true
                             }
+                            return
+                        }
+                    } else {
+                        Logger.shared.log("Season \(selectedEpisode.seasonNumber) not found. Available seasons: \(seasons.count)", type: "Warning")
+                        if seasons.count > 1 {
+                            self.availableSeasons = seasons
+                            self.pendingResult = result
+                            self.pendingJSController = jsController
+                            self.pendingService = service
+                            self.isFetchingStreams = false
                             
-                            if let episode = foundEpisode {
-                                targetHref = episode.href
-                                Logger.shared.log("TV Show - Auto-selected E\(targetEpisodeNumber) - Using href: \(targetHref)", type: "Stream")
-                                self.streamFetchProgress = "Found episode, fetching stream..."
-                            } else {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                self.showingSeasonPicker = true
+                            }
+                            return
+                        } else {
+                            let season = seasons.first ?? []
+                            if !season.isEmpty {
                                 self.pendingEpisodes = season
                                 self.pendingResult = result
                                 self.pendingJSController = jsController
@@ -892,55 +938,10 @@ struct ModulesSearchResultsSheet: View {
                                     self.showingEpisodePicker = true
                                 }
                                 return
-                            }
-                        }
-                    } else {
-                        Logger.shared.log("Season \(selectedEpisode.seasonNumber) not found. Available seasons: \(seasons.count)", type: "Warning")
-                        
-                        var foundEpisode: EpisodeLink? = nil
-                        for season in seasons {
-                            if let episode = season.first(where: { $0.number == targetEpisodeNumber }) {
-                                foundEpisode = episode
-                                Logger.shared.log("Found episode \(targetEpisodeNumber) in a different season, auto-playing", type: "Stream")
-                                break
-                            }
-                        }
-                        
-                        if let episode = foundEpisode {
-                            targetHref = episode.href
-                            Logger.shared.log("TV Show - Auto-selected E\(targetEpisodeNumber) - Using href: \(targetHref)", type: "Stream")
-                            self.streamFetchProgress = "Found episode, fetching stream..."
-                            ProgressManager.shared.recordEpisodeServiceInfo(showId: tmdbId, seasonNumber: selectedEpisode.seasonNumber, episodeNumber: selectedEpisode.episodeNumber, serviceId: service.id, href: targetHref)
-                        } else {
-                            if seasons.count > 1 {
-                                self.availableSeasons = seasons
-                                self.pendingResult = result
-                                self.pendingJSController = jsController
-                                self.pendingService = service
-                                self.isFetchingStreams = false
-                                
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                    self.showingSeasonPicker = true
-                                }
-                                return
                             } else {
-                                let season = seasons.first ?? []
-                                if !season.isEmpty {
-                                    self.pendingEpisodes = season
-                                    self.pendingResult = result
-                                    self.pendingJSController = jsController
-                                    self.pendingService = service
-                                    self.isFetchingStreams = false
-                                    
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        self.showingEpisodePicker = true
-                                    }
-                                    return
-                                } else {
-                                    Logger.shared.log("No episodes found in any season", type: "Error")
-                                    self.isFetchingStreams = false
-                                    return
-                                }
+                                Logger.shared.log("No episodes found in any season", type: "Error")
+                                self.isFetchingStreams = false
+                                return
                             }
                         }
                     }

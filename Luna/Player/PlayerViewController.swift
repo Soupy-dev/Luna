@@ -9,7 +9,7 @@ import UIKit
 import SwiftUI
 import AVFoundation
 
-final class PlayerViewController: UIViewController {
+final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate {
     private let videoContainer: UIView = {
         let v = UIView()
         v.translatesAutoresizingMaskIntoConstraints = false
@@ -216,6 +216,47 @@ final class PlayerViewController: UIViewController {
         b.showsMenuAsPrimaryAction = true
         return b
     }()
+
+    private let dimmingView: UIView = {
+        let v = UIView()
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.backgroundColor = .black
+        v.alpha = 0.0
+        v.isUserInteractionEnabled = false
+        return v
+    }()
+
+    private let brightnessContainer: UIVisualEffectView = {
+        let effect = UIBlurEffect(style: .systemThinMaterialDark)
+        let v = UIVisualEffectView(effect: effect)
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.layer.cornerRadius = 12
+        v.clipsToBounds = true
+        v.alpha = 0.0
+        v.isHidden = true
+        return v
+    }()
+
+    private let brightnessSlider: UISlider = {
+        let slider = UISlider()
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        slider.minimumValue = 0.0
+        slider.maximumValue = 1.0
+        slider.value = 1.0
+        slider.minimumTrackTintColor = .white
+        slider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.3)
+        slider.thumbTintColor = .white
+        slider.transform = CGAffineTransform(rotationAngle: -.pi / 2)
+        return slider
+    }()
+
+    private let brightnessIcon: UIImageView = {
+        let icon = UIImageView(image: UIImage(systemName: "sun.max.fill"))
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.tintColor = .white
+        icon.alpha = 0.8
+        return icon
+    }()
     
     private let progressContainer: UIView = {
         let v = UIView()
@@ -231,6 +272,13 @@ final class PlayerViewController: UIViewController {
         @Published var duration: Double = 1
     }
     private var progressModel = ProgressModel()
+
+    private var containerTapGesture: UITapGestureRecognizer?
+
+    private var brightnessLevel: Float = 1.0
+    private let twoFingerSettingKey = "mpvTwoFingerTapEnabled"
+    private let brightnessSettingKey = "mpvBrightnessControlEnabled"
+    private let brightnessLevelKey = "mpvBrightnessLevel"
     
     private lazy var renderer: MPVSoftwareRenderer = {
         let r = MPVSoftwareRenderer(displayLayer: displayLayer)
@@ -329,6 +377,19 @@ final class PlayerViewController: UIViewController {
         }
     }
     private var subtitleModel = SubtitleModel()
+
+    private var isTwoFingerTapEnabled: Bool {
+        if UserDefaults.standard.object(forKey: twoFingerSettingKey) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: twoFingerSettingKey)
+    }
+    private var isBrightnessControlEnabled: Bool {
+        if UserDefaults.standard.object(forKey: brightnessSettingKey) == nil {
+            return false
+        }
+        return UserDefaults.standard.bool(forKey: brightnessSettingKey)
+    }
     
     private var originalSpeed: Double = 1.0
     private var holdGesture: UILongPressGestureRecognizer?
@@ -348,6 +409,7 @@ final class PlayerViewController: UIViewController {
         setupActions()
         setupHoldGesture()
         setupDoubleTapSkipGestures()
+        setupBrightnessControls()
         
         NotificationCenter.default.addObserver(self, selector: #selector(handleLoggerNotification(_:)), name: NSNotification.Name("LoggerNotification"), object: nil)
         
@@ -497,6 +559,7 @@ final class PlayerViewController: UIViewController {
         displayLayer.backgroundColor = UIColor.black.cgColor
         
         videoContainer.layer.addSublayer(displayLayer)
+        videoContainer.addSubview(dimmingView)
         videoContainer.addSubview(controlsOverlayView)
         videoContainer.addSubview(loadingIndicator)
         view.addSubview(errorBanner)
@@ -510,6 +573,9 @@ final class PlayerViewController: UIViewController {
         videoContainer.addSubview(subtitleButton)
         videoContainer.addSubview(speedButton)
         videoContainer.addSubview(audioButton)
+        videoContainer.addSubview(brightnessContainer)
+        brightnessContainer.contentView.addSubview(brightnessSlider)
+        brightnessContainer.contentView.addSubview(brightnessIcon)
         
         NSLayoutConstraint.activate([
             videoContainer.topAnchor.constraint(equalTo: view.topAnchor),
@@ -521,6 +587,11 @@ final class PlayerViewController: UIViewController {
             progressContainer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
             progressContainer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
             progressContainer.heightAnchor.constraint(equalToConstant: 44),
+
+            dimmingView.topAnchor.constraint(equalTo: videoContainer.topAnchor),
+            dimmingView.leadingAnchor.constraint(equalTo: videoContainer.leadingAnchor),
+            dimmingView.trailingAnchor.constraint(equalTo: videoContainer.trailingAnchor),
+            dimmingView.bottomAnchor.constraint(equalTo: videoContainer.bottomAnchor),
             
             controlsOverlayView.topAnchor.constraint(equalTo: videoContainer.topAnchor),
             controlsOverlayView.leadingAnchor.constraint(equalTo: videoContainer.leadingAnchor),
@@ -580,7 +651,22 @@ final class PlayerViewController: UIViewController {
             audioButton.trailingAnchor.constraint(equalTo: speedButton.leadingAnchor, constant: -8),
             audioButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
             audioButton.widthAnchor.constraint(equalToConstant: 32),
-            audioButton.heightAnchor.constraint(equalToConstant: 32)
+            audioButton.heightAnchor.constraint(equalToConstant: 32),
+
+            brightnessContainer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            brightnessContainer.centerYAnchor.constraint(equalTo: videoContainer.centerYAnchor),
+            brightnessContainer.widthAnchor.constraint(equalToConstant: 52),
+            brightnessContainer.heightAnchor.constraint(equalToConstant: 220),
+
+            brightnessSlider.centerXAnchor.constraint(equalTo: brightnessContainer.contentView.centerXAnchor),
+            brightnessSlider.centerYAnchor.constraint(equalTo: brightnessContainer.contentView.centerYAnchor),
+            brightnessSlider.widthAnchor.constraint(equalTo: brightnessContainer.contentView.heightAnchor, multiplier: 0.82),
+            brightnessSlider.heightAnchor.constraint(equalToConstant: 34),
+
+            brightnessIcon.centerXAnchor.constraint(equalTo: brightnessContainer.contentView.centerXAnchor),
+            brightnessIcon.topAnchor.constraint(equalTo: brightnessContainer.contentView.topAnchor, constant: 8),
+            brightnessIcon.heightAnchor.constraint(equalToConstant: 20),
+            brightnessIcon.widthAnchor.constraint(equalToConstant: 20)
         ])
     }
     
@@ -591,7 +677,10 @@ final class PlayerViewController: UIViewController {
         skipBackwardButton.addTarget(self, action: #selector(skipBackwardTapped), for: .touchUpInside)
         skipForwardButton.addTarget(self, action: #selector(skipForwardTapped), for: .touchUpInside)
         let tap = UITapGestureRecognizer(target: self, action: #selector(containerTapped))
+        tap.delegate = self
+        tap.cancelsTouchesInView = false
         videoContainer.addGestureRecognizer(tap)
+        containerTapGesture = tap
     }
     
     private func setupHoldGesture() {
@@ -605,17 +694,38 @@ final class PlayerViewController: UIViewController {
     private func setupDoubleTapSkipGestures() {
         let leftDoubleTap = UITapGestureRecognizer(target: self, action: #selector(leftSideDoubleTapped))
         leftDoubleTap.numberOfTapsRequired = 2
+        leftDoubleTap.delegate = self
         videoContainer.addGestureRecognizer(leftDoubleTap)
         
         let rightDoubleTap = UITapGestureRecognizer(target: self, action: #selector(rightSideDoubleTapped))
         rightDoubleTap.numberOfTapsRequired = 2
+        rightDoubleTap.delegate = self
         videoContainer.addGestureRecognizer(rightDoubleTap)
         
         #if !os(tvOS)
-        let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(twoFingerTapped))
-        twoFingerTap.numberOfTouchesRequired = 2
-        videoContainer.addGestureRecognizer(twoFingerTap)
+        if isTwoFingerTapEnabled {
+            let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(twoFingerTapped))
+            twoFingerTap.numberOfTouchesRequired = 2
+            twoFingerTap.delegate = self
+            videoContainer.addGestureRecognizer(twoFingerTap)
+        }
         #endif
+    }
+
+    private func setupBrightnessControls() {
+        brightnessSlider.addTarget(self, action: #selector(brightnessSliderChanged(_:)), for: .valueChanged)
+        loadBrightnessLevel()
+        updateBrightnessControlVisibility()
+    }
+
+    private func loadBrightnessLevel() {
+        if UserDefaults.standard.object(forKey: brightnessLevelKey) == nil {
+            UserDefaults.standard.set(1.0, forKey: brightnessLevelKey)
+        }
+        let stored = UserDefaults.standard.float(forKey: brightnessLevelKey)
+        brightnessLevel = stored > 0 ? stored : 1.0
+        brightnessSlider.value = brightnessLevel
+        applyBrightnessLevel(brightnessLevel)
     }
     
     @objc private func leftSideDoubleTapped(_ gesture: UITapGestureRecognizer) {
@@ -642,6 +752,28 @@ final class PlayerViewController: UIViewController {
     
     @objc private func twoFingerTapped(_ gesture: UITapGestureRecognizer) {
         centerPlayPauseTapped()
+    }
+
+    @objc private func brightnessSliderChanged(_ sender: UISlider) {
+        applyBrightnessLevel(sender.value)
+        showControlsTemporarily()
+    }
+
+    private func applyBrightnessLevel(_ value: Float) {
+        let clamped = max(0.0, min(value, 1.0))
+        brightnessLevel = clamped
+        UserDefaults.standard.set(clamped, forKey: brightnessLevelKey)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.dimmingView.alpha = self.isBrightnessControlEnabled ? CGFloat(1.0 - clamped) : 0.0
+        }
+    }
+
+    private func updateBrightnessControlVisibility() {
+        let enabled = isBrightnessControlEnabled
+        brightnessContainer.isHidden = !enabled
+        brightnessContainer.alpha = enabled && controlsVisible ? 1.0 : 0.0
+        dimmingView.alpha = enabled ? CGFloat(1.0 - brightnessLevel) : 0.0
     }
     
     @objc private func handleHoldGesture(_ gesture: UILongPressGestureRecognizer) {
@@ -1217,6 +1349,7 @@ final class PlayerViewController: UIViewController {
     private func showControlsTemporarily() {
         controlsHideWorkItem?.cancel()
         controlsVisible = true
+        updateBrightnessControlVisibility()
         
         DispatchQueue.main.async {
             UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
@@ -1233,6 +1366,10 @@ final class PlayerViewController: UIViewController {
                 self.speedButton.alpha = 1.0
                 if !self.audioButton.isHidden {
                     self.audioButton.alpha = 1.0
+                }
+                if self.isBrightnessControlEnabled {
+                    self.brightnessContainer.isHidden = false
+                    self.brightnessContainer.alpha = 1.0
                 }
             }
         }
@@ -1260,8 +1397,23 @@ final class PlayerViewController: UIViewController {
                 self.subtitleButton.alpha = 0.0
                 self.speedButton.alpha = 0.0
                 self.audioButton.alpha = 0.0
+                self.brightnessContainer.alpha = 0.0
             }
         }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.updateBrightnessControlVisibility()
+        }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if isBrightnessControlEnabled {
+            let location = touch.location(in: brightnessContainer)
+            if brightnessContainer.bounds.contains(location) {
+                return false
+            }
+        }
+        return true
     }
     
     @objc private func closeTapped() {
