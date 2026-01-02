@@ -104,6 +104,10 @@ final class MPVSoftwareRenderer {
     private var subtitleRenderCache: SubtitleRenderCache?
     private var lastRenderDimensions: CGSize = .zero
     private let subtitleUpdateInterval: Double = 0.5
+    private var lastPixelBufferCreateWidth: Int = -1
+    private var lastPixelBufferCreateHeight: Int = -1
+    private var cachedVideoSize: CGSize = .zero
+    private var lastVideoSizeCheckTime: CFTimeInterval = 0
     
     var isPausedState: Bool {
         return isPaused
@@ -439,7 +443,15 @@ final class MPVSoftwareRenderer {
     
     private func renderFrame() {
         guard let context = renderContext else { return }
-        let videoSize = currentVideoSize()
+        
+        // Cache video size to avoid repeated mpv queries
+        let currentTime = CACurrentMediaTime()
+        if currentTime - lastVideoSizeCheckTime > 0.5 {
+            cachedVideoSize = currentVideoSize()
+            lastVideoSizeCheckTime = currentTime
+        }
+        let videoSize = cachedVideoSize
+        
         guard videoSize.width > 0, videoSize.height > 0 else {
             Logger.shared.log("MPVSoftwareRenderer: Skipping render - video size not ready (\(videoSize.width)x\(videoSize.height))", type: "Debug")
             return
@@ -476,6 +488,12 @@ final class MPVSoftwareRenderer {
         }
         
         if status != kCVReturnSuccess || pixelBuffer == nil {
+            // Cache dimension tracking to avoid allocating new attributes dictionary if size didn't change
+            if lastPixelBufferCreateWidth != width || lastPixelBufferCreateHeight != height {
+                lastPixelBufferCreateWidth = width
+                lastPixelBufferCreateHeight = height
+            }
+            
             let attrs: [CFString: Any] = [
                 kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
                 kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue!,

@@ -20,6 +20,23 @@ final class PlayerViewController: UIViewController {
     
     private let displayLayer = AVSampleBufferDisplayLayer()
     
+    private func createSymbolButton(symbolName: String, pointSize: CGFloat = 18, weight: UIImage.SymbolWeight = .semibold, backgroundColor: UIColor? = nil) -> UIButton {
+        let b = UIButton(type: .system)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        let cfg = UIImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
+        let img = UIImage(systemName: symbolName, withConfiguration: cfg)
+        b.setImage(img, for: .normal)
+        b.tintColor = .white
+        if let bg = backgroundColor {
+            b.backgroundColor = bg
+            b.layer.cornerRadius = pointSize + 10
+            b.clipsToBounds = true
+        } else {
+            b.alpha = 0.0
+        }
+        return b
+    }
+    
     private let centerPlayPauseButton: UIButton = {
         let b = UIButton(type: .system)
         b.translatesAutoresizingMaskIntoConstraints = false
@@ -594,9 +611,11 @@ final class PlayerViewController: UIViewController {
         rightDoubleTap.numberOfTapsRequired = 2
         videoContainer.addGestureRecognizer(rightDoubleTap)
         
+        #if !os(tvOS)
         let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(twoFingerTapped))
         twoFingerTap.numberOfTouchesRequired = 2
         videoContainer.addGestureRecognizer(twoFingerTap)
+        #endif
     }
     
     @objc private func leftSideDoubleTapped(_ gesture: UITapGestureRecognizer) {
