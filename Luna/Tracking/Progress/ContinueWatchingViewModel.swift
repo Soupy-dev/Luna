@@ -178,6 +178,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                     userInfo["isMovie"] = false
                     userInfo["seasonNumber"] = entry.seasonNumber
                     userInfo["episodeNumber"] = entry.episodeNumber
+                    Logger.shared.log("CW postModulesSearch: title='\(canonicalTitle)', showId=\(showId), S\(entry.seasonNumber ?? -1)E\(entry.episodeNumber ?? -1)", type: "ContinueWatching")
                 }
             }
             NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenModules"), object: nil, userInfo: userInfo)
