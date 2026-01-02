@@ -922,7 +922,8 @@ struct ModulesSearchResultsSheet: View {
                             if let targetEpisode = season.first(where: { $0.number == targetEpisodeNumber }) {
                                 targetHref = targetEpisode.href
                                 self.streamFetchProgress = "Found episode, fetching stream..."
-                                ProgressManager.shared.recordEpisodeServiceInfo(showId: tmdbId, seasonNumber: 1, episodeNumber: selectedEpisode.episodeNumber, serviceId: service.id, href: targetHref)
+                                // Preserve the logical season/episode for progress so CW doesn’t store a fake S1 entry
+                                ProgressManager.shared.recordEpisodeServiceInfo(showId: tmdbId, seasonNumber: selectedEpisode.seasonNumber, episodeNumber: selectedEpisode.episodeNumber, serviceId: service.id, href: targetHref)
                             } else {
                                 Logger.shared.log("Episode \(targetEpisodeNumber) not found even after remap; showing picker", type: "Warning")
                                 self.pendingEpisodes = season

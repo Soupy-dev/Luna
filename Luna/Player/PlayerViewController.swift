@@ -797,11 +797,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     private func applyBrightnessLevel(_ value: Float, applyHardware: Bool = true) {
+        if isClosing { return }
         let clamped = max(0.0, min(value, 1.0))
         brightnessLevel = clamped
         UserDefaults.standard.set(clamped, forKey: brightnessLevelKey)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            if self.isClosing { return }
             if applyHardware && self.isBrightnessControlEnabled {
                 UIScreen.main.brightness = CGFloat(clamped)
                 self.didAdjustHardwareBrightness = true
@@ -811,6 +813,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     private func updateBrightnessControlVisibility() {
+        if isClosing { return }
         let enabled = isBrightnessControlEnabled
         brightnessContainer.isHidden = !enabled
         brightnessContainer.alpha = enabled && controlsVisible ? 1.0 : 0.0
@@ -827,6 +830,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard didAdjustHardwareBrightness else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            if self.isClosing { return }
             UIScreen.main.brightness = self.originalHardwareBrightness
             self.didAdjustHardwareBrightness = false
         }
