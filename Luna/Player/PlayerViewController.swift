@@ -1097,12 +1097,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             state: .off
         ) { [weak self] _ in
             Logger.shared.log("Disabling embedded subtitles", type: "Info")
-            DispatchQueue.global(qos: .userInitiated).async {
-                self?.renderer.disableSubtitles()
-                DispatchQueue.main.async {
-                    self?.updateSubtitleTracksMenu()
-                }
-            }
+            self?.renderer.disableSubtitles()
+            self?.updateSubtitleTracksMenu()
         }
         trackActions.append(disableAction)
         
@@ -1117,13 +1113,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                     image: UIImage(systemName: "captions.bubble"),
                     state: .off
                 ) { [weak self] _ in
-                    Logger.shared.log("Selecting embedded subtitle track: \(id) - \(name)", type: "Info")
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        self?.renderer.setSubtitleTrack(id: id)
-                        DispatchQueue.main.async {
-                            self?.updateSubtitleTracksMenu()
-                        }
-                    }
+                    Logger.shared.log("User selected embedded subtitle track: \(id) - \(name)", type: "Info")
+                    self?.renderer.setSubtitleTrack(id: id)
+                    self?.updateSubtitleTracksMenu()
                 }
                 trackActions.append(action)
             }

@@ -312,6 +312,11 @@ final class MPVSoftwareRenderer {
         }
         if status < 0 {
             Logger.shared.log("Failed to set property \(name)=\(value) (\(status))", type: "Warn")
+        } else {
+            // Log successful subtitle-related property changes
+            if name == "sid" || name == "sub-visibility" {
+                Logger.shared.log("MPV property set: \(name)=\(value)", type: "Info")
+            }
         }
     }
     
@@ -1591,19 +1596,35 @@ final class MPVSoftwareRenderer {
     
     func setSubtitleTrack(id: Int) {
         Logger.shared.log("MPVSoftwareRenderer: Setting subtitle track to ID \(id)", type: "Info")
-        setProperty(name: "sid", value: String(id))
-        // Ensure subtitle rendering is enabled
-        setProperty(name: "sub-visibility", value: "yes")
-        Logger.shared.log("MPVSoftwareRenderer: Subtitle visibility set to yes", type: "Info")
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.delegate?.renderer(self, subtitleTrackDidChange: id)
+        
+        // MPV operations must be on main thread
+        if Thread.isMainThread {
+            setProperty(name: "sid", value: String(id))
+            setProperty(name: "sub-visibility", value: "yes")
+            Logger.shared.log("MPVSoftwareRenderer: Subtitle track set to \(id), visibility=yes", type: "Info")
+            delegate?.renderer(self, subtitleTrackDidChange: id)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.setProperty(name: "sid", value: String(id))
+                self.setProperty(name: "sub-visibility", value: "yes")
+                Logger.shared.log("MPVSoftwareRenderer: Subtitle track set to \(id), visibility=yes (from bg thread)", type: "Info")
+                self.delegate?.renderer(self, subtitleTrackDidChange: id)
+            }
         }
     }
     
     func disableSubtitles() {
-        setProperty(name: "sid", value: "no")
-        setProperty(name: "sub-visibility", value: "no")
+        Logger.shared.log("MPVSoftwareRenderer: Disabling subtitles", type: "Info")
+        if Thread.isMainThread {
+            setProperty(name: "sid", value: "no")
+            setProperty(name: "sub-visibility", value: "no")
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.setProperty(name: "sid", value: "no")
+                self?.setProperty(name: "sub-visibility", value: "no")
+            }
+        }
     }
 
     // Clear cached subtitle render state so newly loaded external subtitles appear immediately
