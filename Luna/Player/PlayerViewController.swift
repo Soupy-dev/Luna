@@ -1134,12 +1134,20 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard currentSubtitleIndex < subtitleURLs.count else { return }
         let urlString = subtitleURLs[currentSubtitleIndex]
         
+        Logger.shared.log("Loading subtitle from: \(urlString)", type: "Info")
+        
         guard let url = URL(string: urlString) else {
             Logger.shared.log("Invalid subtitle URL: \(urlString)", type: "Error")
             return
         }
         
-        URLSession.custom.dataTask(with: url) { [weak self] data, response, error in
+        var request = URLRequest(url: url)
+        request.setValue(URLSession.randomUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(url.scheme! + "://" + (url.host ?? ""), forHTTPHeaderField: "Origin")
+        request.setValue(url.absoluteString, forHTTPHeaderField: "Referer")
+        request.timeoutInterval = 30
+        
+        URLSession.custom.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
             
             if let error = error {
@@ -1147,19 +1155,31 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 return
             }
             
+            if let httpResponse = response as? HTTPURLResponse {
+                Logger.shared.log("Subtitle download response: \(httpResponse.statusCode)", type: "Info")
+                if httpResponse.statusCode != 200 {
+                    Logger.shared.log("Subtitle download failed with status \(httpResponse.statusCode)", type: "Error")
+                    return
+                }
+            }
+            
             guard let data = data, let subtitleContent = String(data: data, encoding: .utf8) else {
-                Logger.shared.log("Failed to parse subtitle data", type: "Error")
+                Logger.shared.log("Failed to parse subtitle data (size: \(data?.count ?? 0) bytes)", type: "Error")
                 return
             }
             
+            Logger.shared.log("Subtitle content loaded: \(subtitleContent.prefix(100))...", type: "Info")
             self.parseAndDisplaySubtitles(subtitleContent)
         }.resume()
     }
     
     private func parseAndDisplaySubtitles(_ content: String) {
-        subtitleEntries = SubtitleLoader.parseSubtitles(from: content, fontSize: subtitleModel.fontSize, foregroundColor: subtitleModel.foregroundColor)
-        Logger.shared.log("Loaded \(subtitleEntries.count) subtitle entries", type: "Info")
-        renderer.refreshSubtitleOverlay()
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.subtitleEntries = SubtitleLoader.parseSubtitles(from: content, fontSize: self.subtitleModel.fontSize, foregroundColor: self.subtitleModel.foregroundColor)
+            Logger.shared.log("Loaded \(self.subtitleEntries.count) subtitle entries", type: "Info")
+            self.renderer.refreshSubtitleOverlay()
+        }
     }
     
     @objc private func subtitleButtonTapped() {

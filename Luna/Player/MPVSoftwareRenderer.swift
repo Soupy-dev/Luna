@@ -1608,6 +1608,8 @@ final class MPVSoftwareRenderer {
             self.subtitleRenderCache = nil
             self.cachedSubtitleText = nil
             self.lastSubtitleCheckTime = -1.0
+            // Force immediate subtitle check on next render
+            self.scheduleRender()
         }
     }
 }
