@@ -1089,6 +1089,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let tracks = renderer.getSubtitleTracks()
         Logger.shared.log("updateSubtitleTracksMenu: Found \(tracks.count) embedded subtitle tracks", type: "Info")
         
+        // Show subtitle button if we have embedded tracks
+        if !tracks.isEmpty {
+            subtitleButton.isHidden = false
+            Logger.shared.log("Subtitle button made visible for embedded tracks", type: "Info")
+        }
+        
         var trackActions: [UIAction] = []
 
         let disableAction = UIAction(

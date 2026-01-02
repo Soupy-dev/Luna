@@ -159,6 +159,7 @@ final class MPVSoftwareRenderer {
         setOption(name: "subs-fallback", value: "yes")
         setOption(name: "sub-ass", value: "yes")
         setOption(name: "embeddedfonts", value: "yes")
+        setOption(name: "blend-subtitles", value: "yes")
         setOption(name: "sub-visibility", value: "no")
         
         let initStatus = mpv_initialize(handle)
