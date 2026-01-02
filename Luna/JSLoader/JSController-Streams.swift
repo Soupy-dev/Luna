@@ -59,13 +59,38 @@ extension JSController {
                     var streamUrls: [String]? = nil
                     var subtitleUrls: [String]? = nil
                     var streamUrlsAndHeaders : [[String:Any]]? = nil
-                    
+                    var collectedSubtitleUrls: [String] = []
+
+                    func appendSubtitles(from value: Any?) {
+                        if let subsArray = value as? [Any] {
+                            for item in subsArray {
+                                if let s = item as? String {
+                                    collectedSubtitleUrls.append(s)
+                                } else if let dict = item as? [String: Any] {
+                                    if let url = dict["url"] as? String {
+                                        collectedSubtitleUrls.append(url)
+                                    } else if let file = dict["file"] as? String {
+                                        collectedSubtitleUrls.append(file)
+                                    }
+                                }
+                            }
+                        } else if let subString = value as? String {
+                            collectedSubtitleUrls.append(subString)
+                        }
+                    }
+
                     if let streamSources = json["streams"] as? [[String:Any]] {
                         streamUrlsAndHeaders = streamSources
                         Logger.shared.log("Found \(streamSources.count) streams and headers", type: "Stream")
+                        for source in streamSources {
+                            appendSubtitles(from: source["subtitles"])
+                            appendSubtitles(from: source["subtitle"])
+                        }
                     } else if let streamSource = json["stream"] as? [String:Any] {
                         streamUrlsAndHeaders = [streamSource]
                         Logger.shared.log("Found single stream with headers", type: "Stream")
+                        appendSubtitles(from: streamSource["subtitles"])
+                        appendSubtitles(from: streamSource["subtitle"])
                     } else if let streamsArray = json["streams"] as? [String] {
                         streamUrls = streamsArray
                         Logger.shared.log("Found \(streamsArray.count) streams", type: "Stream")
@@ -73,15 +98,15 @@ extension JSController {
                         streamUrls = [streamUrl]
                         Logger.shared.log("Found single stream", type: "Stream")
                     }
-                    
-                    if let subsArray = json["subtitles"] as? [String] {
-                        subtitleUrls = subsArray
-                        Logger.shared.log("Found \(subsArray.count) subtitle tracks", type: "Stream")
-                    } else if let subtitleUrl = json["subtitles"] as? String {
-                        subtitleUrls = [subtitleUrl]
-                        Logger.shared.log("Found single subtitle track", type: "Stream")
+
+                    appendSubtitles(from: json["subtitles"])
+
+                    if !collectedSubtitleUrls.isEmpty {
+                        let uniqueSubs = Array(Set(collectedSubtitleUrls))
+                        subtitleUrls = uniqueSubs
+                        Logger.shared.log("Collected \(uniqueSubs.count) subtitle tracks (including per-stream)", type: "Stream")
                     }
-                    
+
                     Logger.shared.log("Starting stream with \(streamUrls?.count ?? 0) sources and \(subtitleUrls?.count ?? 0) subtitles", type: "Stream")
                     DispatchQueue.main.async {
                         completion((streamUrls, subtitleUrls, streamUrlsAndHeaders))
