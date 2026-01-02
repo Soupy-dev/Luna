@@ -227,6 +227,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }()
 
 #if !os(tvOS)
+    private var originalHardwareBrightness: CGFloat = UIScreen.main.brightness
+    private var didAdjustHardwareBrightness = false
+
     private let brightnessContainer: UIVisualEffectView = {
         let effect: UIBlurEffect
         if #available(iOS 15.0, *) {
@@ -502,6 +505,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         renderer.stop()
         displayLayer.removeFromSuperlayer()
         NotificationCenter.default.removeObserver(self)
+#if !os(tvOS)
+        restoreHardwareBrightnessIfNeeded()
+#endif
     }
     
     convenience init(url: URL, preset: PlayerPreset, headers: [String: String]? = nil, subtitles: [String]? = nil) {
@@ -763,12 +769,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 #if !os(tvOS)
     private func loadBrightnessLevel() {
         if UserDefaults.standard.object(forKey: brightnessLevelKey) == nil {
-            UserDefaults.standard.set(1.0, forKey: brightnessLevelKey)
+            UserDefaults.standard.set(Float(UIScreen.main.brightness), forKey: brightnessLevelKey)
         }
         let stored = UserDefaults.standard.float(forKey: brightnessLevelKey)
-        brightnessLevel = stored > 0 ? stored : 1.0
+        brightnessLevel = max(0.0, min(stored, 1.0))
         brightnessSlider.value = brightnessLevel
-        applyBrightnessLevel(brightnessLevel)
+        applyBrightnessLevel(brightnessLevel, applyHardware: isBrightnessControlEnabled)
     }
 
     @objc private func brightnessSliderChanged(_ sender: UISlider) {
@@ -776,13 +782,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         showControlsTemporarily()
     }
 
-    private func applyBrightnessLevel(_ value: Float) {
+    private func applyBrightnessLevel(_ value: Float, applyHardware: Bool = true) {
         let clamped = max(0.0, min(value, 1.0))
         brightnessLevel = clamped
         UserDefaults.standard.set(clamped, forKey: brightnessLevelKey)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.dimmingView.alpha = self.isBrightnessControlEnabled ? CGFloat(1.0 - clamped) : 0.0
+            if applyHardware && self.isBrightnessControlEnabled {
+                UIScreen.main.brightness = CGFloat(clamped)
+                self.didAdjustHardwareBrightness = true
+            }
+            self.dimmingView.alpha = 0.0
         }
     }
 
@@ -790,7 +800,22 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let enabled = isBrightnessControlEnabled
         brightnessContainer.isHidden = !enabled
         brightnessContainer.alpha = enabled && controlsVisible ? 1.0 : 0.0
-        dimmingView.alpha = enabled ? CGFloat(1.0 - brightnessLevel) : 0.0
+        dimmingView.alpha = 0.0
+
+        if enabled {
+            applyBrightnessLevel(brightnessLevel)
+        } else {
+            restoreHardwareBrightnessIfNeeded()
+        }
+    }
+    
+    private func restoreHardwareBrightnessIfNeeded() {
+        guard didAdjustHardwareBrightness else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            UIScreen.main.brightness = self.originalHardwareBrightness
+            self.didAdjustHardwareBrightness = false
+        }
     }
 #else
     private func updateBrightnessControlVisibility() {

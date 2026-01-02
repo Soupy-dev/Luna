@@ -497,6 +497,14 @@ final class TrackerManager: NSObject, ObservableObject {
         }
     }
 
+    func cachedAniListId(for tmdbId: Int) -> Int? {
+        var id: Int? = nil
+        anilistIdCacheQueue.sync {
+            id = anilistIdCache[tmdbId]
+        }
+        return id
+    }
+
     func syncMangaProgress(title: String, chapterNumber: Int) {
         guard trackerState.syncEnabled else {
             Logger.shared.log("Skipping manga sync (sync disabled) for \(title) ch \(chapterNumber)", type: "Tracker")

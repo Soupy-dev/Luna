@@ -156,7 +156,11 @@ final class ContinueWatchingViewModel: ObservableObject {
     }
 
     func resume(_ entry: ContinueWatchingEntry) {
-        let canonicalTitle = entry.showTitle ?? entry.title
+        Task { await resumeAsync(entry) }
+    }
+
+    private func resumeAsync(_ entry: ContinueWatchingEntry) async {
+        let canonicalTitle = await resolveCanonicalTitle(for: entry)
 
         func postModulesSearch() {
             var userInfo: [String: Any] = ["title": canonicalTitle]
@@ -192,7 +196,6 @@ final class ContinueWatchingViewModel: ObservableObject {
 
         // Try to resume using the last recorded service/href when available
         if let serviceId = entry.lastServiceId, let href = entry.lastHref {
-            // Attempt to find the service
             let service = ServiceStore.shared.getServices().first(where: { $0.id == serviceId })
             if let service = service {
                 let jsController = JSController()
@@ -210,7 +213,6 @@ final class ContinueWatchingViewModel: ObservableObject {
                         didResolve = true
                         timeoutTask.cancel()
                         let (streams, subtitles, sources) = streamResult
-                        // pick the first available stream and headers
                         let streamURLString: String?
                         var headerFields: [String: String] = [:]
                         if let source = sources?.first {
@@ -251,7 +253,6 @@ final class ContinueWatchingViewModel: ObservableObject {
                             } else if !headerFields.isEmpty {
                                 finalHeaders = headerFields
                             }
-                            // try external player first
                             let externalRaw = UserDefaults.standard.string(forKey: "externalPlayer") ?? ExternalPlayer.none.rawValue
                             let external = ExternalPlayer(rawValue: externalRaw) ?? .none
                             if let scheme = external.schemeURL(for: streamURLString), UIApplication.shared.canOpenURL(scheme) {
@@ -259,7 +260,6 @@ final class ContinueWatchingViewModel: ObservableObject {
                                 return
                             }
 
-                            // In-app player
                             let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? InAppPlayer.normal.rawValue
                             let inAppPlayer = (inAppRaw == "mpv") ? "mpv" : "Normal"
 
@@ -308,7 +308,6 @@ final class ContinueWatchingViewModel: ObservableObject {
                                 return
                             }
                         } else {
-                            // No streams resolved -> fallback to details view
                             var userInfo: [String: Any] = [:]
                             switch entry.type {
                             case .movie:
@@ -334,17 +333,69 @@ final class ContinueWatchingViewModel: ObservableObject {
                 return
             }
 
-            // Service reference missing locally; fall back to opening details so user can pick a stream
             recordProgressSnapshot()
             postModulesSearch()
             return
         }
 
-        // Fallback: open detail or update progress only (no known service)
         recordProgressSnapshot()
         DispatchQueue.main.async {
             postModulesSearch()
         }
+    }
+
+    private func resolveCanonicalTitle(for entry: ContinueWatchingEntry) async -> String {
+        if let title = entry.showTitle, !title.isEmpty {
+            return title
+        }
+
+        // Prefer AniList metadata for anime (cached mapping from TMDB -> AniList ID)
+        if entry.type == .episode, let showId = entry.showId, let anilistId = TrackerManager.shared.cachedAniListId(for: showId) {
+            if let info = try? await AniListService.shared.fetchAnimeBasicInfo(anilistId: anilistId) {
+                await MainActor.run {
+                    if let idx = self.entries.firstIndex(where: { $0.id == entry.id }) {
+                        self.entries[idx].showTitle = info.title
+                        if self.entries[idx].imageURL == nil, let cover = info.coverImage {
+                            self.entries[idx].imageURL = cover
+                        }
+                    }
+                }
+                return info.title
+            }
+        }
+
+        switch entry.type {
+        case .movie:
+            if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
+                if let detail = try? await TMDBService.shared.getMovieDetails(id: movieId) {
+                    await MainActor.run {
+                        if let idx = self.entries.firstIndex(where: { $0.id == entry.id }) {
+                            self.entries[idx].showTitle = detail.title
+                            if self.entries[idx].imageURL == nil, let poster = detail.fullPosterURL {
+                                self.entries[idx].imageURL = poster
+                            }
+                        }
+                    }
+                    return detail.title
+                }
+            }
+        case .episode:
+            if let showId = entry.showId {
+                if let detail = try? await TMDBService.shared.getTVShowDetails(id: showId) {
+                    await MainActor.run {
+                        if let idx = self.entries.firstIndex(where: { $0.id == entry.id }) {
+                            self.entries[idx].showTitle = detail.name
+                            if self.entries[idx].imageURL == nil, let poster = detail.fullPosterURL {
+                                self.entries[idx].imageURL = poster
+                            }
+                        }
+                    }
+                    return detail.name
+                }
+            }
+        }
+
+        return entry.showTitle ?? entry.title
     }
 
     func playFromStart(_ entry: ContinueWatchingEntry) {

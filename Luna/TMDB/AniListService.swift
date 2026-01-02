@@ -164,6 +164,39 @@ class AniListService {
     }
     
     // MARK: - Fetch Anime Details
+
+    /// Fetch minimal anime info (title and cover) by AniList ID
+    func fetchAnimeBasicInfo(anilistId: Int) async throws -> AniListBasicInfo {
+        let query = """
+        query {
+            Media(id: \(anilistId), type: ANIME) {
+                id
+                title { romaji english native }
+                coverImage { large medium }
+            }
+        }
+        """
+
+        struct Response: Codable {
+            let data: DataWrapper
+            struct DataWrapper: Codable { let Media: MediaData? }
+            struct MediaData: Codable {
+                let id: Int
+                let title: AniListAnime.AniListTitle
+                let coverImage: AniListCoverImage?
+            }
+        }
+
+        let data = try await executeGraphQLQuery(query, token: nil)
+        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        guard let media = decoded.data.Media else {
+            throw NSError(domain: "AniListService", code: -1, userInfo: [NSLocalizedDescriptionKey: "AniList title not found for id \(anilistId)"])
+        }
+
+        let title = AniListTitlePicker.title(from: media.title, preferredLanguageCode: preferredLanguageCode)
+        let cover = media.coverImage?.large ?? media.coverImage?.medium
+        return AniListBasicInfo(id: media.id, title: title, coverImage: cover)
+    }
     
     /// Fetch full anime details with seasons and episodes from AniList + TMDB
     /// Uses AniList for season structure and sequels, TMDB for episode details
@@ -956,6 +989,12 @@ struct AniListSearchResult {
         self.episodes = anime.episodes
         self.coverImage = nil
     }
+}
+
+struct AniListBasicInfo {
+    let id: Int
+    let title: String
+    let coverImage: String?
 }
 
 enum AniListTitlePicker {
