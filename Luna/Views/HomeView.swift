@@ -464,14 +464,6 @@ struct HomeView: View {
                         updated["upcomingAnime"] = contentFilter.filterSearchResults(upcomingAnimeResult)
 
                         self.catalogResults = updated
-                        
-                        // Log all catalog data for debugging
-                        Logger.shared.log("Loaded \(updated.count) catalog types with data", type: "HomeView")
-                        for (catalogId, items) in updated {
-                            Logger.shared.log("  \(catalogId): \(items.count) items", type: "HomeView")
-                        }
-                        
-                        Logger.shared.log("Enabled catalogs: \(self.catalogManager.getEnabledCatalogs().map { $0.id }.joined(separator: ", "))", type: "HomeView")
 
                         let heroPool = !(updated["trending"] ?? []).isEmpty ? (updated["trending"] ?? []) : updated.values.flatMap { $0 }
                         self.heroContent = heroPool.first { $0.backdropPath != nil } ?? heroPool.first

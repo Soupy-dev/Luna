@@ -96,7 +96,7 @@ class AniListService {
     // MARK: - Airing Schedule
 
     /// Fetch upcoming airing episodes for the next `daysAhead` days (default 7).
-    func fetchAiringSchedule(daysAhead: Int = 7, perPage: Int = 70) async throws -> [AniListAiringScheduleEntry] {
+    func fetchAiringSchedule(daysAhead: Int = 7, perPage: Int = 100) async throws -> [AniListAiringScheduleEntry] {
         let now = Int(Date().timeIntervalSince1970)
         let until = now + (max(daysAhead, 1) * 86_400)
 

@@ -18,7 +18,7 @@ class Logger: @unchecked Sendable {
     
     private let queue = DispatchQueue(label: "me.cranci.sora.logger", attributes: .concurrent)
     private var logs: [LogEntry] = []
-    private let maxLogEntries = 1000
+    private let maxLogEntries = 300
     
     private init() {}
     
@@ -70,18 +70,8 @@ class Logger: @unchecked Sendable {
     }
     
     func exportLogsToFile() async -> URL? {
-        let logsContent = await getLogsAsync()
-        let fileName = "Luna_Logs_\(DateFormatter().string(from: Date())).txt"
-        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let exportURL = documentsDirectory.appendingPathComponent(fileName)
-        
-        do {
-            try logsContent.write(to: exportURL, atomically: true, encoding: .utf8)
-            return exportURL
-        } catch {
-            print("Failed to export logs: \(error)")
-            return nil
-        }
+        // File export disabled to keep logs in-memory only
+        return nil
     }
     
     func clearLogs() {
