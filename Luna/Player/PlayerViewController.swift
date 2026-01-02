@@ -10,6 +10,8 @@ import SwiftUI
 import AVFoundation
 
 final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate {
+    private let playerLogId = UUID().uuidString.prefix(8)
+
     private let videoContainer: UIView = {
         let v = UIView()
         v.translatesAutoresizingMaskIntoConstraints = false
@@ -308,6 +310,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var subtitleURLs: [String] = []
     private var currentSubtitleIndex: Int = 0
     private var subtitleEntries: [SubtitleEntry] = []
+
+    private func logMPV(_ message: String) {
+        Logger.shared.log("[MPV \(playerLogId)] " + message, type: "MPV")
+    }
     
     class SubtitleModel: ObservableObject {
         @Published var currentAttributedText: NSAttributedString = NSAttributedString()
@@ -415,6 +421,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        logMPV("viewDidLoad, initialURL=")
         
 #if !os(tvOS)
         modalPresentationCapturesStatusBarAppearance = true
@@ -431,6 +438,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         
         do {
             try renderer.start()
+            logMPV("renderer.start succeeded")
         } catch {
             Logger.shared.log("Failed to start MPV renderer: \(error)", type: "Error")
             presentErrorAlert(title: "Playback Error", message: "Failed to start renderer: \(error)")
@@ -442,6 +450,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         showControlsTemporarily()
         
         if let url = initialURL, let preset = initialPreset {
+            logMPV("loading initial url=\(url.absoluteString) preset=\(preset.id.rawValue)")
             load(url: url, preset: preset, headers: initialHeaders)
         }
         
@@ -497,6 +506,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     deinit {
+        logMPV("deinit; stopping renderer and restoring state")
         pipController?.delegate = nil
         if pipController?.isPictureInPictureActive == true {
             pipController?.stopPictureInPicture()
@@ -519,6 +529,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
+        logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
         renderer.load(url: url, with: preset, headers: headers)
         if let info = mediaInfo {
             prepareSeekToLastPosition(for: info)
@@ -1470,12 +1481,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func closeTapped() {
+        logMPV("closeTapped; pipActive=\(pipController?.isPictureInPictureActive == true); mediaInfo=\(String(describing: mediaInfo))")
         pipController?.delegate = nil
         if pipController?.isPictureInPictureActive == true {
             pipController?.stopPictureInPicture()
         }
         
         renderer.stop()
+        logMPV("renderer.stop called from closeTapped")
         
         if presentingViewController != nil {
             dismiss(animated: true, completion: nil)
@@ -1631,6 +1644,7 @@ extension PlayerViewController: PiPControllerDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, let pip = self.pipController else { return }
             if pip.isPictureInPicturePossible && !pip.isPictureInPictureActive {
+                self.logMPV("Entering background; starting PiP")
                 pip.startPictureInPicture()
             }
         }
@@ -1640,6 +1654,7 @@ extension PlayerViewController: PiPControllerDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, let pip = self.pipController else { return }
             if pip.isPictureInPictureActive {
+                self.logMPV("Returning to foreground; stopping PiP")
                 pip.stopPictureInPicture()
             }
         }

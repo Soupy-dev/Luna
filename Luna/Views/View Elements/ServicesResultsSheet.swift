@@ -840,6 +840,7 @@ struct ModulesSearchResultsSheet: View {
         jsController.fetchEpisodesJS(url: result.href) { episodes in
             DispatchQueue.main.async {
                 Logger.shared.log("Fetched \(episodes.count) episodes for: \(result.title)", type: "Stream")
+                Logger.shared.log("Episode numbers fetched: \(episodes.map { $0.number }.sorted())", type: "Stream")
                 self.streamFetchProgress = "Found \(episodes.count) episode\(episodes.count == 1 ? "" : "s")"
                 
                 if episodes.isEmpty {
@@ -886,7 +887,7 @@ struct ModulesSearchResultsSheet: View {
                     
                     Logger.shared.log("Episode parsing: Grouped \(episodes.count) episodes into \(seasons.count) seasons. Looking for S\(selectedEpisode.seasonNumber)E\(selectedEpisode.episodeNumber)", type: "Stream")
                     for (idx, season) in seasons.enumerated() {
-                        Logger.shared.log("  Season \(idx): \(season.count) episodes, numbers: \(season.map { $0.number })", type: "Stream")
+                        Logger.shared.log("  Season \(idx + 1): \(season.count) episodes, numbers: \(season.map { $0.number })", type: "Stream")
                     }
                     
                     let targetSeasonIndex = selectedEpisode.seasonNumber - 1

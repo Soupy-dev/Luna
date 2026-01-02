@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if !os(tvOS)
+import UIKit
+#endif
 
 struct LogEntry: Identifiable {
     let id = UUID()
@@ -54,6 +57,8 @@ struct LoggerView: View {
     @State private var searchText = ""
     @State private var isAutoScrollEnabled = true
     @State private var showingFilterSheet = false
+    @State private var shareURL: URL?
+    @State private var isSharing = false
     
     private var filteredLogs: [LogEntry] {
         var logs = loggerManager.logs
@@ -105,14 +110,39 @@ struct LoggerView: View {
         .navigationTitle(NSLocalizedString("Logs", comment: ""))
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    loggerManager.clearLogs()
-                }) {
-                    Image(systemName: "trash")
+                HStack(spacing: 16) {
+#if !os(tvOS)
+                    Button(action: { Task { await exportLogs() } }) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+#endif
+                    Button(action: {
+                        loggerManager.clearLogs()
+                    }) {
+                        Image(systemName: "trash")
+                    }
                 }
             }
         }
+#if !os(tvOS)
+        .sheet(isPresented: $isSharing, onDismiss: { shareURL = nil }) {
+            if let url = shareURL {
+                ActivityView(activityItems: [url])
+            }
+        }
+#endif
     }
+
+#if !os(tvOS)
+    private func exportLogs() async {
+        if let url = await Logger.shared.exportLogsToFile() {
+            await MainActor.run {
+                self.shareURL = url
+                self.isSharing = true
+            }
+        }
+    }
+#endif
 }
 
 struct LogEntryRow: View {
@@ -182,6 +212,20 @@ struct LogEntryRow: View {
         }
     }
 }
+
+#if !os(tvOS)
+// Simple ActivityView wrapper for sharing log file
+struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    let applicationActivities: [UIActivity]? = nil
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#endif
 
 // MARK: - Logger Manager
 class LoggerManager: ObservableObject {

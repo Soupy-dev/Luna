@@ -160,7 +160,9 @@ final class ContinueWatchingViewModel: ObservableObject {
     }
 
     private func resumeAsync(_ entry: ContinueWatchingEntry) async {
+        Logger.shared.log("CW Resume start: type=\(entry.type) showId=\(entry.showId ?? -1) S\(entry.seasonNumber ?? -1)E\(entry.episodeNumber ?? -1) lastService=\(String(describing: entry.lastServiceId))", type: "ContinueWatching")
         let canonicalTitle = await resolveCanonicalTitle(for: entry)
+        Logger.shared.log("CW Resume resolved title=\(canonicalTitle)", type: "ContinueWatching")
 
         func postModulesSearch() {
             var userInfo: [String: Any] = ["title": canonicalTitle]
@@ -198,12 +200,14 @@ final class ContinueWatchingViewModel: ObservableObject {
         if let serviceId = entry.lastServiceId, let href = entry.lastHref {
             let service = ServiceStore.shared.getServices().first(where: { $0.id == serviceId })
             if let service = service {
+                Logger.shared.log("CW Resume using saved service \(service.metadata.sourceName) href=\(href)", type: "ContinueWatching")
                 let jsController = JSController()
                 jsController.loadScript(service.jsScript)
                 var didResolve = false
                 let timeoutTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     if !didResolve {
+                        Logger.shared.log("CW Resume timeout; fallback to modules search", type: "ContinueWatching")
                         recordProgressSnapshot()
                         postModulesSearch()
                     }
@@ -212,6 +216,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                     DispatchQueue.main.async {
                         didResolve = true
                         timeoutTask.cancel()
+                        Logger.shared.log("CW Resume stream result streams=\(streamResult.0?.count ?? 0) sources=\(streamResult.2?.count ?? 0)", type: "ContinueWatching")
                         let (streams, subtitles, sources) = streamResult
                         let streamURLString: String?
                         var headerFields: [String: String] = [:]
@@ -308,6 +313,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                                 return
                             }
                         } else {
+                            Logger.shared.log("CW Resume no stream; open detail fallback", type: "ContinueWatching")
                             var userInfo: [String: Any] = [:]
                             switch entry.type {
                             case .movie:
