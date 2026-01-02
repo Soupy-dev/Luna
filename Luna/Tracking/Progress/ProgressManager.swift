@@ -136,6 +136,10 @@ final class ProgressManager: ObservableObject {
         do {
             let data = try Data(contentsOf: progressFileURL)
             let decoded = try JSONDecoder().decode(ProgressData.self, from: data)
+            Logger.shared.log("Loaded \(decoded.episodeProgress.count) episodes from JSON", type: "Progress")
+            for ep in decoded.episodeProgress.prefix(5) {
+                Logger.shared.log("  - showId=\(ep.showId ?? -1) S\(ep.seasonNumber)E\(ep.episodeNumber)", type: "Progress")
+            }
             accessQueue.async(flags: .barrier) { [weak self] in
                 self?.progressData = decoded
                 self?.publishCurrentData()

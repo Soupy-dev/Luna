@@ -52,6 +52,11 @@ final class ContinueWatchingViewModel: ObservableObject {
             .sink { [weak self] movieList, episodeList in
                 guard let self = self else { return }
 
+                Logger.shared.log("CW ViewModel loaded episodeProgressList with \(episodeList.count) episodes", type: "ContinueWatching")
+                for ep in episodeList.prefix(5) {
+                    Logger.shared.log("  - showId=\(ep.showId ?? -1) S\(ep.seasonNumber)E\(ep.episodeNumber) progress=\(Int(ep.progress*100))%", type: "ContinueWatching")
+                }
+
                 let movieEntries = movieList
                     .filter { $0.progress > self.minProgress && $0.progress < self.maxProgress }
                     .map { m -> ContinueWatchingEntry in
@@ -75,7 +80,8 @@ final class ContinueWatchingViewModel: ObservableObject {
                 let episodeEntries = episodeList
                     .filter { $0.progress > self.minProgress && $0.progress < self.maxProgress }
                     .map { e -> ContinueWatchingEntry in
-                        ContinueWatchingEntry(
+                        Logger.shared.log("CW creating entry for S\(e.seasonNumber)E\(e.episodeNumber)", type: "ContinueWatching")
+                        return ContinueWatchingEntry(
                             id: e.id,
                             title: "S\(e.seasonNumber)E\(e.episodeNumber)",
                             showTitle: nil,
