@@ -199,7 +199,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                 jsController.loadScript(service.jsScript)
                 var didResolve = false
                 let timeoutTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
                     if !didResolve {
                         recordProgressSnapshot()
                         postDetail(autoPlay: true)
