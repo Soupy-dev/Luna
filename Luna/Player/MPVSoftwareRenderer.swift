@@ -1600,5 +1600,15 @@ final class MPVSoftwareRenderer {
         setProperty(name: "sid", value: "no")
         setProperty(name: "sub-visibility", value: "no")
     }
+
+    // Clear cached subtitle render state so newly loaded external subtitles appear immediately
+    func refreshSubtitleOverlay() {
+        renderQueue.async { [weak self] in
+            guard let self else { return }
+            self.subtitleRenderCache = nil
+            self.cachedSubtitleText = nil
+            self.lastSubtitleCheckTime = -1.0
+        }
+    }
 }
 

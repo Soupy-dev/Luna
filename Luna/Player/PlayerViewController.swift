@@ -1079,6 +1079,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func updateSubtitleTracksMenu() {
+        // If we already have external subtitle URLs, keep the external menu intact
+        guard subtitleURLs.isEmpty else { return }
+
         let tracks = renderer.getSubtitleTracks()
         
         var trackActions: [UIAction] = []
@@ -1156,6 +1159,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func parseAndDisplaySubtitles(_ content: String) {
         subtitleEntries = SubtitleLoader.parseSubtitles(from: content, fontSize: subtitleModel.fontSize, foregroundColor: subtitleModel.foregroundColor)
         Logger.shared.log("Loaded \(subtitleEntries.count) subtitle entries", type: "Info")
+        renderer.refreshSubtitleOverlay()
     }
     
     @objc private func subtitleButtonTapped() {

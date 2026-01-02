@@ -63,9 +63,6 @@ struct ModulesSearchResultsSheet: View {
         self.selectedEpisode = selectedEpisode
         self.tmdbId = tmdbId
         
-        if let ep = selectedEpisode {
-            Logger.shared.log("ModulesSearchResultsSheet init: S\(ep.seasonNumber)E\(ep.episodeNumber)", type: "Debug")
-        }
     }
 
     private var effectiveEpisode: TMDBEpisode? {
@@ -648,7 +645,6 @@ struct ModulesSearchResultsSheet: View {
         } else {
             searchQuery = mediaTitle
         }
-        Logger.shared.log("ModulesSearch query: '\(searchQuery)' (mediaTitle='\(mediaTitle)', selectedEpisode=\(selectedEpisode != nil), seasonNum=\(selectedEpisode?.seasonNumber ?? -1), epNum=\(selectedEpisode?.episodeNumber ?? -1), isAnime=\(isAnime))", type: "Stream")
         let baseTitleQuery = searchQuery.caseInsensitiveCompare(mediaTitle) == .orderedSame ? nil : mediaTitle
         
         Task {
