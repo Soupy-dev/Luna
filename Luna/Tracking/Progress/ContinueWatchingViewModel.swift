@@ -200,10 +200,24 @@ final class ContinueWatchingViewModel: ObservableObject {
                 jsController.fetchStreamUrlJS(episodeUrl: href, module: service) { [weak self] streamResult in
                     DispatchQueue.main.async {
                         let (streams, subtitles, sources) = streamResult
-                        // pick the first available stream
+                        // pick the first available stream and headers
                         let streamURLString: String?
-                        if let source = sources?.first, let url = source["url"] as? String {
-                            streamURLString = url
+                        var headerFields: [String: String] = [:]
+                        if let source = sources?.first {
+                            if let url = source["url"] as? String {
+                                streamURLString = url
+                            } else {
+                                streamURLString = nil
+                            }
+
+                            if let headers = source["headers"] as? [String: String] {
+                                headerFields = headers
+                            } else if let headersAny = source["headers"] as? [String: Any] {
+                                headerFields = headersAny.compactMapValues { value in
+                                    if let str = value as? String { return str }
+                                    return "\(value)"
+                                }
+                            }
                         } else if let stream = streams?.first {
                             streamURLString = stream
                         } else {
@@ -214,6 +228,18 @@ final class ContinueWatchingViewModel: ObservableObject {
                             guard let streamURL = URL(string: streamURLString) else {
                                 Logger.shared.log("Invalid stream URL: \(streamURLString)", type: "Error")
                                 return
+                            }
+                            var finalHeaders: [String: String]? = nil
+                            if let baseURL = URL(string: service.metadata.baseUrl)?.absoluteString {
+                                var headers = [
+                                    "Origin": baseURL,
+                                    "Referer": baseURL,
+                                    "User-Agent": URLSession.randomUserAgent
+                                ]
+                                for (k, v) in headerFields { headers[k] = v }
+                                finalHeaders = headers
+                            } else if !headerFields.isEmpty {
+                                finalHeaders = headerFields
                             }
                             // try external player first
                             let externalRaw = UserDefaults.standard.string(forKey: "externalPlayer") ?? ExternalPlayer.none.rawValue
@@ -229,7 +255,7 @@ final class ContinueWatchingViewModel: ObservableObject {
 
                             if inAppPlayer == "mpv" {
                                 let preset = PlayerPreset.presets.first
-                                let pvc = PlayerViewController(url: streamURL, preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []), headers: nil, subtitles: subtitles)
+                                let pvc = PlayerViewController(url: streamURL, preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []), headers: finalHeaders, subtitles: subtitles)
                                 if entry.type == .movie {
                                     if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
                                         pvc.mediaInfo = .movie(id: movieId, title: canonicalTitle)
@@ -245,7 +271,12 @@ final class ContinueWatchingViewModel: ObservableObject {
                                 return
                             } else {
                                 let playerVC = NormalPlayer()
-                                let asset = AVURLAsset(url: streamURL, options: nil)
+                                let asset: AVURLAsset
+                                if let headers = finalHeaders {
+                                    asset = AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+                                } else {
+                                    asset = AVURLAsset(url: streamURL, options: nil)
+                                }
                                 let item = AVPlayerItem(asset: asset)
                                 playerVC.player = AVPlayer(playerItem: item)
                                 if entry.type == .movie {
