@@ -633,13 +633,22 @@ struct ModulesSearchResultsSheet: View {
             isSearching = false
             return
         }
+        // Anime: use AniList season title (already includes sequel naming) + episode tag
+        // Non-anime: keep prior season suffix behavior for season > 1
+        let isAnime = TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
         let searchQuery: String
-        if let ep = selectedEpisode, ep.seasonNumber > 1 {
-            searchQuery = "\(mediaTitle) season \(ep.seasonNumber)"
+        if let ep = selectedEpisode {
+            if isAnime {
+                searchQuery = "\(mediaTitle) E\(ep.episodeNumber)"
+            } else if ep.seasonNumber > 1 {
+                searchQuery = "\(mediaTitle) season \(ep.seasonNumber)"
+            } else {
+                searchQuery = mediaTitle
+            }
         } else {
             searchQuery = mediaTitle
         }
-        Logger.shared.log("ModulesSearch query: '\(searchQuery)' (selectedEpisode=\(selectedEpisode != nil), seasonNum=\(selectedEpisode?.seasonNumber ?? -1))", type: "Stream")
+        Logger.shared.log("ModulesSearch query: '\(searchQuery)' (selectedEpisode=\(selectedEpisode != nil), seasonNum=\(selectedEpisode?.seasonNumber ?? -1), epNum=\(selectedEpisode?.episodeNumber ?? -1), isAnime=\(isAnime))", type: "Stream")
         let baseTitleQuery = searchQuery.caseInsensitiveCompare(mediaTitle) == .orderedSame ? nil : mediaTitle
         
         Task {
