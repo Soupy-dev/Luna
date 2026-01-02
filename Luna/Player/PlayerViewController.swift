@@ -1155,30 +1155,40 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         request.setValue(url.absoluteString, forHTTPHeaderField: "Referer")
         request.timeoutInterval = 30
         
-        URLSession.custom.dataTask(with: request) { [weak self] data, response, error in
+        // Download on background queue to avoid blocking main thread
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             
-            if let error = error {
-                Logger.shared.log("Failed to download subtitles: \(error.localizedDescription)", type: "Error")
-                return
-            }
-            
-            if let httpResponse = response as? HTTPURLResponse {
-                Logger.shared.log("Subtitle download response: \(httpResponse.statusCode)", type: "Info")
-                if httpResponse.statusCode != 200 {
-                    Logger.shared.log("Subtitle download failed with status \(httpResponse.statusCode)", type: "Error")
+            URLSession.custom.dataTask(with: request) { [weak self] data, response, error in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    Logger.shared.log("Failed to download subtitles: \(error.localizedDescription)", type: "Error")
                     return
                 }
-            }
-            
-            guard let data = data, let subtitleContent = String(data: data, encoding: .utf8) else {
-                Logger.shared.log("Failed to parse subtitle data (size: \(data?.count ?? 0) bytes)", type: "Error")
-                return
-            }
-            
-            Logger.shared.log("Subtitle content loaded: \(subtitleContent.prefix(100))...", type: "Info")
-            self.parseAndDisplaySubtitles(subtitleContent)
-        }.resume()
+                
+                if let httpResponse = response as? HTTPURLResponse {
+                    Logger.shared.log("Subtitle download response: \(httpResponse.statusCode)", type: "Info")
+                    if httpResponse.statusCode != 200 {
+                        Logger.shared.log("Subtitle download failed with status \(httpResponse.statusCode)", type: "Error")
+                        return
+                    }
+                }
+                
+                guard let data = data, let subtitleContent = String(data: data, encoding: .utf8) else {
+                    Logger.shared.log("Failed to parse subtitle data (size: \(data?.count ?? 0) bytes)", type: "Error")
+                    return
+                }
+                
+                Logger.shared.log("Subtitle content loaded: \(subtitleContent.prefix(100))...", type: "Info")
+                
+                // Parse subtitles on background queue (heavy text processing)
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    guard let self = self else { return }
+                    self.parseAndDisplaySubtitles(subtitleContent)
+                }
+            }.resume()
+        }
     }
     
     private func parseAndDisplaySubtitles(_ content: String) {
