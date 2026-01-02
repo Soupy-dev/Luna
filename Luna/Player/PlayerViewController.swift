@@ -515,6 +515,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         self.initialPreset = preset
         self.initialHeaders = headers
         self.initialSubtitles = subtitles
+        Logger.shared.log("PlayerViewController init with \(subtitles?.count ?? 0) subtitle URLs", type: "Info")
+        if let subs = subtitles, !subs.isEmpty {
+            Logger.shared.log("Subtitle URLs in player init: \(subs)", type: "Info")
+        }
     }
     
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
@@ -1118,15 +1122,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         subtitleButton.menu = subtitleMenu
     }
     private func loadSubtitles(_ urls: [String]) {
+        Logger.shared.log("loadSubtitles called with \(urls.count) URLs", type: "Info")
         subtitleURLs = urls
         
         if !urls.isEmpty {
+            Logger.shared.log("Setting up subtitle button and loading first subtitle", type: "Info")
             subtitleButton.isHidden = false
             currentSubtitleIndex = 0
             subtitleModel.isVisible = true
             loadCurrentSubtitle()
             updateSubtitleButtonAppearance()
             updateSubtitleMenu()
+        } else {
+            Logger.shared.log("No subtitle URLs to load", type: "Info")
         }
     }
     

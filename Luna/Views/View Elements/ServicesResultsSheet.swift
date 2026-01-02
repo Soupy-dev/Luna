@@ -1024,7 +1024,10 @@ struct ModulesSearchResultsSheet: View {
     }
     
     private func processStreamResult(streams: [String]?, subtitles: [String]?, sources: [[String: Any]]?, service: Service) {
-        Logger.shared.log("Stream fetch result - Streams: \(streams?.count ?? 0), Sources: \(sources?.count ?? 0)", type: "Stream")
+        Logger.shared.log("Stream fetch result - Streams: \(streams?.count ?? 0), Sources: \(sources?.count ?? 0), Subtitles: \(subtitles?.count ?? 0)", type: "Stream")
+        if let subs = subtitles, !subs.isEmpty {
+            Logger.shared.log("Subtitle URLs received: \(subs)", type: "Stream")
+        }
         self.streamFetchProgress = "Processing stream data..."
         
         var availableStreams: [StreamOption] = []
@@ -1147,6 +1150,10 @@ struct ModulesSearchResultsSheet: View {
     }
     
     private func playStreamURL(_ url: String, service: Service, subtitles: [String]?, headers: [String: String]?) {
+        Logger.shared.log("playStreamURL called with subtitles: \(subtitles?.count ?? 0) URLs", type: "Stream")
+        if let subs = subtitles, !subs.isEmpty {
+            Logger.shared.log("Subtitle URLs to pass to player: \(subs)", type: "Stream")
+        }
         isFetchingStreams = false
         showingStreamMenu = false
         pendingSubtitles = nil
@@ -1193,6 +1200,7 @@ struct ModulesSearchResultsSheet: View {
             
             if inAppPlayer == "mpv" {
                 let preset = PlayerPreset.presets.first
+                Logger.shared.log("Creating PlayerViewController with \(subtitles?.count ?? 0) subtitle URLs", type: "Stream")
                 let pvc = PlayerViewController(
                     url: streamURL,
                     preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
