@@ -730,10 +730,26 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         #endif
     }
 
-    private func setupBrightnessControls() {
-        brightnessSlider.addTarget(self, action: #selector(brightnessSliderChanged(_:)), for: .valueChanged)
-        loadBrightnessLevel()
-        updateBrightnessControlVisibility()
+    @objc private func leftSideDoubleTapped(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: videoContainer)
+        let isLeftSide = location.x < videoContainer.bounds.width / 2
+        guard isLeftSide else { return }
+        renderer.seek(by: -10)
+        animateButtonTap(skipBackwardButton)
+        showControlsTemporarily()
+    }
+
+    @objc private func rightSideDoubleTapped(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: videoContainer)
+        let isRightSide = location.x >= videoContainer.bounds.width / 2
+        guard isRightSide else { return }
+        renderer.seek(by: 10)
+        animateButtonTap(skipForwardButton)
+        showControlsTemporarily()
+    }
+
+    @objc private func twoFingerTapped(_ gesture: UITapGestureRecognizer) {
+        centerPlayPauseTapped()
     }
 
     private func setupBrightnessControls() {

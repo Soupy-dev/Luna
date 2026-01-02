@@ -1,10 +1,16 @@
 import SwiftUI
+import Combine
 
 struct ScheduleView: View {
     @AppStorage("showLocalScheduleTime") private var showLocalScheduleTime = true
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var scheduleEntries: [AniListAiringScheduleEntry] = []
     @State private var dayBuckets: [DayBucket] = []
+    @State private var currentDayAnchor = Date()
+
+    private let scheduleDaysAhead = 7
+    private let dayChangeTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Group {
@@ -51,34 +57,40 @@ struct ScheduleView: View {
 
                     ForEach(dayBuckets) { bucket in
                         Section(header: Text(formattedDay(bucket.date))) {
-                            ForEach(bucket.items) { item in
-                                HStack(spacing: 12) {
-                                    if let cover = item.coverImage, let url = URL(string: cover) {
-                                        AsyncImage(url: url) { image in
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                        } placeholder: {
-                                            Color.gray.opacity(0.2)
+                            if bucket.items.isEmpty {
+                                Text("No episodes scheduled.")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            } else {
+                                ForEach(bucket.items) { item in
+                                    HStack(spacing: 12) {
+                                        if let cover = item.coverImage, let url = URL(string: cover) {
+                                            AsyncImage(url: url) { image in
+                                                image
+                                                    .resizable()
+                                                    .aspectRatio(contentMode: .fill)
+                                            } placeholder: {
+                                                Color.gray.opacity(0.2)
+                                            }
+                                            .frame(width: 60, height: 80)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                         }
-                                        .frame(width: 60, height: 80)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                    }
 
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(item.title)
-                                            .font(.headline)
-                                        Text("Episode \(item.episode)")
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
-                                        Text(formattedTime(item.airingAt))
-                                            .font(.footnote)
-                                            .foregroundColor(.secondary)
-                                    }
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(item.title)
+                                                .font(.headline)
+                                            Text("Episode \(item.episode)")
+                                                .font(.subheadline)
+                                                .foregroundColor(.secondary)
+                                            Text(formattedTime(item.airingAt))
+                                                .font(.footnote)
+                                                .foregroundColor(.secondary)
+                                        }
 
-                                    Spacer()
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 4)
                                 }
-                                .padding(.vertical, 4)
                             }
                         }
                     }
@@ -91,6 +103,12 @@ struct ScheduleView: View {
         .task {
             await loadSchedule()
         }
+        .refreshable {
+            await loadSchedule()
+        }
+        .onReceive(dayChangeTimer) { _ in
+            Task { await handleDayChangeIfNeeded() }
+        }
     }
 
     private func loadSchedule() async {
@@ -100,9 +118,11 @@ struct ScheduleView: View {
         }
 
         do {
-            let entries = try await AniListService.shared.fetchAiringSchedule(daysAhead: 7)
+            let entries = try await AniListService.shared.fetchAiringSchedule(daysAhead: scheduleDaysAhead)
             await MainActor.run {
                 isLoading = false
+                scheduleEntries = entries
+                currentDayAnchor = Date()
                 updateBuckets(with: entries)
             }
         } catch {
@@ -115,19 +135,44 @@ struct ScheduleView: View {
 
     private func updateBuckets(with entries: [AniListAiringScheduleEntry]) {
         let calendar = makeCalendar()
-        let grouped = Dictionary(grouping: entries) { entry in
-            calendar.startOfDay(for: entry.airingAt)
+        let startOfToday = calendar.startOfDay(for: Date())
+
+        var buckets: [DayBucket] = []
+        for offset in 0...scheduleDaysAhead {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: startOfToday),
+                  let nextDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: day)) else {
+                continue
+            }
+
+            let dayItems = entries
+                .filter { entry in
+                    entry.airingAt >= calendar.startOfDay(for: day) && entry.airingAt < nextDay
+                }
+                .sorted { $0.airingAt < $1.airingAt }
+
+            buckets.append(DayBucket(date: calendar.startOfDay(for: day), items: dayItems))
         }
 
-        let buckets = grouped.map { key, value in
-            DayBucket(date: key, items: value.sorted { $0.airingAt < $1.airingAt })
-        }
-        dayBuckets = buckets.sorted { $0.date < $1.date }
+        dayBuckets = buckets
     }
 
     private func regroupBuckets() {
-        let flat = dayBuckets.flatMap { $0.items }
-        updateBuckets(with: flat)
+        updateBuckets(with: scheduleEntries)
+    }
+
+    private func handleDayChangeIfNeeded() async {
+        let calendar = makeCalendar()
+        let trackedDay = calendar.startOfDay(for: currentDayAnchor)
+        let today = calendar.startOfDay(for: Date())
+
+        if today != trackedDay {
+            await loadSchedule()
+        } else {
+            await MainActor.run {
+                currentDayAnchor = Date()
+                updateBuckets(with: scheduleEntries)
+            }
+        }
     }
 
     private func makeCalendar() -> Calendar {

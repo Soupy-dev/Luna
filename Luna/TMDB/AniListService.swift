@@ -97,13 +97,19 @@ class AniListService {
 
     /// Fetch upcoming airing episodes for the next `daysAhead` days (default 7).
     func fetchAiringSchedule(daysAhead: Int = 7, perPage: Int = 100) async throws -> [AniListAiringScheduleEntry] {
-        let now = Int(Date().timeIntervalSince1970)
-        let until = now + (max(daysAhead, 1) * 86_400)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+
+        let today = calendar.startOfDay(for: Date())
+        let upperDay = calendar.date(byAdding: .day, value: max(daysAhead, 1) + 1, to: today) ?? today
+
+        let lowerBound = Int(today.timeIntervalSince1970)
+        let upperBound = Int(upperDay.timeIntervalSince1970)
 
         let query = """
         query {
             Page(perPage: \(perPage)) {
-                airingSchedules(airingAt_greater: \(now), airingAt_lesser: \(until), sort: TIME) {
+                airingSchedules(airingAt_greater: \(lowerBound - 1), airingAt_lesser: \(upperBound), sort: TIME) {
                     id
                     airingAt
                     episode
@@ -136,8 +142,8 @@ class AniListService {
         let data = try await executeGraphQLQuery(query, token: nil)
         let decoded = try JSONDecoder().decode(Response.self, from: data)
 
-        let nowDate = Date()
-        let upperBound = nowDate.addingTimeInterval(Double(max(daysAhead, 1)) * 86_400)
+        let start = today
+        let end = upperDay
 
         return decoded.data.Page.airingSchedules
             .map { schedule in
@@ -153,7 +159,7 @@ class AniListService {
                 )
             }
             .filter { entry in
-                entry.airingAt >= nowDate && entry.airingAt <= upperBound
+                entry.airingAt >= start && entry.airingAt < end
             }
     }
     
