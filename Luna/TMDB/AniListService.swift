@@ -96,7 +96,7 @@ class AniListService {
     // MARK: - Airing Schedule
 
     /// Fetch upcoming airing episodes for the next `daysAhead` days (default 7).
-    func fetchAiringSchedule(daysAhead: Int = 7, perPage: Int = 50) async throws -> [AniListAiringScheduleEntry] {
+    func fetchAiringSchedule(daysAhead: Int = 7, perPage: Int = 70) async throws -> [AniListAiringScheduleEntry] {
         let now = Int(Date().timeIntervalSince1970)
         let until = now + (max(daysAhead, 1) * 86_400)
 
@@ -136,18 +136,25 @@ class AniListService {
         let data = try await executeGraphQLQuery(query, token: nil)
         let decoded = try JSONDecoder().decode(Response.self, from: data)
 
-        return decoded.data.Page.airingSchedules.map { schedule in
-            let title = AniListTitlePicker.title(from: schedule.media.title, preferredLanguageCode: preferredLanguageCode)
-            let cover = schedule.media.coverImage?.large ?? schedule.media.coverImage?.medium
-            return AniListAiringScheduleEntry(
-                id: schedule.id,
-                mediaId: schedule.media.id,
-                title: title,
-                airingAt: Date(timeIntervalSince1970: TimeInterval(schedule.airingAt)),
-                episode: schedule.episode,
-                coverImage: cover
-            )
-        }
+        let nowDate = Date()
+        let upperBound = nowDate.addingTimeInterval(Double(max(daysAhead, 1)) * 86_400)
+
+        return decoded.data.Page.airingSchedules
+            .map { schedule in
+                let title = AniListTitlePicker.title(from: schedule.media.title, preferredLanguageCode: preferredLanguageCode)
+                let cover = schedule.media.coverImage?.large ?? schedule.media.coverImage?.medium
+                return AniListAiringScheduleEntry(
+                    id: schedule.id,
+                    mediaId: schedule.media.id,
+                    title: title,
+                    airingAt: Date(timeIntervalSince1970: TimeInterval(schedule.airingAt)),
+                    episode: schedule.episode,
+                    coverImage: cover
+                )
+            }
+            .filter { entry in
+                entry.airingAt >= nowDate && entry.airingAt <= upperBound
+            }
     }
     
     // MARK: - Fetch Anime Details

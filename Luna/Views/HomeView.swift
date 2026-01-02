@@ -32,6 +32,7 @@ struct HomeView: View {
     @StateObject private var contentFilter = TMDBContentFilter.shared
     @StateObject private var continueVM = ContinueWatchingViewModel()
     @State private var continueDetailToShow: DetailLaunch? = nil
+    @State private var continueModuleSearch: ModuleSearchLaunch? = nil
     
     private var heroHeight: CGFloat {
 #if os(tvOS)
@@ -99,6 +100,16 @@ struct HomeView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ContinueWatchingOpenModules"))) { note in
+            guard let info = note.userInfo,
+                  let tmdbId = info["tmdbId"] as? Int,
+                  let isMovie = info["isMovie"] as? Bool,
+                  let title = info["title"] as? String else { return }
+
+            let season = info["seasonNumber"] as? Int
+            let episode = info["episodeNumber"] as? Int
+            continueModuleSearch = ModuleSearchLaunch(tmdbId: tmdbId, title: title, isMovie: isMovie, seasonNumber: season, episodeNumber: episode)
+        }
         .onChangeComp(of: contentFilter.filterHorror) { _, _ in
             if hasLoadedContent {
                 loadContent()
@@ -109,6 +120,15 @@ struct HomeView: View {
         }
         .sheet(item: $continueDetailToShow) { launch in
             MediaDetailView(searchResult: launch.searchResult, resumeHint: launch.resumeHint, autoPlay: launch.autoPlay)
+        }
+        .sheet(item: $continueModuleSearch) { launch in
+            ModulesSearchResultsSheet(
+                mediaTitle: launch.title,
+                originalTitle: nil,
+                isMovie: launch.isMovie,
+                selectedEpisode: launch.selectedEpisode,
+                tmdbId: launch.tmdbId
+            )
         }
     }
     
@@ -467,6 +487,31 @@ struct HomeView: View {
                 }
             }
         }
+    }
+}
+
+private struct ModuleSearchLaunch: Identifiable {
+    let id = UUID()
+    let tmdbId: Int
+    let title: String
+    let isMovie: Bool
+    let seasonNumber: Int?
+    let episodeNumber: Int?
+
+    var selectedEpisode: TMDBEpisode? {
+        guard !isMovie, let season = seasonNumber, let episode = episodeNumber else { return nil }
+        return TMDBEpisode(
+            id: tmdbId * 1000 + episode,
+            name: "Episode \(episode)",
+            overview: nil,
+            stillPath: nil,
+            episodeNumber: episode,
+            seasonNumber: season,
+            airDate: nil,
+            runtime: nil,
+            voteAverage: 0,
+            voteCount: 0
+        )
     }
 }
 

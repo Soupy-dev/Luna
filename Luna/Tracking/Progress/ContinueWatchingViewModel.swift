@@ -158,8 +158,8 @@ final class ContinueWatchingViewModel: ObservableObject {
     func resume(_ entry: ContinueWatchingEntry) {
         let canonicalTitle = entry.showTitle ?? entry.title
 
-        func postDetail(autoPlay: Bool) {
-            var userInfo: [String: Any] = ["title": canonicalTitle, "autoPlay": autoPlay]
+        func postModulesSearch() {
+            var userInfo: [String: Any] = ["title": canonicalTitle]
             switch entry.type {
             case .movie:
                 if let idStr = entry.id.split(separator: "_").last, let movieId = Int(idStr) {
@@ -174,7 +174,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                     userInfo["episodeNumber"] = entry.episodeNumber
                 }
             }
-            NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenDetail"), object: nil, userInfo: userInfo)
+            NotificationCenter.default.post(name: Notification.Name("ContinueWatchingOpenModules"), object: nil, userInfo: userInfo)
         }
 
         func recordProgressSnapshot() {
@@ -202,7 +202,7 @@ final class ContinueWatchingViewModel: ObservableObject {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     if !didResolve {
                         recordProgressSnapshot()
-                        postDetail(autoPlay: true)
+                        postModulesSearch()
                     }
                 }
                 jsController.fetchStreamUrlJS(episodeUrl: href, module: service) { [weak self] streamResult in
@@ -336,14 +336,14 @@ final class ContinueWatchingViewModel: ObservableObject {
 
             // Service reference missing locally; fall back to opening details so user can pick a stream
             recordProgressSnapshot()
-            postDetail(autoPlay: true)
+            postModulesSearch()
             return
         }
 
         // Fallback: open detail or update progress only (no known service)
         recordProgressSnapshot()
         DispatchQueue.main.async {
-            postDetail(autoPlay: true)
+            postModulesSearch()
         }
     }
 
