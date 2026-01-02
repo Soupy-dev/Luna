@@ -704,6 +704,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         pipButton.addTarget(self, action: #selector(pipTapped), for: .touchUpInside)
         skipBackwardButton.addTarget(self, action: #selector(skipBackwardTapped), for: .touchUpInside)
         skipForwardButton.addTarget(self, action: #selector(skipForwardTapped), for: .touchUpInside)
+        subtitleButton.addTarget(self, action: #selector(subtitleButtonTapped), for: .touchUpInside)
         let tap = UITapGestureRecognizer(target: self, action: #selector(containerTapped))
         tap.delegate = self
         tap.cancelsTouchesInView = false
@@ -869,6 +870,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     @objc private func skipForwardTapped() {
         renderer.seek(by: 10)
         animateButtonTap(skipForwardButton)
+        showControlsTemporarily()
+    }
+    
+    @objc private func subtitleButtonTapped() {
+        Logger.shared.log("subtitleButtonTapped called - button was physically tapped", type: "Info")
         showControlsTemporarily()
     }
     
@@ -1113,8 +1119,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             let noTracksAction = UIAction(title: "No subtitles in stream", state: .off) { _ in }
             trackActions.append(noTracksAction)
         } else {
-            for (id, name) in tracks {
-                let action = UIAction(
+            // Use map to properly capture values in closures (same pattern as audio tracks)
+            let subtitleActions = tracks.map { (id, name) in
+                UIAction(
                     title: name,
                     image: UIImage(systemName: "captions.bubble"),
                     state: .off
@@ -1123,12 +1130,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                     self?.renderer.setSubtitleTrack(id: id)
                     self?.updateSubtitleTracksMenu()
                 }
-                trackActions.append(action)
             }
+            trackActions.append(contentsOf: subtitleActions)
         }
         
+        Logger.shared.log("Setting subtitle menu with \(trackActions.count) actions", type: "Info")
         let subtitleMenu = UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: trackActions)
         subtitleButton.menu = subtitleMenu
+        Logger.shared.log("Subtitle menu assigned to button", type: "Info")
     }
     private func loadSubtitles(_ urls: [String]) {
         Logger.shared.log("loadSubtitles called with \(urls.count) URLs", type: "Info")
