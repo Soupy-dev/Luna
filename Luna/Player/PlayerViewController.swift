@@ -301,6 +301,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var isSeeking = false
     private var cachedDuration: Double = 0
     private var cachedPosition: Double = 0
+    private var isClosing = false
     private var pipController: PiPController?
     private var initialURL: URL?
     private var initialPreset: PlayerPreset?
@@ -506,6 +507,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     deinit {
+        isClosing = true
+        renderer.delegate = nil
         logMPV("deinit; stopping renderer and restoring state")
         pipController?.delegate = nil
         if pipController?.isPictureInPictureActive == true {
@@ -1481,7 +1484,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func closeTapped() {
+        isClosing = true
         logMPV("closeTapped; pipActive=\(pipController?.isPictureInPictureActive == true); mediaInfo=\(String(describing: mediaInfo))")
+        renderer.delegate = nil
         pipController?.delegate = nil
         if pipController?.isPictureInPictureActive == true {
             pipController?.stopPictureInPicture()
@@ -1548,15 +1553,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 // MARK: - MPVSoftwareRendererDelegate
 extension PlayerViewController: MPVSoftwareRendererDelegate {
     func renderer(_ renderer: MPVSoftwareRenderer, didUpdatePosition position: Double, duration: Double) {
+        if isClosing { return }
         updatePosition(position, duration: duration)
     }
     
     func renderer(_ renderer: MPVSoftwareRenderer, didChangePause isPaused: Bool) {
+        if isClosing { return }
         updatePlayPauseButton(isPaused: isPaused)
         pipController?.updatePlaybackState()
     }
     
     func renderer(_ renderer: MPVSoftwareRenderer, didChangeLoading isLoading: Bool) {
+        if isClosing { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if isLoading {
@@ -1572,6 +1580,7 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
     }
     
     func renderer(_ renderer: MPVSoftwareRenderer, didBecomeReadyToSeek: Bool) {
+        if isClosing { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             

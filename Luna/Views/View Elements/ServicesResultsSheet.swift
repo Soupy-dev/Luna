@@ -921,7 +921,7 @@ struct ModulesSearchResultsSheet: View {
                             Logger.shared.log("Remapping requested season \(selectedEpisode.seasonNumber) to provider season 1 (episodes: \(season.map { $0.number }))", type: "Stream")
                             if let targetEpisode = season.first(where: { $0.number == targetEpisodeNumber }) {
                                 targetHref = targetEpisode.href
-                                self.streamFetchProgress = "Found episode in season 1, fetching stream..."
+                                self.streamFetchProgress = "Found episode, fetching stream..."
                                 ProgressManager.shared.recordEpisodeServiceInfo(showId: tmdbId, seasonNumber: 1, episodeNumber: selectedEpisode.episodeNumber, serviceId: service.id, href: targetHref)
                             } else {
                                 Logger.shared.log("Episode \(targetEpisodeNumber) not found even after remap; showing picker", type: "Warning")
