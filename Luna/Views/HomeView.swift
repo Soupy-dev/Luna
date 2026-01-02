@@ -358,14 +358,11 @@ struct HomeView: View {
                         ? limitedItems.filter { $0.id != heroContent?.id }
                         : limitedItems
                     
-                    let _ = Logger.shared.log("Rendering catalog: \(catalog.id) with \(displayItems.count) items", type: "HomeView")
-                    
                     MediaSection(
                         title: catalog.name,
                         items: displayItems
                     )
                 } else {
-                    let _ = Logger.shared.log("Skipping catalog \(catalog.id): items=\(catalogResults[catalog.id]?.count ?? 0)", type: "HomeView")
                 }
             }
             

@@ -197,8 +197,18 @@ final class ContinueWatchingViewModel: ObservableObject {
             if let service = service {
                 let jsController = JSController()
                 jsController.loadScript(service.jsScript)
+                var didResolve = false
+                let timeoutTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    if !didResolve {
+                        recordProgressSnapshot()
+                        postDetail(autoPlay: true)
+                    }
+                }
                 jsController.fetchStreamUrlJS(episodeUrl: href, module: service) { [weak self] streamResult in
                     DispatchQueue.main.async {
+                        didResolve = true
+                        timeoutTask.cancel()
                         let (streams, subtitles, sources) = streamResult
                         // pick the first available stream and headers
                         let streamURLString: String?
