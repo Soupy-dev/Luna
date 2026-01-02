@@ -781,26 +781,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         dimmingView.alpha = 0.0
     }
 #endif
-        applyBrightnessLevel(sender.value)
-        showControlsTemporarily()
-    }
-
-    private func applyBrightnessLevel(_ value: Float) {
-        let clamped = max(0.0, min(value, 1.0))
-        brightnessLevel = clamped
-        UserDefaults.standard.set(clamped, forKey: brightnessLevelKey)
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.dimmingView.alpha = self.isBrightnessControlEnabled ? CGFloat(1.0 - clamped) : 0.0
-        }
-    }
-
-    private func updateBrightnessControlVisibility() {
-        let enabled = isBrightnessControlEnabled
-        brightnessContainer.isHidden = !enabled
-        brightnessContainer.alpha = enabled && controlsVisible ? 1.0 : 0.0
-        dimmingView.alpha = enabled ? CGFloat(1.0 - brightnessLevel) : 0.0
-    }
     
     @objc private func handleHoldGesture(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
