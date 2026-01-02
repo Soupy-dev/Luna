@@ -55,6 +55,18 @@ struct ModulesSearchResultsSheet: View {
     @StateObject private var serviceManager = ServiceManager.shared
     @StateObject private var algorithmManager = AlgorithmManager.shared
     
+    init(mediaTitle: String, originalTitle: String?, isMovie: Bool, selectedEpisode: TMDBEpisode?, tmdbId: Int) {
+        self.mediaTitle = mediaTitle
+        self.originalTitle = originalTitle
+        self.isMovie = isMovie
+        self.selectedEpisode = selectedEpisode
+        self.tmdbId = tmdbId
+        
+        if let ep = selectedEpisode {
+            Logger.shared.log("ModulesSearchResultsSheet init: S\(ep.seasonNumber)E\(ep.episodeNumber)", type: "Debug")
+        }
+    }
+    
     private var servicesWithResults: [(service: Service, results: [SearchItem])] {
         moduleResults.filter { !$0.results.isEmpty }
     }

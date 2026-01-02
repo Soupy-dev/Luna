@@ -593,6 +593,10 @@ final class PlayerViewController: UIViewController {
         let rightDoubleTap = UITapGestureRecognizer(target: self, action: #selector(rightSideDoubleTapped))
         rightDoubleTap.numberOfTapsRequired = 2
         videoContainer.addGestureRecognizer(rightDoubleTap)
+        
+        let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(twoFingerTapped))
+        twoFingerTap.numberOfTouchesRequired = 2
+        videoContainer.addGestureRecognizer(twoFingerTap)
     }
     
     @objc private func leftSideDoubleTapped(_ gesture: UITapGestureRecognizer) {
@@ -615,6 +619,10 @@ final class PlayerViewController: UIViewController {
         renderer.seek(by: 10)
         animateButtonTap(skipForwardButton)
         showControlsTemporarily()
+    }
+    
+    @objc private func twoFingerTapped(_ gesture: UITapGestureRecognizer) {
+        centerPlayPauseTapped()
     }
     
     @objc private func handleHoldGesture(_ gesture: UILongPressGestureRecognizer) {

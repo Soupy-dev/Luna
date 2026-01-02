@@ -108,6 +108,7 @@ struct HomeView: View {
 
             let season = info["seasonNumber"] as? Int
             let episode = info["episodeNumber"] as? Int
+            Logger.shared.log("CW Module Search: tmdbId=\(tmdbId), isMovie=\(isMovie), title=\(title), season=\(season ?? -1), episode=\(episode ?? -1)", type: "Debug")
             continueModuleSearch = ModuleSearchLaunch(tmdbId: tmdbId, title: title, isMovie: isMovie, seasonNumber: season, episodeNumber: episode)
         }
         .onChangeComp(of: contentFilter.filterHorror) { _, _ in
