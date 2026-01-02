@@ -915,7 +915,28 @@ struct ModulesSearchResultsSheet: View {
                         }
                     } else {
                         Logger.shared.log("Season \(selectedEpisode.seasonNumber) not found. Available seasons: \(seasons.count)", type: "Warning")
-                        if seasons.count > 1 {
+                        // Common case: provider returns a single season even for sequels. Remap to season 1 automatically.
+                        if seasons.count == 1 {
+                            let season = seasons[0]
+                            Logger.shared.log("Remapping requested season \(selectedEpisode.seasonNumber) to provider season 1 (episodes: \(season.map { $0.number }))", type: "Stream")
+                            if let targetEpisode = season.first(where: { $0.number == targetEpisodeNumber }) {
+                                targetHref = targetEpisode.href
+                                self.streamFetchProgress = "Found episode in season 1, fetching stream..."
+                                ProgressManager.shared.recordEpisodeServiceInfo(showId: tmdbId, seasonNumber: 1, episodeNumber: selectedEpisode.episodeNumber, serviceId: service.id, href: targetHref)
+                            } else {
+                                Logger.shared.log("Episode \(targetEpisodeNumber) not found even after remap; showing picker", type: "Warning")
+                                self.pendingEpisodes = season
+                                self.pendingResult = result
+                                self.pendingJSController = jsController
+                                self.pendingService = service
+                                self.isFetchingStreams = false
+                                
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    self.showingEpisodePicker = true
+                                }
+                                return
+                            }
+                        } else if seasons.count > 1 {
                             self.availableSeasons = seasons
                             self.pendingResult = result
                             self.pendingJSController = jsController
