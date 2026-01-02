@@ -157,6 +157,9 @@ final class MPVSoftwareRenderer {
         setOption(name: "demuxer-max-bytes", value: "150M")
         setOption(name: "demuxer-readahead-secs", value: "20")
         setOption(name: "subs-fallback", value: "yes")
+        setOption(name: "sub-ass", value: "yes")
+        setOption(name: "embeddedfonts", value: "yes")
+        setOption(name: "sub-visibility", value: "no")
         
         let initStatus = mpv_initialize(handle)
         guard initStatus >= 0 else {
@@ -1587,9 +1590,11 @@ final class MPVSoftwareRenderer {
     }
     
     func setSubtitleTrack(id: Int) {
+        Logger.shared.log("MPVSoftwareRenderer: Setting subtitle track to ID \(id)", type: "Info")
         setProperty(name: "sid", value: String(id))
         // Ensure subtitle rendering is enabled
         setProperty(name: "sub-visibility", value: "yes")
+        Logger.shared.log("MPVSoftwareRenderer: Subtitle visibility set to yes", type: "Info")
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.delegate?.renderer(self, subtitleTrackDidChange: id)

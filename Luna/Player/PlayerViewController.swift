@@ -1087,6 +1087,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard subtitleURLs.isEmpty else { return }
 
         let tracks = renderer.getSubtitleTracks()
+        Logger.shared.log("updateSubtitleTracksMenu: Found \(tracks.count) embedded subtitle tracks", type: "Info")
         
         var trackActions: [UIAction] = []
 
@@ -1095,8 +1096,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             image: UIImage(systemName: "xmark"),
             state: .off
         ) { [weak self] _ in
-            self?.renderer.disableSubtitles()
-            self?.updateSubtitleTracksMenu()
+            Logger.shared.log("Disabling embedded subtitles", type: "Info")
+            DispatchQueue.global(qos: .userInitiated).async {
+                self?.renderer.disableSubtitles()
+                DispatchQueue.main.async {
+                    self?.updateSubtitleTracksMenu()
+                }
+            }
         }
         trackActions.append(disableAction)
         
@@ -1111,8 +1117,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                     image: UIImage(systemName: "captions.bubble"),
                     state: .off
                 ) { [weak self] _ in
-                    self?.renderer.setSubtitleTrack(id: id)
-                    self?.updateSubtitleTracksMenu()
+                    Logger.shared.log("Selecting embedded subtitle track: \(id) - \(name)", type: "Info")
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        self?.renderer.setSubtitleTrack(id: id)
+                        DispatchQueue.main.async {
+                            self?.updateSubtitleTracksMenu()
+                        }
+                    }
                 }
                 trackActions.append(action)
             }
