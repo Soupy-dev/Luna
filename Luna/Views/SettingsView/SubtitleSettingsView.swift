@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct SubtitleSettingsView: View {
-    @ObservedObject private var settings = Settings.shared
+    @ObservedObject var settings = Settings.shared
     @StateObject private var accentColorManager = AccentColorManager.shared
     
     let subtitleLanguages = [

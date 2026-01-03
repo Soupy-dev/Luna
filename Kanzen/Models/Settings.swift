@@ -72,7 +72,7 @@ class Settings: ObservableObject {
         }
     }
     
-    private init() {
+    init() {
         if let colorData = UserDefaults.standard.data(forKey: "accentColor"),
            let uiColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData) {
             self.accentColor = Color(uiColor)
