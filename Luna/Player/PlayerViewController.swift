@@ -807,6 +807,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         brightnessContainer.isHidden = true
         brightnessContainer.alpha = 0.0
     }
+
+#endif
+
     @objc private func handleHoldGesture(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
         case .began:
