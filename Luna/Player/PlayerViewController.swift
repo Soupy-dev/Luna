@@ -1086,11 +1086,26 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         // Auto-select preferred anime audio language when applicable
         if isAnimeContent() && !userSelectedAudioTrack {
             let preferredLang = Settings.shared.preferredAnimeAudioLanguage.lowercased()
-            if let matching = detailedTracks.first(where: { !$0.2.isEmpty && $0.2.lowercased().contains(preferredLang) }) {
+            Logger.shared.log("Anime detected, looking for audio language: \(preferredLang)", type: "Info")
+            Logger.shared.log("Available audio tracks with languages: \(detailedTracks.map { \"id=\($0.0) name=\($0.1) lang=\($0.2)\" }.joined(separator: \", \"))", type: "Debug")
+            let preferredLangName = languageName(for: preferredLang)
+            if let matching = detailedTracks.first(where: {
+                let langCode = $0.2.lowercased()
+                let title = $0.1.lowercased()
+                if !langCode.isEmpty && langCode.contains(preferredLang) { return true }
+                if !langCode.isEmpty && !preferredLangName.isEmpty && langCode.contains(preferredLangName.lowercased()) { return true }
+                if !title.isEmpty && title.contains(preferredLang) { return true }
+                if !title.isEmpty && !preferredLangName.isEmpty && title.contains(preferredLangName.lowercased()) { return true }
+                return false
+            }) {
                 Logger.shared.log("Auto-selecting anime audio track id=\(matching.0) lang=\(matching.2)", type: "Info")
                 userSelectedAudioTrack = true
                 renderer.setAudioTrack(id: matching.0)
+            } else {
+                Logger.shared.log("No matching audio track found for language \(preferredLang)", type: "Info")
             }
+        } else if !isAnimeContent() {
+            Logger.shared.log("Not anime content, skipping auto audio selection", type: "Debug")
         }
         
         let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: trackActions)
@@ -1104,6 +1119,22 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             return false
         case .episode(let showId, _, _):
             return trackerManager.cachedAniListId(for: showId) != nil
+        }
+    }
+
+    private func languageName(for code: String) -> String {
+        switch code.lowercased() {
+        case "jpn", "ja", "jp": return "japanese"
+        case "eng", "en", "us", "uk": return "english"
+        case "spa", "es", "esp": return "spanish"
+        case "fre", "fra", "fr": return "french"
+        case "ger", "deu", "de": return "german"
+        case "ita", "it": return "italian"
+        case "por", "pt": return "portuguese"
+        case "rus", "ru": return "russian"
+        case "chi", "zho", "zh": return "chinese"
+        case "kor", "ko": return "korean"
+        default: return ""
         }
     }
     
