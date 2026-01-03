@@ -126,6 +126,7 @@ final class MPVSoftwareRenderer {
     private var lastSubtitleCheckTime: Double = -1.0
     private var cachedSubtitleText: NSAttributedString?
     private var subtitleRenderCache: SubtitleRenderCache?
+    private var forceSubtitleRender: Bool = false
     private var lastRenderDimensions: CGSize = .zero
     private let subtitleUpdateInterval: Double = 1.0
     private var lastPixelBufferCreateWidth: Int = -1
@@ -529,11 +530,22 @@ final class MPVSoftwareRenderer {
         
         let updateFlags = UInt32(status)
         
+        var didRender = false
+
         // Render frame if there's a new frame AND video is playing (or new frame from seek)
         if updateFlags & MPV_RENDER_UPDATE_FRAME.rawValue != 0 {
             renderFrame()
+            didRender = true
+        } else if isPaused && forceSubtitleRender {
+            // While paused, still render once to draw subtitles
+            renderFrame()
+            didRender = true
         }
-        
+
+        if didRender {
+            forceSubtitleRender = false
+        }
+
         // Only schedule future renders when playing (don't loop renders while paused)
         if status > 0 && !isPaused {
             scheduleRender()
@@ -661,8 +673,8 @@ final class MPVSoftwareRenderer {
             let currentTime = cachedPosition
             let timeDelta = abs(currentTime - lastSubtitleCheckTime)
             
-            // Only check for new subtitle text when playing (skip when paused to reduce thermal load)
-            if !isPaused && timeDelta >= subtitleUpdateInterval {
+            // Update subtitle text even when paused so overlays show on paused frames
+            if timeDelta >= subtitleUpdateInterval {
                 lastSubtitleCheckTime = currentTime
                 // Check for external subtitle first
                 cachedSubtitleText = delegate?.renderer(self, getSubtitleForTime: currentTime)
@@ -1335,6 +1347,8 @@ final class MPVSoftwareRenderer {
             subtitleRenderCache = nil
             cachedSubtitleText = nil
             lastSubtitleCheckTime = -1.0
+            forceSubtitleRender = true
+            scheduleRender()
         case "track-list":
             delegate?.rendererDidChangeTracks(self)
         default:
@@ -1745,6 +1759,7 @@ final class MPVSoftwareRenderer {
             self.subtitleRenderCache = nil
             self.cachedSubtitleText = nil
             self.lastSubtitleCheckTime = -1.0
+            self.forceSubtitleRender = true
             // Force immediate subtitle check on next render
             self.scheduleRender()
         }
