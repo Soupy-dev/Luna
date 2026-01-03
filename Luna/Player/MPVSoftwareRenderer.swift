@@ -98,6 +98,7 @@ final class MPVSoftwareRenderer {
     private var isLoading: Bool = false
     private var isRenderScheduled = false
     private var lastRenderTime: CFTimeInterval = 0
+    private var currentEmbeddedSubtitleText: String?
     private var minRenderInterval: CFTimeInterval
     private var isReadyToSeek: Bool = false
     private var lastSubtitleCheckTime: Double = -1.0
@@ -159,19 +160,7 @@ final class MPVSoftwareRenderer {
         setOption(name: "subs-fallback", value: "yes")
         setOption(name: "sub-ass", value: "yes")
         setOption(name: "embeddedfonts", value: "yes")
-        setOption(name: "blend-subtitles", value: "yes")
-        setOption(name: "sub-visibility", value: "no")
-        // Force visible, readable defaults for embedded subs
-        setOption(name: "sub-ass-override", value: "force")
-        setOption(name: "sub-scale-by-window", value: "yes")
-        setOption(name: "sub-use-margins", value: "no")
-        setOption(name: "sub-pos", value: "92")
-        setOption(name: "sub-font-size", value: "36")
-        setOption(name: "sub-color", value: "#FFFFFFFF")
-        setOption(name: "sub-border-color", value: "#FF000000")
-        setOption(name: "sub-border-size", value: "2")
-        setOption(name: "sub-shadow-color", value: "#80000000")
-        setOption(name: "sub-shadow-offset", value: "1")
+        setOption(name: "sub-visibility", value: "yes")
         
         let initStatus = mpv_initialize(handle)
         guard initStatus >= 0 else {
@@ -409,7 +398,8 @@ final class MPVSoftwareRenderer {
             ("time-pos", MPV_FORMAT_DOUBLE),
             ("pause", MPV_FORMAT_FLAG),
             ("sid", MPV_FORMAT_INT64),
-            ("sub-visibility", MPV_FORMAT_FLAG)
+            ("sub-visibility", MPV_FORMAT_FLAG),
+            ("sub-text", MPV_FORMAT_STRING)
         ]
         
         for (name, format) in properties {
@@ -604,7 +594,15 @@ final class MPVSoftwareRenderer {
             // Only check for new subtitle text periodically
             if timeDelta >= subtitleUpdateInterval {
                 lastSubtitleCheckTime = currentTime
+                // Check for external subtitle first
                 cachedSubtitleText = delegate?.renderer(self, getSubtitleForTime: currentTime)
+                
+                // If no external subtitle, check for embedded subtitle
+                if cachedSubtitleText == nil || cachedSubtitleText?.length == 0 {
+                    if let embeddedText = currentEmbeddedSubtitleText, !embeddedText.isEmpty {
+                        cachedSubtitleText = createAttributedString(from: embeddedText, style: style)
+                    }
+                }
             }
             
             // Burn cached subtitle image if text exists and hasn't expired from cache
@@ -1325,6 +1323,13 @@ final class MPVSoftwareRenderer {
             } else {
                 Logger.shared.log("Failed to read sub-visibility (status=\(status))", type: "Warn")
             }
+        case "sub-text":
+            // Extract embedded subtitle text for manual rendering
+            if let text = getStringProperty(handle: handle, name: "sub-text"), !text.isEmpty {
+                currentEmbeddedSubtitleText = text
+            } else {
+                currentEmbeddedSubtitleText = nil
+            }
         default:
             break
         }
@@ -1348,6 +1353,46 @@ final class MPVSoftwareRenderer {
                 return mpv_get_property(handle, pointer, format, mutablePointer)
             }
         }
+    }
+    
+    private func createAttributedString(from text: String, style: SubtitleStyle) -> NSAttributedString {
+        // Strip ASS tags for simple rendering
+        let cleanText = stripASSTags(from: text)
+        
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.boldSystemFont(ofSize: style.fontSize),
+            .foregroundColor: style.foregroundColor,
+            .strokeColor: style.strokeColor,
+            .strokeWidth: -style.strokeWidth
+        ]
+        
+        return NSAttributedString(string: cleanText, attributes: attributes)
+    }
+    
+    private func stripASSTags(from text: String) -> String {
+        // Remove ASS override codes like {\tags}
+        var result = text
+        while let start = result.range(of: "{"), let end = result.range(of: "}", range: start.upperBound..<result.endIndex) {
+            result.removeSubrange(start.lowerBound..<end.upperBound)
+        }
+        // Convert ASS line breaks (\\N) to actual newlines
+        result = result.replacingOccurrences(of: "\\\\N", with: "\n")
+        result = result.replacingOccurrences(of: "\\\\n", with: "\n")
+        // Clean up any remaining whitespace
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    private func stripASSTags(from text: String) -> String {
+        // Remove ASS override codes like {\tags}
+        var result = text
+        while let start = result.range(of: "{"), let end = result.range(of: "}", range: start.upperBound..<result.endIndex) {
+            result.removeSubrange(start.lowerBound..<end.upperBound)
+        }
+        // Convert ASS line breaks (\N) to actual newlines
+        result = result.replacingOccurrences(of: "\\N", with: "\n")
+        result = result.replacingOccurrences(of: "\\n", with: "\n")
+        // Clean up any remaining whitespace
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
     @inline(__always)
@@ -1646,7 +1691,7 @@ final class MPVSoftwareRenderer {
         renderQueue.async { [weak self] in
             guard let self, let handle = self.mpv else { return }
 
-            // Try mpv commands first (synchronous, thread-safe)
+            // Set subtitle track and enable visibility
             let sidStatus = self.commandSync(handle, ["set", "sid", String(id)])
             let visStatus = self.commandSync(handle, ["set", "sub-visibility", "yes"])
 
@@ -1661,9 +1706,9 @@ final class MPVSoftwareRenderer {
             // Read back sid to verify
             var readSid: Int64 = -1
             let readStatus = self.getProperty(handle: handle, name: "sid", format: MPV_FORMAT_INT64, value: &readSid)
-            Logger.shared.log("MPVSoftwareRenderer: subtitle track request id=\(id) sidStatus=\(sidStatus) visStatus=\(visStatus) readStatus=\(readStatus) readSid=\(readSid)", type: "Info")
+            Logger.shared.log("MPVSoftwareRenderer: subtitle track set - id=\(id) sidStatus=\(sidStatus) visStatus=\(visStatus) readSid=\(readSid)", type: "Info")
 
-            // Hard fallback: if the requested track didn't stick, try the first available track
+            // Fallback to first track if requested track failed
             if readStatus < 0 || readSid != Int64(id) {
                 let tracks = self.getSubtitleTracks()
                 if let first = tracks.first {
@@ -1671,23 +1716,8 @@ final class MPVSoftwareRenderer {
                     _ = self.commandSync(handle, ["set", "sid", String(first.0)])
                     _ = self.commandSync(handle, ["set", "sub-visibility", "yes"])
                     readSid = Int64(first.0)
-                } else {
-                    Logger.shared.log("MPVSoftwareRenderer: fallback failed, no subtitle tracks found", type: "Error")
                 }
             }
-
-            // Reinforce visibility/style to avoid invisible ASS styling
-            _ = self.commandSync(handle, ["set", "sub-visibility", "yes"])
-            _ = self.commandSync(handle, ["set", "sub-ass-override", "force"])
-            _ = self.commandSync(handle, ["set", "sub-scale-by-window", "yes"])
-            _ = self.commandSync(handle, ["set", "sub-use-margins", "no"])
-            _ = self.commandSync(handle, ["set", "sub-pos", "92"])
-            _ = self.commandSync(handle, ["set", "sub-font-size", "36"])
-            _ = self.commandSync(handle, ["set", "sub-color", "#FFFFFFFF"])
-            _ = self.commandSync(handle, ["set", "sub-border-color", "#FF000000"])
-            _ = self.commandSync(handle, ["set", "sub-border-size", "2"])
-            _ = self.commandSync(handle, ["set", "sub-shadow-color", "#80000000"])
-            _ = self.commandSync(handle, ["set", "sub-shadow-offset", "1"])
 
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }

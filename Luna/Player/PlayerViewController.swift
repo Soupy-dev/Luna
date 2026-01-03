@@ -1684,12 +1684,12 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
     
     func renderer(_ renderer: MPVSoftwareRenderer, subtitleTrackDidChange trackId: Int) {
         if isClosing { return }
-        // When an in-stream subtitle track is selected, enable subtitle display
+        // When an embedded subtitle track is selected, enable subtitle display
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.subtitleModel.isVisible = true
             self.updateSubtitleButtonAppearance()
-            // In-stream subtitles will render via mpv's internal rendering (sub-visibility is enabled)
+            // Embedded subtitles are extracted from mpv and rendered manually
         }
     }
 
