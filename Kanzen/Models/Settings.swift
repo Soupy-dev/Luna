@@ -12,6 +12,13 @@ enum Appearance: String, CaseIterable, Identifiable {
     var id: String { self.rawValue }
 }
 
+enum PlayerChoice: String, CaseIterable, Identifiable {
+    case mpv = "MPV"
+    case vlc = "VLC"
+    
+    var id: String { self.rawValue }
+}
+
 enum SubtitleSize: String, CaseIterable, Identifiable {
     case small = "Small"
     case medium = "Medium"
@@ -78,6 +85,12 @@ class Settings: ObservableObject {
         }
     }
     
+    @Published var playerChoice: PlayerChoice {
+        didSet {
+            UserDefaults.standard.set(playerChoice.rawValue, forKey: "playerChoice")
+        }
+    }
+    
     init() {
         if let colorData = UserDefaults.standard.data(forKey: "accentColor"),
            let uiColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData) {
@@ -103,6 +116,14 @@ class Settings: ObservableObject {
         }
 
         self.preferredAnimeAudioLanguage = UserDefaults.standard.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn"
+        
+        // Load player choice
+        if let choiceRawValue = UserDefaults.standard.string(forKey: "playerChoice"),
+           let choice = PlayerChoice(rawValue: choiceRawValue) {
+            self.playerChoice = choice
+        } else {
+            self.playerChoice = .mpv  // Default to mpv for backward compatibility
+        }
         
         updateAppearance()
     }

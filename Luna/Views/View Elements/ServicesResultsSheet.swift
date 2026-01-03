@@ -1195,56 +1195,32 @@ struct ModulesSearchResultsSheet: View {
             
             Logger.shared.log("Final headers: \(finalHeaders)", type: "Stream")
             
-            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
-            let inAppPlayer = (inAppRaw == "mpv") ? "mpv" : "Normal"
+            let playerChoice = Settings.shared.playerChoice
             
-            if inAppPlayer == "mpv" {
-                let preset = PlayerPreset.presets.first
-                Logger.shared.log("Creating PlayerViewController with \(subtitles?.count ?? 0) subtitle URLs", type: "Stream")
-                let pvc = PlayerViewController(
-                    url: streamURL,
-                    preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
-                    headers: finalHeaders,
-                    subtitles: subtitles
-                )
-                if isMovie {
-                    pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle)
-                } else if let episode = selectedEpisode {
-                    Logger.shared.log("ModulesSearch playback: Setting mediaInfo to S\(episode.seasonNumber)E\(episode.episodeNumber)", type: "Stream")
-                    pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber)
-                } else {
-                    Logger.shared.log("ModulesSearch playback: WARNING - selectedEpisode is nil! tvShow progress may be incorrect", type: "Error")
-                }
-                pvc.modalPresentationStyle = .fullScreen
-                
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.topmostViewController().present(pvc, animated: true, completion: nil)
-                } else {
-                    Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
-                }
-                return
+            // Both MPV and VLC renderers support the same PlayerViewController interface
+            let preset = PlayerPreset.presets.first
+            Logger.shared.log("Creating PlayerViewController with \(playerChoice.rawValue) renderer and \(subtitles?.count ?? 0) subtitle URLs", type: "Stream")
+            let pvc = PlayerViewController(
+                url: streamURL,
+                preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
+                headers: finalHeaders,
+                subtitles: subtitles
+            )
+            if isMovie {
+                pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle)
+            } else if let episode = selectedEpisode {
+                Logger.shared.log("ModulesSearch playback: Setting mediaInfo to S\(episode.seasonNumber)E\(episode.episodeNumber)", type: "Stream")
+                pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber)
             } else {
-                let playerVC = NormalPlayer()
-                let asset = AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": finalHeaders])
-                let item = AVPlayerItem(asset: asset)
-                playerVC.player = AVPlayer(playerItem: item)
-                if isMovie {
-                    playerVC.mediaInfo = .movie(id: tmdbId, title: mediaTitle)
-                } else if let episode = selectedEpisode {
-                    playerVC.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber)
-                }
-                playerVC.modalPresentationStyle = .fullScreen
-                
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.topmostViewController().present(playerVC, animated: true) {
-                        playerVC.player?.play()
-                    }
-                } else {
-                    Logger.shared.log("Failed to find root view controller to present player", type: "Error")
-                    playerVC.player?.play()
-                }
+                Logger.shared.log("ModulesSearch playback: WARNING - selectedEpisode is nil! tvShow progress may be incorrect", type: "Error")
+            }
+            pvc.modalPresentationStyle = .fullScreen
+            
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let rootVC = windowScene.windows.first?.rootViewController {
+                rootVC.topmostViewController().present(pvc, animated: true, completion: nil)
+            } else {
+                Logger.shared.log("Failed to find root view controller to present player", type: "Error")
             }
         }
     }

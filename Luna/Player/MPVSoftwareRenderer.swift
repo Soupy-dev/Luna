@@ -10,7 +10,7 @@ import Libmpv
 import CoreMedia
 import CoreVideo
 import AVFoundation
-import CoreImage
+I import CoreImage
 import Metal
 import MetalKit
 
