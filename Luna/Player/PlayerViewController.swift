@@ -191,7 +191,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         b.setImage(img, for: .normal)
         b.tintColor = .white
         b.alpha = 0.0
-        b.showsMenuAsPrimaryAction = true
+        b.showsMenuAsPrimaryAction = false
         return b
     }()
     
@@ -1213,15 +1213,52 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func subtitleButtonTapped() {
-        guard !subtitleURLs.isEmpty else { return }
-        
-        if subtitleURLs.count == 1 {
-            subtitleModel.isVisible.toggle()
-            updateSubtitleButtonAppearance()
-        } else {
-            showSubtitleSelectionMenu()
+        // External subtitles present
+        if !subtitleURLs.isEmpty {
+            if subtitleURLs.count == 1 {
+                subtitleModel.isVisible.toggle()
+                updateSubtitleButtonAppearance()
+            } else {
+                showSubtitleSelectionMenu()
+            }
+            showControlsTemporarily()
+            Logger.shared.log("subtitleButtonTapped: handled external subtitle flow", type: "Info")
+            return
         }
-        
+
+        // Embedded subtitles flow
+        let embeddedTracks = renderer.getSubtitleTracks()
+        guard !embeddedTracks.isEmpty else {
+            Logger.shared.log("subtitleButtonTapped: no embedded tracks available", type: "Info")
+            showControlsTemporarily()
+            return
+        }
+
+        let alert = UIAlertController(title: "Select Subtitle", message: nil, preferredStyle: .actionSheet)
+
+        let disable = UIAlertAction(title: "Disable Subtitles", style: .destructive) { [weak self] _ in
+            Logger.shared.log("Embedded subtitles disabled via action sheet", type: "Info")
+            self?.renderer.disableSubtitles()
+            self?.updateSubtitleTracksMenu()
+        }
+        alert.addAction(disable)
+
+        for (id, name) in embeddedTracks {
+            alert.addAction(UIAlertAction(title: name, style: .default) { [weak self] _ in
+                Logger.shared.log("Embedded subtitle selected via action sheet: id=\(id) name=\(name)", type: "Info")
+                self?.renderer.setSubtitleTrack(id: id)
+                self?.updateSubtitleTracksMenu()
+            })
+        }
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+
+        if let pop = alert.popoverPresentationController {
+            pop.sourceView = subtitleButton
+            pop.sourceRect = subtitleButton.bounds
+        }
+
+        present(alert, animated: true)
         showControlsTemporarily()
     }
     
