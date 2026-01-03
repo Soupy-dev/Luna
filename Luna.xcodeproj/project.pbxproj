@@ -125,7 +125,6 @@
 		14AAA0023FFF000200AAAAAA /* CatalogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AAA0013FFF000100AAAAAA /* CatalogManager.swift */; };
 		14AAA0043FFF000400AAAAAA /* CatalogsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */; };
 		2F0A1B002F0A1B002F0A1B00 /* VLCRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F0A1B012F0A1B002F0A1B01 /* VLCRenderer.swift */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		12F745372EB539F000889684 /* Embed Frameworks */ = {
