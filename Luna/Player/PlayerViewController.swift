@@ -651,8 +651,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             try rendererStart()
             logMPV("renderer.start succeeded")
         } catch {
-            Logger.shared.log("Failed to start MPV renderer: \(error)", type: "Error")
-            presentErrorAlert(title: "Playback Error", message: "Failed to start renderer: \(error)")
+            let rendererName = vlcRenderer != nil ? "VLC" : "MPV"
+            Logger.shared.log("Failed to start \(rendererName) renderer: \(error)", type: "Error")
+            presentErrorAlert(title: "Playback Error", message: "Failed to start \(rendererName) renderer: \(error)")
         }
         
         pipController = PiPController(sampleBufferDisplayLayer: displayLayer)
