@@ -45,6 +45,7 @@ enum ExternalPlayer: String, CaseIterable, Identifiable {
 enum InAppPlayer: String, CaseIterable, Identifiable {
     case normal = "Normal"
     case mpv = "mpv"
+    case vlc = "libVLC"
     
     var id: String { rawValue }
 }
@@ -63,7 +64,12 @@ final class PlayerSettingsStore: ObservableObject {
     }
     
     @Published var inAppPlayer: InAppPlayer {
-        didSet { UserDefaults.standard.set(inAppPlayer.rawValue, forKey: "inAppPlayer") }
+        didSet { 
+            // Map InAppPlayer to PlayerChoice in Settings
+            let playerChoice: PlayerChoice = didSet == .vlc ? .vlc : .mpv
+            Settings.shared.playerChoice = playerChoice
+            UserDefaults.standard.set(inAppPlayer.rawValue, forKey: "inAppPlayer")
+        }
     }
 
     @Published var mpvTwoFingerTapEnabled: Bool {
@@ -80,8 +86,10 @@ final class PlayerSettingsStore: ObservableObject {
         
         self.landscapeOnly = UserDefaults.standard.bool(forKey: "alwaysLandscape")
         
+        // Load from Settings.shared.playerChoice if available, otherwise from legacy storage
         let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? InAppPlayer.normal.rawValue
-        self.inAppPlayer = InAppPlayer(rawValue: inAppRaw) ?? .normal
+        let playerChoice = Settings.shared.playerChoice
+        self.inAppPlayer = playerChoice == .vlc ? .vlc : (inAppRaw == InAppPlayer.vlc.rawValue ? .vlc : .mpv)
 
         if UserDefaults.standard.object(forKey: "mpvTwoFingerTapEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "mpvTwoFingerTapEnabled")
@@ -194,6 +202,21 @@ struct PlayerSettingsView: View {
                         Spacer()
                         Toggle("", isOn: $store.mpvTwoFingerTapEnabled)
                             .tint(accentColorManager.currentAccentColor)
+                    }
+                }
+            } else if store.inAppPlayer == .vlc {
+                Section(header: Text("libVLC")) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Hardware Acceleration")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Text("Use hardware acceleration for video decoding when available.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer()
                     }
                 }
             }
