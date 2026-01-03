@@ -2043,5 +2043,12 @@ final class MPVSoftwareRenderer {
 
         context.draw(cgImage, in: renderRect)
     }
+    
+    func loadExternalSubtitles(urls: [String]) {
+        // MPV external subtitle loading is handled elsewhere or not supported
+    }
+    func clearSubtitleCache() {
+        // MPV subtitle cache clearing is handled elsewhere or not needed
+    }
 }
 
