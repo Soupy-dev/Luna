@@ -48,3 +48,10 @@ jobs:
           pod install
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
+      - name: Build tvOS IPA
+        run: ./ipabuild.sh tvos
+      - name: Upload tvOS IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Luna-tvOS
+          path: build/Luna-tvOS.ipa
