@@ -872,12 +872,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         animateButtonTap(skipForwardButton)
         showControlsTemporarily()
     }
-    
-    @objc private func subtitleButtonTapped() {
-        Logger.shared.log("subtitleButtonTapped called - button was physically tapped", type: "Info")
-        showControlsTemporarily()
-    }
-    
     private func updateSubtitleMenu() {
         var trackActions: [UIAction] = []
         
