@@ -1333,8 +1333,11 @@ final class MPVSoftwareRenderer {
             // Extract embedded subtitle text for manual rendering
             if let text = getStringProperty(handle: handle, name: "sub-text"), !text.isEmpty {
                 currentEmbeddedSubtitleText = text
+                let preview = text.prefix(80)
+                Logger.shared.log("mpv sub-text received (\(text.count) chars): \(preview)", type: "Debug")
             } else {
                 currentEmbeddedSubtitleText = nil
+                Logger.shared.log("mpv sub-text cleared", type: "Debug")
             }
             // Force subtitle refresh for back-to-back dialogue
             subtitleRenderCache = nil
@@ -1769,9 +1772,45 @@ final class MPVSoftwareRenderer {
         metalCommandQueue = device.makeCommandQueue()
         
         // Create render pipeline for subtitle composition
-        guard let library = device.makeDefaultLibrary() else {
-            Logger.shared.log("Failed to load Metal library with shaders", type: "Error")
-            return
+        let library: MTLLibrary?
+        if let defaultLib = device.makeDefaultLibrary() {
+            library = defaultLib
+        } else {
+            // Fallback: compile shaders from inline source when .metal is not bundled
+            let shaderSource = """
+            #include <metal_stdlib>
+            using namespace metal;
+
+            struct VertexOut {
+                float4 position [[position]];
+                float2 texCoords;
+            };
+
+            vertex VertexOut vertexShader(
+                uint vertexID [[vertex_id]],
+                constant float *vertices [[buffer(0)]])
+            {
+                uint offset = vertexID * 6;
+                VertexOut out;
+                out.position = float4(vertices[offset], vertices[offset + 1], vertices[offset + 2], vertices[offset + 3]);
+                out.texCoords = float2(vertices[offset + 4], vertices[offset + 5]);
+                return out;
+            }
+
+            fragment float4 fragmentShader(
+                VertexOut in [[stage_in]],
+                texture2d<float> subtitleTexture [[texture(0)]],
+                sampler textureSampler [[sampler(0)]])
+            {
+                return subtitleTexture.sample(textureSampler, in.texCoords);
+            }
+            """
+            do {
+                library = try device.makeLibrary(source: shaderSource, options: nil)
+            } catch {
+                Logger.shared.log("Failed to load Metal library with shaders (inline compile failed): \(error)", type: "Error")
+                return
+            }
         }
         
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
@@ -1820,6 +1859,12 @@ final class MPVSoftwareRenderer {
         let bufferHeight = CVPixelBufferGetHeight(pixelBuffer)
         
         guard bufferWidth > 0, bufferHeight > 0 else { return }
+
+        let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
+        guard let renderRect = subtitleRenderRect(for: imageSize, bufferWidth: bufferWidth, bufferHeight: bufferHeight, style: style) else {
+            renderSubtitleWithCPU(cgImage: cgImage, into: pixelBuffer, style: style)
+            return
+        }
         
         // Create Metal texture from subtitle CGImage
         let ciImage = CIImage(cgImage: cgImage)
@@ -1886,7 +1931,8 @@ final class MPVSoftwareRenderer {
         renderEncoder.setFragmentSamplerState(samplerState, index: 0)
         
         // Draw quad covering subtitle area
-        drawSubtitleQuad(encoder: renderEncoder)
+        let vertices = subtitleQuadVertices(for: renderRect, bufferWidth: bufferWidth, bufferHeight: bufferHeight)
+        drawSubtitleQuad(encoder: renderEncoder, vertices: vertices)
         
         renderEncoder.endEncoding()
         commandBuffer.commit()
@@ -1918,17 +1964,50 @@ final class MPVSoftwareRenderer {
         return descriptor
     }
     
-    private func drawSubtitleQuad(encoder: MTLRenderCommandEncoder) {
-        let vertices: [Float] = [
-            -1.0, -1.0, 0.0, 1.0, 0.0, 1.0,
-             1.0, -1.0, 0.0, 1.0, 1.0, 1.0,
-            -1.0,  1.0, 0.0, 1.0, 0.0, 0.0,
-             1.0,  1.0, 0.0, 1.0, 1.0, 0.0
+    private func subtitleRenderRect(for imageSize: CGSize, bufferWidth: Int, bufferHeight: Int, style: SubtitleStyle) -> CGRect? {
+        guard bufferWidth > 0, bufferHeight > 0, imageSize.width > 0, imageSize.height > 0 else { return nil }
+
+        let bottomMargin = max(CGFloat(bufferHeight) * 0.08, style.fontSize * 1.4)
+        let horizontalMargin = max(CGFloat(bufferWidth) * 0.02, style.fontSize * 0.8)
+        let availableWidth = max(CGFloat(bufferWidth) - horizontalMargin * 2.0, 1.0)
+        let scale = min(1.0, availableWidth / imageSize.width)
+
+        let renderWidth = imageSize.width * scale
+        let renderHeight = imageSize.height * scale
+
+        var xPosition = (CGFloat(bufferWidth) - renderWidth) / 2.0
+        if xPosition < horizontalMargin {
+            xPosition = horizontalMargin
+        }
+        if xPosition + renderWidth > CGFloat(bufferWidth) - horizontalMargin {
+            xPosition = max(horizontalMargin, CGFloat(bufferWidth) - horizontalMargin - renderWidth)
+        }
+
+        let yPosition = CGFloat(bufferHeight) - renderHeight - bottomMargin
+        let renderRect = CGRect(x: xPosition, y: yPosition, width: renderWidth, height: renderHeight)
+
+        guard renderRect.width > 0, renderRect.height > 0 else { return nil }
+        return renderRect
+    }
+
+    private func subtitleQuadVertices(for rect: CGRect, bufferWidth: Int, bufferHeight: Int) -> [Float] {
+        let left = Float((rect.minX / CGFloat(bufferWidth)) * 2.0 - 1.0)
+        let right = Float((rect.maxX / CGFloat(bufferWidth)) * 2.0 - 1.0)
+        let top = Float(1.0 - (rect.minY / CGFloat(bufferHeight)) * 2.0)
+        let bottom = Float(1.0 - (rect.maxY / CGFloat(bufferHeight)) * 2.0)
+
+        return [
+            left,  bottom, 0.0, 1.0, 0.0, 1.0, // bottom-left
+            right, bottom, 0.0, 1.0, 1.0, 1.0, // bottom-right
+            left,  top,    0.0, 1.0, 0.0, 0.0, // top-left
+            right, top,    0.0, 1.0, 1.0, 0.0  // top-right
         ]
-        
+    }
+
+    private func drawSubtitleQuad(encoder: MTLRenderCommandEncoder, vertices: [Float]) {
         guard let device = metalDevice else { return }
         guard let vertexBuffer = device.makeBuffer(bytes: vertices, length: vertices.count * MemoryLayout<Float>.size, options: []) else { return }
-        
+
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
@@ -1951,25 +2030,8 @@ final class MPVSoftwareRenderer {
         }
         
         let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
-        let bottomMargin = max(CGFloat(bufferHeight) * 0.08, style.fontSize * 1.4)
-        let horizontalMargin = max(CGFloat(bufferWidth) * 0.02, style.fontSize * 0.8)
-        let availableWidth = max(CGFloat(bufferWidth) - horizontalMargin * 2.0, 1.0)
-        let scale = min(1.0, availableWidth / imageSize.width)
-        
-        let renderWidth = imageSize.width * scale
-        let renderHeight = imageSize.height * scale
-        
-        var xPosition = (CGFloat(bufferWidth) - renderWidth) / 2.0
-        if xPosition < horizontalMargin {
-            xPosition = horizontalMargin
-        }
-        if xPosition + renderWidth > CGFloat(bufferWidth) - horizontalMargin {
-            xPosition = max(horizontalMargin, CGFloat(bufferWidth) - horizontalMargin - renderWidth)
-        }
-        
-        let yPosition = CGFloat(bufferHeight) - renderHeight - bottomMargin
-        let renderRect = CGRect(x: xPosition, y: yPosition, width: renderWidth, height: renderHeight)
-        
+        guard let renderRect = subtitleRenderRect(for: imageSize, bufferWidth: bufferWidth, bufferHeight: bufferHeight, style: style) else { return }
+
         context.draw(cgImage, in: renderRect)
     }
 }
