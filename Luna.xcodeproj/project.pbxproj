@@ -140,7 +140,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-	1A1A1A1A1A1A1A1A1A1A1A1B /* VLCRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VLCRenderer.swift; sourceTree = "<group>"; };
 		12201F502EBE91870033073C /* ServiceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceStore.swift; sourceTree = "<group>"; };
 		12201F532EBE922D0033073C /* ServiceModels.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = ServiceModels.xcdatamodel; sourceTree = "<group>"; };
 		1240112B2EFF3B8B00CEC6EB /* Luna.local.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Luna.local.entitlements; sourceTree = "<group>"; };
