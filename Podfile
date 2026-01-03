@@ -3,7 +3,7 @@
 platform :ios, '14.0'
 
 # Disable warning about overriding build settings  
-install! 'cocoapods', :disable_input_output_paths => true, :warn_for_unused_master_specs_repo => false
+install! 'cocoapods', :warn_for_unused_master_specs_repo => false
 
 target 'Luna' do
   use_frameworks!
@@ -46,6 +46,8 @@ post_install do |installer|
           build_config.each do |key, value|
             config.build_settings[key] = value
           end
+          # Allow CocoaPods run scripts to access generated helpers on Xcode 15+/16 sandbox
+          config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
         end
       end
     end
