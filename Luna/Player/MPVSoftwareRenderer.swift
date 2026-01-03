@@ -839,45 +839,41 @@ final class MPVSoftwareRenderer {
         )
         
         // Check if we have a cached image for this text
-        let cachedResult: (image: CGImage, size: CGSize)? = subtitleImageLock.withLock {
-            if let cache = subtitleRenderCache, cache.key == key {
-                return (cache.image, cache.size)
-            }
-            return nil
+        subtitleImageLock.lock()
+        if let cache = subtitleRenderCache, cache.key == key {
+            let result = (cache.image, cache.size)
+            subtitleImageLock.unlock()
+            return result
         }
         
-        if let cachedResult = cachedResult {
-            return cachedResult
+        // Check if we have a pending image for this text (from previous async work)
+        if let pending = pendingSubtitleImage, pending.key == key {
+            let result = (pending.image, pending.size)
+            subtitleImageLock.unlock()
+            return result
         }
+        subtitleImageLock.unlock()
         
-        // Check if we have a pending image for this text
-        let pendingResult: (image: CGImage, size: CGSize)? = subtitleImageLock.withLock {
-            if let pending = pendingSubtitleImage, pending.key == key {
-                return (pending.image, pending.size)
-            }
-            return nil
-        }
-        
-        if let pendingResult = pendingResult {
-            // Have pending image, queue async for future frames
-            subtitleRenderQueue.async { [weak self] in
-                self?.generateSubtitleImage(from: attributedText, style: style, maxWidth: maxWidth, key: key)
-            }
-            return pendingResult
-        }
-        
-        // No cache and no pending - render synchronously for first frame, then queue async
-        let result = generateSubtitleImage(from: attributedText, style: style, maxWidth: maxWidth, key: key)
-        
-        // Queue async work for smoother future frames
+        // Queue async subtitle generation to reduce thermal load
         subtitleRenderQueue.async { [weak self] in
             self?.generateSubtitleImage(from: attributedText, style: style, maxWidth: maxWidth, key: key)
         }
         
-        return result
+        // For first frame: render synchronously as fallback to ensure subtitle appears
+        // Subsequent frames will use cached or pending image
+        return generateSubtitleImage(from: attributedText, style: style, maxWidth: maxWidth, key: key)
     }
     
     private func generateSubtitleImage(from attributedText: NSAttributedString, style: SubtitleStyle, maxWidth: CGFloat, key: SubtitleRenderKey) -> (image: CGImage, size: CGSize)? {
+        // Early exit if another thread already rendered this (e.g., sync fallback completed before async work started)
+        subtitleImageLock.lock()
+        if let cache = subtitleRenderCache, cache.key == key {
+            let result = (cache.image, cache.size)
+            subtitleImageLock.unlock()
+            return result
+        }
+        subtitleImageLock.unlock()
+        
         return autoreleasepool {
             let mutable = NSMutableAttributedString(attributedString: attributedText)
             let fullRange = NSRange(location: 0, length: mutable.length)
