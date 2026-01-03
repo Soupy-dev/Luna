@@ -806,14 +806,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if isClosing { return }
         brightnessContainer.isHidden = true
         brightnessContainer.alpha = 0.0
-        dimmingView.alpha = 0.0
-    }
-#else
-    private func updateBrightnessControlVisibility() {
-        dimmingView.alpha = 0.0
-    }
-#endif
     
+            func rendererDidChangeTracks(_ renderer: MPVSoftwareRenderer) {
+                if isClosing { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.updateAudioTracksMenu()
+                }
+            }
     @objc private func handleHoldGesture(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
         case .began:
@@ -1267,6 +1267,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if !subtitleURLs.isEmpty {
             if subtitleURLs.count == 1 {
                 subtitleModel.isVisible.toggle()
+                renderer.refreshSubtitleOverlay()
                 updateSubtitleButtonAppearance()
             } else {
                 showSubtitleSelectionMenu()
@@ -1320,6 +1321,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         
         let disableAction = UIAlertAction(title: "Disable Subtitles", style: .default) { [weak self] _ in
             self?.subtitleModel.isVisible = false
+            self?.renderer.refreshSubtitleOverlay()
             self?.updateSubtitleButtonAppearance()
         }
         alert.addAction(disableAction)

@@ -1302,18 +1302,18 @@ final class MPVSoftwareRenderer {
             let status = getProperty(handle: handle, name: name, format: MPV_FORMAT_FLAG, value: &flag)
             if status >= 0 {
                 let newPaused = flag != 0
-                if newPaused != isPaused {
-                    isPaused = newPaused
-                    delegate?.renderer(self, didChangePause: isPaused)
-                }
-            }
-        case "sid":
-            var sidValue: Int64 = -1
-            let status = getProperty(handle: handle, name: name, format: MPV_FORMAT_INT64, value: &sidValue)
-            if status >= 0 {
-                Logger.shared.log("MPV property change: sid=\(sidValue)", type: "Info")
-                delegate?.renderer(self, subtitleTrackDidChange: Int(sidValue))
             } else {
+            case "sub-text":
+                // Extract embedded subtitle text for manual rendering
+                if let text = getStringProperty(handle: handle, name: "sub-text"), !text.isEmpty {
+                    currentEmbeddedSubtitleText = text
+                } else {
+                    currentEmbeddedSubtitleText = nil
+                }
+                // Force subtitle refresh for back-to-back dialogue
+                subtitleRenderCache = nil
+                cachedSubtitleText = nil
+                lastSubtitleCheckTime = -1.0
                 Logger.shared.log("Failed to read sid property (status=\(status))", type: "Warn")
             }
         case "sub-visibility":
@@ -1864,6 +1864,15 @@ final class MPVSoftwareRenderer {
             return
         }
         
+        // Ensure rendering covers the full pixel buffer
+        renderEncoder.setViewport(MTLViewport(
+            originX: 0,
+            originY: 0,
+            width: Double(bufferWidth),
+            height: Double(bufferHeight),
+            znear: 0,
+            zfar: 1
+        ))
         renderEncoder.setRenderPipelineState(pipelineState)
         renderEncoder.setFragmentTexture(metalTexture, index: 0)
         renderEncoder.setFragmentSamplerState(samplerState, index: 0)
