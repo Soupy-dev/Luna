@@ -345,7 +345,7 @@ final class VLCRenderer: NSObject {
     @objc private func mediaPlayerTimeChanged() {
         guard let player = mediaPlayer else { return }
         
-        let positionMs = player.time?.value?.doubleValue ?? 0
+        let positionMs = player.time.value?.doubleValue ?? 0
         let durationMs = player.media?.length?.value?.doubleValue ?? 0
         let position = positionMs / 1000.0
         let duration = durationMs / 1000.0
