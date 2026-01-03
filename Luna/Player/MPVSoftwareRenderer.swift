@@ -846,7 +846,7 @@ final class MPVSoftwareRenderer {
             
             if style.strokeWidth > 0 && style.strokeColor.cgColor.alpha > 0 {
                 mutable.addAttribute(.strokeColor, value: style.strokeColor, range: fullRange)
-                mutable.addAttribute(.strokeWidth, value: -style.strokeWidth * 2.0, range: fullRange)
+                mutable.addAttribute(.strokeWidth, value: -style.strokeWidth, range: fullRange)
             } else {
                 mutable.removeAttribute(.strokeColor, range: fullRange)
                 mutable.removeAttribute(.strokeWidth, range: fullRange)
@@ -871,7 +871,7 @@ final class MPVSoftwareRenderer {
             let paddedSize = CGSize(width: boundingRect.width + padding * 2.0, height: boundingRect.height + padding * 2.0)
             let textRect = CGRect(origin: CGPoint(x: padding, y: padding), size: boundingRect.size)
             
-            UIGraphicsBeginImageContextWithOptions(paddedSize, false, 0)
+            UIGraphicsBeginImageContextWithOptions(paddedSize, false, 2.0)
             defer { UIGraphicsEndImageContext() }
             
             if strokeRadius > 0, let ctx = UIGraphicsGetCurrentContext() {

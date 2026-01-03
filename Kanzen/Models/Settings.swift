@@ -31,10 +31,10 @@ enum SubtitleSize: String, CaseIterable, Identifiable {
     
     var strokeWidth: CGFloat {
         switch self {
-        case .small: return 3.0
-        case .medium: return 3.5
-        case .large: return 4.0
-        case .extraLarge: return 4.5
+        case .small: return 1.5
+        case .medium: return 1.8
+        case .large: return 2.0
+        case .extraLarge: return 2.5
         }
     }
 }
