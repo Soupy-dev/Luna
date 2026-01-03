@@ -624,6 +624,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         modalPresentationCapturesStatusBarAppearance = true
 #endif
         setupLayout()
+        
+        // Add VLC rendering view if using VLC renderer
+        if let vlcRenderer = vlcRenderer, let vlcView = (renderer as? VLCRenderer)?.getRenderingView() {
+            videoContainer.addSubview(vlcView)
+            vlcView.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                vlcView.topAnchor.constraint(equalTo: videoContainer.topAnchor),
+                vlcView.bottomAnchor.constraint(equalTo: videoContainer.bottomAnchor),
+                vlcView.leadingAnchor.constraint(equalTo: videoContainer.leadingAnchor),
+                vlcView.trailingAnchor.constraint(equalTo: videoContainer.trailingAnchor)
+            ])
+        }
+        
         setupActions()
         setupHoldGesture()
         setupDoubleTapSkipGestures()
@@ -692,8 +705,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         displayLayer.frame = videoContainer.bounds
-        displayLayer.isHidden = false
-        displayLayer.opacity = 1.0
+        // Only show displayLayer when using MPV renderer; hide when using VLC
+        displayLayer.isHidden = (vlcRenderer != nil)
+        displayLayer.opacity = (vlcRenderer != nil) ? 0.0 : 1.0
         
         if let gradientLayer = controlsOverlayView.layer.sublayers?.first(where: { $0.name == "gradientLayer" }) {
             gradientLayer.frame = controlsOverlayView.bounds
@@ -1839,6 +1853,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func pipTapped() {
+        // PiP is not supported with VLC renderer; only works with MPV
+        if vlcRenderer != nil {
+            presentErrorAlert(title: "Picture in Picture Unavailable", message: "Picture in Picture is not supported with the libVLC player.")
+            return
+        }
+        
         guard let pip = pipController else { return }
         if pip.isPictureInPictureActive {
             pip.stopPictureInPicture()

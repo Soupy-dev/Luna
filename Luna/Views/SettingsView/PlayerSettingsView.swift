@@ -45,7 +45,7 @@ enum ExternalPlayer: String, CaseIterable, Identifiable {
 enum InAppPlayer: String, CaseIterable, Identifiable {
     case normal = "Normal"
     case mpv = "mpv"
-    case vlc = "libVLC"
+    // case vlc = "libVLC"  // TODO: Implement proper Metal/OpenGL rendering for VLC
     
     var id: String { rawValue }
 }
@@ -66,7 +66,7 @@ final class PlayerSettingsStore: ObservableObject {
     @Published var inAppPlayer: InAppPlayer {
         didSet { 
             // Map InAppPlayer to PlayerChoice in Settings
-            let playerChoice: PlayerChoice = inAppPlayer == .vlc ? .vlc : .mpv
+            let playerChoice: PlayerChoice = .mpv  // Currently only MPV is supported
             Settings.shared.playerChoice = playerChoice
             UserDefaults.standard.set(inAppPlayer.rawValue, forKey: "inAppPlayer")
         }

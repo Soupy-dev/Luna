@@ -38,6 +38,9 @@ final class VLCRenderer: NSObject {
     private let eventQueue = DispatchQueue(label: "vlc.renderer.events", qos: .utility)
     private let stateQueue = DispatchQueue(label: "vlc.renderer.state", attributes: .concurrent)
     
+    // VLC rendering view - this is what we'll add to the view hierarchy
+    private let vlcView = UIView()
+    
     private var vlcInstance: VLCMediaList?
     private var mediaPlayer: VLCMediaPlayer?
     private var currentMedia: VLCMedia?
@@ -58,10 +61,23 @@ final class VLCRenderer: NSObject {
     init(displayLayer: AVSampleBufferDisplayLayer) {
         self.displayLayer = displayLayer
         super.init()
+        setupVLCView()
     }
     
     deinit {
         stop()
+    }
+    
+    // MARK: - View Setup
+    
+    private func setupVLCView() {
+        vlcView.backgroundColor = .black
+        vlcView.clipsToBounds = true
+    }
+    
+    /// Return the VLC view to be added to the view hierarchy
+    func getRenderingView() -> UIView {
+        return vlcView
     }
     
     // MARK: - Lifecycle
@@ -70,14 +86,16 @@ final class VLCRenderer: NSObject {
         guard !isRunning else { return }
         
         do {
-            mediaPlayer = VLCMediaPlayer()
+            mediaPlayer = VLCMediaPlayer(options: ["--video-on-top"])
             guard let mediaPlayer = mediaPlayer else {
                 throw RendererError.vlcInitializationFailed
             }
             
-            // Configure media player for compatibility with AVSampleBufferDisplayLayer
+            // Set the drawing view - VLC will render into this UIView
+            mediaPlayer.drawable = vlcView
+            
+            // Configure media player
             mediaPlayer.audio = true
-            mediaPlayer.drawable = displayLayer
             
             // Set up event handling
             NotificationCenter.default.addObserver(
@@ -260,10 +278,6 @@ final class VLCRenderer: NSObject {
         return getAudioTracksDetailed().map { ($0.0, $0.1) }
     }
     
-    func setAudioTrack(_ id: Int) {
-        setAudioTrack(id)
-    }
-    
     func setAudioTrack(id: Int) {
         eventQueue.async { [weak self] in
             guard let self, let media = self.currentMedia else { return }
@@ -277,6 +291,7 @@ final class VLCRenderer: NSObject {
             }
         }
     }
+
     
     // MARK: - Subtitle Track Controls
     
