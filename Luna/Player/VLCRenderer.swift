@@ -94,9 +94,6 @@ final class VLCRenderer: NSObject {
             // Set the drawing view - VLC will render into this UIView
             mediaPlayer.drawable = vlcView
             
-            // Configure media player
-            mediaPlayer.audio = true
-            
             // Set up event handling
             NotificationCenter.default.addObserver(
                 self,
@@ -182,7 +179,7 @@ final class VLCRenderer: NSObject {
                 urlString = urlString + "?:http-user-agent=" + (headers["User-Agent"] ?? "VLC")
             }
             
-            let media = VLCMedia(URL: URL(string: urlString) ?? url)
+            let media = VLCMedia(url: URL(string: urlString) ?? url)
             self.currentMedia = media
             
             player.media = media
@@ -300,7 +297,7 @@ final class VLCRenderer: NSObject {
         return result
     }
     
-    func setSubtitleTrack(_ id: Int) {
+    func setSubtitleTrack(id: Int) {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             
@@ -348,8 +345,10 @@ final class VLCRenderer: NSObject {
     @objc private func mediaPlayerTimeChanged() {
         guard let player = mediaPlayer else { return }
         
-        let position = Double(player.time.value) / 1000.0  // Convert from milliseconds
-        let duration = Double(player.media?.length.value ?? 0) / 1000.0
+        let positionMs = player.time?.value?.doubleValue ?? 0
+        let durationMs = player.media?.length?.value?.doubleValue ?? 0
+        let position = positionMs / 1000.0
+        let duration = durationMs / 1000.0
         
         cachedPosition = position
         cachedDuration = duration
