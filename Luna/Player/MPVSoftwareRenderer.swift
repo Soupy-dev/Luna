@@ -1375,19 +1375,6 @@ final class MPVSoftwareRenderer {
         while let start = result.range(of: "{"), let end = result.range(of: "}", range: start.upperBound..<result.endIndex) {
             result.removeSubrange(start.lowerBound..<end.upperBound)
         }
-        // Convert ASS line breaks (\\N) to actual newlines
-        result = result.replacingOccurrences(of: "\\\\N", with: "\n")
-        result = result.replacingOccurrences(of: "\\\\n", with: "\n")
-        // Clean up any remaining whitespace
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    
-    private func stripASSTags(from text: String) -> String {
-        // Remove ASS override codes like {\tags}
-        var result = text
-        while let start = result.range(of: "{"), let end = result.range(of: "}", range: start.upperBound..<result.endIndex) {
-            result.removeSubrange(start.lowerBound..<end.upperBound)
-        }
         // Convert ASS line breaks (\N) to actual newlines
         result = result.replacingOccurrences(of: "\\N", with: "\n")
         result = result.replacingOccurrences(of: "\\n", with: "\n")
