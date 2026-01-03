@@ -250,25 +250,16 @@ final class VLCRenderer: NSObject {
     // MARK: - Audio Track Controls
     
     func getAudioTracksDetailed() -> [(Int, String, String)] {
-        guard let media = currentMedia else { return [] }
+        guard let player = mediaPlayer else { return [] }
         
         var result: [(Int, String, String)] = []
-        var trackNumber = 1
         
-        // VLC media descriptors for audio tracks
-        let audioTrackInfo = media.mediaAsStringValueForOption(VLCAudioTrackOptionsKey) ?? ""
-        if audioTrackInfo.isEmpty {
-            return []
-        }
-        
-        // Parse audio track info and create entries
-        // Format varies by source, so provide generic numbered audio tracks
-        let trackCount = media.numberOfAudioTracks()
-        for i in 0..<Int32(trackCount) {
-            let trackName = media.audioTrackNameAtIndex(i)
-            let displayName = !trackName.isEmpty ? trackName : "Audio Track \(trackNumber)"
-            result.append((Int(i), displayName, ""))
-            trackNumber += 1
+        // VLC provides audio track info through the media player
+        if let audioTrackIndexes = player.audioTrackIndexes as? [Int],
+           let audioTrackNames = player.audioTrackNames as? [String] {
+            for (index, name) in zip(audioTrackIndexes, audioTrackNames) {
+                result.append((index, name, ""))
+            }
         }
         
         return result
@@ -280,14 +271,12 @@ final class VLCRenderer: NSObject {
     
     func setAudioTrack(id: Int) {
         eventQueue.async { [weak self] in
-            guard let self, let media = self.currentMedia else { return }
+            guard let self, let player = self.mediaPlayer else { return }
             
-            if id >= 0 && id < Int(media.numberOfAudioTracks()) {
-                media.audioTrackIndexForAudioDescription(id)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.delegate?.renderer(self, subtitleTrackDidChange: id)
-                }
+            player.currentAudioTrackIndex = Int32(id)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.rendererDidChangeTracks(self)
             }
         }
     }
@@ -296,17 +285,16 @@ final class VLCRenderer: NSObject {
     // MARK: - Subtitle Track Controls
     
     func getSubtitleTracks() -> [(Int, String)] {
-        guard let media = currentMedia else { return [] }
+        guard let player = mediaPlayer else { return [] }
         
         var result: [(Int, String)] = []
-        var trackNumber = 1
         
-        let subTrackCount = Int(media.numberOfSubtitleTracks())
-        for i in 0..<subTrackCount {
-            let trackName = media.subtitleTrackNameAtIndex(Int32(i))
-            let displayName = !trackName.isEmpty ? trackName : "Subtitle Track \(trackNumber)"
-            result.append((i, displayName))
-            trackNumber += 1
+        // VLC provides subtitle track info through the media player
+        if let subtitleIndexes = player.videoSubTitlesIndexes as? [Int],
+           let subtitleNames = player.videoSubTitlesNames as? [String] {
+            for (index, name) in zip(subtitleIndexes, subtitleNames) {
+                result.append((index, name))
+            }
         }
         
         return result
@@ -314,23 +302,21 @@ final class VLCRenderer: NSObject {
     
     func setSubtitleTrack(_ id: Int) {
         eventQueue.async { [weak self] in
-            guard let self, let media = self.currentMedia else { return }
+            guard let self, let player = self.mediaPlayer else { return }
             
-            if id >= 0 && id < Int(media.numberOfSubtitleTracks()) {
-                media.subtitleTrackIndexForSubtitleDescription(Int32(id))
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.delegate?.renderer(self, subtitleTrackDidChange: id)
-                }
+            player.currentVideoSubTitleIndex = Int32(id)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.renderer(self, subtitleTrackDidChange: id)
             }
         }
     }
     
     func disableSubtitles() {
         eventQueue.async { [weak self] in
-            guard let self, let media = self.currentMedia else { return }
-            // Disable subtitles by setting track to -1
-            media.subtitleTrackIndexForSubtitleDescription(-1)
+            guard let self, let player = self.mediaPlayer else { return }
+            // Disable subtitles by setting track index to -1
+            player.currentVideoSubTitleIndex = -1
         }
     }
     

@@ -45,7 +45,7 @@ enum ExternalPlayer: String, CaseIterable, Identifiable {
 enum InAppPlayer: String, CaseIterable, Identifiable {
     case normal = "Normal"
     case mpv = "mpv"
-    // case vlc = "libVLC"  // TODO: Implement proper Metal/OpenGL rendering for VLC
+    case vlc = "libVLC"
     
     var id: String { rawValue }
 }
@@ -66,7 +66,13 @@ final class PlayerSettingsStore: ObservableObject {
     @Published var inAppPlayer: InAppPlayer {
         didSet { 
             // Map InAppPlayer to PlayerChoice in Settings
-            let playerChoice: PlayerChoice = .mpv  // Currently only MPV is supported
+            let playerChoice: PlayerChoice
+            switch inAppPlayer {
+            case .vlc:
+                playerChoice = .vlc
+            case .mpv, .normal:
+                playerChoice = .mpv
+            }
             Settings.shared.playerChoice = playerChoice
             UserDefaults.standard.set(inAppPlayer.rawValue, forKey: "inAppPlayer")
         }
@@ -87,9 +93,13 @@ final class PlayerSettingsStore: ObservableObject {
         self.landscapeOnly = UserDefaults.standard.bool(forKey: "alwaysLandscape")
         
         // Load from Settings.shared.playerChoice if available, otherwise from legacy storage
-        let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? InAppPlayer.normal.rawValue
         let playerChoice = Settings.shared.playerChoice
-        self.inAppPlayer = playerChoice == .vlc ? .vlc : (inAppRaw == InAppPlayer.vlc.rawValue ? .vlc : .mpv)
+        if playerChoice == .vlc {
+            self.inAppPlayer = .vlc
+        } else {
+            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? InAppPlayer.mpv.rawValue
+            self.inAppPlayer = InAppPlayer(rawValue: inAppRaw) ?? .mpv
+        }
 
         if UserDefaults.standard.object(forKey: "mpvTwoFingerTapEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "mpvTwoFingerTapEnabled")
