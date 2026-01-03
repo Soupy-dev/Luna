@@ -21,8 +21,6 @@ jobs:
       - name: Install CocoaPods dependencies
         run: |
           sudo gem install cocoapods
-          pod deintegrate || true
-          rm -f Podfile.lock
           pod install
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
@@ -47,8 +45,6 @@ jobs:
       - name: Install CocoaPods dependencies
         run: |
           sudo gem install cocoapods
-          pod deintegrate || true
-          rm -f Podfile.lock
           pod install
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
