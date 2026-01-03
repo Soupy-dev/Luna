@@ -19,6 +19,7 @@ protocol MPVSoftwareRendererDelegate: AnyObject {
     func renderer(_ renderer: MPVSoftwareRenderer, getSubtitleForTime time: Double) -> NSAttributedString?
     func renderer(_ renderer: MPVSoftwareRenderer, getSubtitleStyle: Void) -> SubtitleStyle
     func renderer(_ renderer: MPVSoftwareRenderer, subtitleTrackDidChange trackId: Int)
+    func rendererDidChangeTracks(_ renderer: MPVSoftwareRenderer)
 }
 
 struct SubtitleStyle {
@@ -410,7 +411,8 @@ final class MPVSoftwareRenderer {
             ("pause", MPV_FORMAT_FLAG),
             ("sid", MPV_FORMAT_INT64),
             ("sub-visibility", MPV_FORMAT_FLAG),
-            ("sub-text", MPV_FORMAT_STRING)
+            ("sub-text", MPV_FORMAT_STRING),
+            ("track-list", MPV_FORMAT_NODE)
         ]
         
         for (name, format) in properties {
@@ -1345,6 +1347,8 @@ final class MPVSoftwareRenderer {
             subtitleRenderCache = nil
             cachedSubtitleText = nil
             lastSubtitleCheckTime = -1.0
+        case "track-list":
+            delegate?.rendererDidChangeTracks(self)
         default:
             break
         }

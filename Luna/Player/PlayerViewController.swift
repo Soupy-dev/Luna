@@ -305,6 +305,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var initialHeaders: [String: String]?
     private var initialSubtitles: [String]?
     private var userSelectedAudioTrack = false
+    private var pendingAutoAudioSelection = true
     
     private var subtitleURLs: [String] = []
     private var currentSubtitleIndex: Int = 0
@@ -526,6 +527,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
         logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
         userSelectedAudioTrack = false
+        pendingAutoAudioSelection = true
         renderer.load(url: url, with: preset, headers: headers)
         if let info = mediaInfo {
             prepareSeekToLastPosition(for: info)
@@ -1077,6 +1079,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                     state: .off
                 ) { [weak self] _ in
                     self?.userSelectedAudioTrack = true
+                    self?.pendingAutoAudioSelection = false
                     self?.renderer.setAudioTrack(id: id)
                     self?.updateAudioTracksMenu()
                 }
@@ -1084,10 +1087,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
 
         // Auto-select preferred anime audio language when applicable
-        if isAnimeContent() && !userSelectedAudioTrack {
+        if isAnimeContent() && !userSelectedAudioTrack && pendingAutoAudioSelection {
             let preferredLang = Settings.shared.preferredAnimeAudioLanguage.lowercased()
             Logger.shared.log("Anime detected, looking for audio language: \(preferredLang)", type: "Info")
-            Logger.shared.log("Available audio tracks with languages: \(detailedTracks.map { \"id=\($0.0) name=\($0.1) lang=\($0.2)\" }.joined(separator: \", \"))", type: "Debug")
+            let trackLog = detailedTracks.map { "id=\($0.0) name=\($0.1) lang=\($0.2)" }.joined(separator: ", ")
+            Logger.shared.log("Available audio tracks with languages: \(trackLog)", type: "Debug")
             let preferredLangName = languageName(for: preferredLang)
             if let matching = detailedTracks.first(where: {
                 let langCode = $0.2.lowercased()
@@ -1100,6 +1104,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }) {
                 Logger.shared.log("Auto-selecting anime audio track id=\(matching.0) lang=\(matching.2)", type: "Info")
                 userSelectedAudioTrack = true
+                pendingAutoAudioSelection = false
                 renderer.setAudioTrack(id: matching.0)
             } else {
                 Logger.shared.log("No matching audio track found for language \(preferredLang)", type: "Info")
@@ -1725,6 +1730,14 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
                 Logger.shared.log("Resumed MPV playback from \(Int(seekTime))s", type: "Progress")
                 self.pendingSeekTime = nil
             }
+        }
+    }
+
+    func rendererDidChangeTracks(_ renderer: MPVSoftwareRenderer) {
+        if isClosing { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateAudioTracksMenu()
         }
     }
     
