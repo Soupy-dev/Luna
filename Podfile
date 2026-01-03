@@ -31,6 +31,9 @@ post_install do |installer|
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
       
+      # Disable sandbox for CocoaPods framework scripts on Xcode 15+
+      config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
+      
       # Ensure inherited values are preserved for CocoaPods integration
       config.build_settings['LD_RUNPATH_SEARCH_PATHS'] ||= ['$(inherited)']
       config.build_settings['OTHER_LDFLAGS'] ||= ['$(inherited)']
