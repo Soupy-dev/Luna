@@ -850,18 +850,31 @@ final class MPVSoftwareRenderer {
             return cachedResult
         }
         
-        // Queue async subtitle generation to reduce thermal load; allows next frame to pick it up
-        subtitleRenderQueue.async { [weak self] in
-            self?.generateSubtitleImage(from: attributedText, style: style, maxWidth: maxWidth, key: key)
-        }
-        
-        // Return pending image only if it matches current text
-        return subtitleImageLock.withLock {
+        // Check if we have a pending image for this text
+        let pendingResult: (image: CGImage, size: CGSize)? = subtitleImageLock.withLock {
             if let pending = pendingSubtitleImage, pending.key == key {
                 return (pending.image, pending.size)
             }
             return nil
         }
+        
+        if let pendingResult = pendingResult {
+            // Have pending image, queue async for future frames
+            subtitleRenderQueue.async { [weak self] in
+                self?.generateSubtitleImage(from: attributedText, style: style, maxWidth: maxWidth, key: key)
+            }
+            return pendingResult
+        }
+        
+        // No cache and no pending - render synchronously for first frame, then queue async
+        let result = generateSubtitleImage(from: attributedText, style: style, maxWidth: maxWidth, key: key)
+        
+        // Queue async work for smoother future frames
+        subtitleRenderQueue.async { [weak self] in
+            self?.generateSubtitleImage(from: attributedText, style: style, maxWidth: maxWidth, key: key)
+        }
+        
+        return result
     }
     
     private func generateSubtitleImage(from attributedText: NSAttributedString, style: SubtitleStyle, maxWidth: CGFloat, key: SubtitleRenderKey) -> (image: CGImage, size: CGSize)? {
