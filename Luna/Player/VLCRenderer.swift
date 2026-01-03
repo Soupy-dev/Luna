@@ -13,8 +13,8 @@
 import UIKit
 import AVFoundation
 
-// MARK: - Compatibility: Handle missing MobileVLCKit gracefully
-#if canImport(MobileVLCKit)
+// MARK: - Compatibility: VLC renderer is iOS-only (tvOS uses MPV)
+#if canImport(MobileVLCKit) && os(iOS)
 import MobileVLCKit
 
 protocol VLCRendererDelegate: AnyObject {
