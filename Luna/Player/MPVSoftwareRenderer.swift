@@ -10,6 +10,8 @@ import Libmpv
 import CoreMedia
 import CoreVideo
 import AVFoundation
+import Metal
+import MetalKit
 
 protocol MPVSoftwareRendererDelegate: AnyObject {
     func renderer(_ renderer: MPVSoftwareRenderer, didUpdatePosition position: Double, duration: Double)
@@ -76,6 +78,12 @@ final class MPVSoftwareRenderer {
     private let eventQueue = DispatchQueue(label: "mpv.software.events", qos: .utility)
     private let stateQueue = DispatchQueue(label: "mpv.software.state", attributes: .concurrent)
     private let subtitleRenderQueue = DispatchQueue(label: "mpv.subtitle.render", qos: .utility)
+    
+    // Metal for GPU subtitle rendering
+    private let metalDevice = MTLCreateSystemDefaultDevice()
+    private var metalCommandQueue: MTLCommandQueue?
+    private var metalPipelineState: MTLRenderPipelineState?
+    private var metalSamplerState: MTLSamplerState?
     private let eventQueueGroup = DispatchGroup()
     private let renderQueueKey = DispatchSpecificKey<Void>()
     
@@ -145,8 +153,8 @@ final class MPVSoftwareRenderer {
         
         self.displayLayer = displayLayer
         let maxFPS = screen.maximumFramesPerSecond
-        // Cap at 30 FPS for thermal efficiency on mobile (50% less render cycles)
-        let cappedFPS = min(maxFPS, 30)
+        // Cap at 24 FPS for aggressive thermal efficiency on mobile
+        let cappedFPS = min(maxFPS, 24)
         self.minRenderInterval = 1.0 / CFTimeInterval(cappedFPS)
         
         renderQueue.setSpecific(key: renderQueueKey, value: ())
@@ -193,14 +201,17 @@ final class MPVSoftwareRenderer {
         setOption(name: "keep-open", value: "yes")
         setOption(name: "idle", value: "yes")
         setOption(name: "vo", value: "libmpv")
-        setOption(name: "hwdec", value: "videotoolbox-copy")
+        setOption(name: "hwdec", value: "auto-safe")
         setOption(name: "gpu-api", value: "metal")
         setOption(name: "gpu-context", value: "metal")
         setOption(name: "demuxer-thread", value: "yes")
         setOption(name: "ytdl", value: "yes")
-        setOption(name: "profile", value: "fast")
-        // Reduce threads from 8 to 4 for thermal efficiency
-        setOption(name: "vd-lavc-threads", value: "4")
+        setOption(name: "profile", value: "sw-fast")
+        // Reduce threads to 2 for minimal thermal load
+        setOption(name: "vd-lavc-threads", value: "2")
+        setOption(name: "vd-lavc-skiploopfilter", value: "all")
+        setOption(name: "vd-lavc-skipidct", value: "nonkey")
+        setOption(name: "vd-lavc-fast", value: "yes")
         setOption(name: "cache", value: "yes")
         setOption(name: "demuxer-max-bytes", value: "30M")
         setOption(name: "demuxer-readahead-secs", value: "5")
@@ -217,6 +228,9 @@ final class MPVSoftwareRenderer {
         }
         
         mpv_request_log_messages(handle, "warn")
+        
+        // Initialize Metal rendering pipeline for subtitles
+        setupMetalPipeline()
         
         try createRenderContext()
         observeProperties()
@@ -724,64 +738,8 @@ final class MPVSoftwareRenderer {
         
         guard bufferWidth > 0, bufferHeight > 0 else { return }
         
-        CVPixelBufferLockBaseAddress(pixelBuffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
-        
-        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
-            return
-        }
-        
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        
-        guard let context = CGContext(
-            data: baseAddress,
-            width: bufferWidth,
-            height: bufferHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: cachedColorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        ) else {
-            return
-        }
-        
-        context.saveGState()
-        context.interpolationQuality = .low
-        
-        // Position cached image at bottom center of buffer
-        let imageSize = cache.size
-        let highRes = bufferWidth >= 3840 || bufferHeight >= 2160
-        let baseScale: CGFloat = highRes ? 0.5 : 1.0
-        let cappedWidth = min(CGFloat(bufferWidth) * baseScale, 1920)
-        let cappedHeight = min(CGFloat(bufferHeight) * baseScale, 1080)
-        let effectiveWidth = Int(max(cappedWidth, 1))
-        let effectiveHeight = Int(max(cappedHeight, 1))
-        
-        let bottomMargin = max(CGFloat(effectiveHeight) * 0.08, style.fontSize * 1.4)
-        let horizontalMargin = max(CGFloat(effectiveWidth) * 0.02, style.fontSize * 0.8)
-        let availableWidth = max(CGFloat(effectiveWidth) - horizontalMargin * 2.0, 1.0)
-        let scale = min(1.0, availableWidth / imageSize.width)
-        
-        let renderWidth = imageSize.width * scale
-        let renderHeight = imageSize.height * scale
-        
-        var xPosition = (CGFloat(effectiveWidth) - renderWidth) / 2.0
-        if xPosition < horizontalMargin {
-            xPosition = horizontalMargin
-        }
-        if xPosition + renderWidth > CGFloat(effectiveWidth) - horizontalMargin {
-            xPosition = max(horizontalMargin, CGFloat(effectiveWidth) - horizontalMargin - renderWidth)
-        }
-        
-        let topLimit = CGFloat(effectiveHeight) - renderHeight - bottomMargin
-        var yPosition = bottomMargin
-        if topLimit < bottomMargin {
-            yPosition = max(topLimit, 0)
-        }
-        let renderRect = CGRect(x: xPosition, y: yPosition, width: renderWidth, height: renderHeight)
-        
-        context.draw(cache.image, in: renderRect)
-        context.restoreGState()
+        // Use Metal GPU rendering for better thermal efficiency
+        renderSubtitleWithMetal(cgImage: cache.image, into: pixelBuffer, style: style)
     }
     
     private func burnSubtitles(into pixelBuffer: CVPixelBuffer, attributedText: NSAttributedString, style: SubtitleStyle) {
@@ -789,12 +747,11 @@ final class MPVSoftwareRenderer {
         let bufferHeight = CVPixelBufferGetHeight(pixelBuffer)
         
         guard bufferWidth > 0, bufferHeight > 0 else {
-            Logger.shared.log("Invalid bufer dimensions for subtitle: \(bufferWidth)x\(bufferHeight)", type: "Error")
+            Logger.shared.log("Invalid buffer dimensions for subtitle: \(bufferWidth)x\(bufferHeight)", type: "Error")
             return
         }
         
         let highRes = bufferWidth >= 3840 || bufferHeight >= 2160
-        // Cap subtitle render resolution to reduce thermal load while keeping visuals crisp on mobile screens.
         let baseScale: CGFloat = highRes ? 0.5 : 1.0
         let cappedWidth = min(CGFloat(bufferWidth) * baseScale, 1920)
         let cappedHeight = min(CGFloat(bufferHeight) * baseScale, 1080)
@@ -806,63 +763,8 @@ final class MPVSoftwareRenderer {
             return
         }
         
-        CVPixelBufferLockBaseAddress(pixelBuffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
-        
-        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
-            Logger.shared.log("Failed to get base addres s for subtitle rendering", type: "Error")
-            return
-        }
-        
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        
-        guard let context = CGContext(
-            data: baseAddress,
-            width: bufferWidth,
-            height: bufferHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: cachedColorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        ) else {
-            Logger.shared.log("Failed to create CGContext for subtitle rendering", type: "Error")
-            return
-        }
-        
-        context.saveGState()
-        // Reduced from .medium to .low for thermal efficiency
-        context.interpolationQuality = .low
-        // Disable antialiasing when playing for thermal efficiency
-        let enableAA = isPaused
-        context.setAllowsAntialiasing(enableAA)
-        context.setShouldAntialias(enableAA)
-        
-        let imageSize = subtitleImage.size
-        let bottomMargin = max(CGFloat(effectiveHeight) * 0.08, style.fontSize * 1.4)
-        let horizontalMargin = max(CGFloat(effectiveWidth) * 0.02, style.fontSize * 0.8)
-        let availableWidth = max(CGFloat(effectiveWidth) - horizontalMargin * 2.0, 1.0)
-        let scale = min(1.0, availableWidth / imageSize.width)
-        
-        let renderWidth = imageSize.width * scale
-        let renderHeight = imageSize.height * scale
-        
-        var xPosition = (CGFloat(effectiveWidth) - renderWidth) / 2.0
-        if xPosition < horizontalMargin {
-            xPosition = horizontalMargin
-        }
-        if xPosition + renderWidth > CGFloat(effectiveWidth) - horizontalMargin {
-            xPosition = max(horizontalMargin, CGFloat(effectiveWidth) - horizontalMargin - renderWidth)
-        }
-        
-        let topLimit = CGFloat(effectiveHeight) - renderHeight - bottomMargin
-        var yPosition = bottomMargin
-        if topLimit < bottomMargin {
-            yPosition = max(topLimit, 0)
-        }
-        let renderRect = CGRect(x: xPosition, y: yPosition, width: renderWidth, height: renderHeight)
-        
-        context.draw(subtitleImage.image, in: renderRect)
-        context.restoreGState()
+        // Use Metal GPU rendering for better thermal efficiency
+        renderSubtitleWithMetal(cgImage: subtitleImage.image, into: pixelBuffer, style: style)
     }
     
     private func makeSubtitleImage(from attributedText: NSAttributedString, style: SubtitleStyle, maxWidth: CGFloat) -> (image: CGImage, size: CGSize)? {
@@ -1846,6 +1748,212 @@ final class MPVSoftwareRenderer {
             // Force immediate subtitle check on next render
             self.scheduleRender()
         }
+    }
+    
+    // MARK: - Metal GPU Subtitle Rendering
+    
+    private func setupMetalPipeline() {
+        guard let device = metalDevice else {
+            Logger.shared.log("Metal device not available, falling back to CPU rendering", type: "Warn")
+            return
+        }
+        
+        metalCommandQueue = device.makeCommandQueue()
+        
+        // Create render pipeline for subtitle composition
+        guard let library = device.makeDefaultLibrary() else {
+            Logger.shared.log("Failed to load Metal library with shaders", type: "Error")
+            return
+        }
+        
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+        pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexShader")
+        pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentShader")
+        
+        guard pipelineDescriptor.vertexFunction != nil, pipelineDescriptor.fragmentFunction != nil else {
+            Logger.shared.log("Failed to load Metal shader functions", type: "Error")
+            return
+        }
+        
+        pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        pipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
+        pipelineDescriptor.colorAttachments[0].rgbBlendOperation = .add
+        pipelineDescriptor.colorAttachments[0].alphaBlendOperation = .add
+        pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        pipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+        pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        
+        do {
+            metalPipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        } catch {
+            Logger.shared.log("Failed to create Metal pipeline: \(error)", type: "Error")
+        }
+        
+        // Create sampler state for texture filtering
+        let samplerDescriptor = MTLSamplerDescriptor()
+        samplerDescriptor.magFilter = .linear
+        samplerDescriptor.minFilter = .linear
+        samplerDescriptor.mipFilter = .linear
+        metalSamplerState = device.makeSamplerState(descriptor: samplerDescriptor)
+    }
+    
+    private func renderSubtitleWithMetal(cgImage: CGImage, into pixelBuffer: CVPixelBuffer, style: SubtitleStyle) {
+        guard let metalDevice = metalDevice,
+              let commandQueue = metalCommandQueue,
+              let pipelineState = metalPipelineState,
+              let samplerState = metalSamplerState else {
+            // Fallback to CPU rendering if Metal not available
+            renderSubtitleWithCPU(cgImage: cgImage, into: pixelBuffer, style: style)
+            return
+        }
+        
+        let bufferWidth = CVPixelBufferGetWidth(pixelBuffer)
+        let bufferHeight = CVPixelBufferGetHeight(pixelBuffer)
+        
+        guard bufferWidth > 0, bufferHeight > 0 else { return }
+        
+        // Create Metal texture from subtitle CGImage
+        let ciImage = CIImage(cgImage: cgImage)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        
+        guard let metalTexture = createMetalTextureFromCIImage(ciImage, device: metalDevice, colorSpace: colorSpace) else {
+            // Fallback to CPU rendering
+            renderSubtitleWithCPU(cgImage: cgImage, into: pixelBuffer, style: style)
+            return
+        }
+        
+        // Create Metal texture for pixel buffer
+        var pixelBufferTexture: MTLTexture?
+        var textureCache: CVMetalTextureCache?
+        let cacheStatus = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, metalDevice, nil, &textureCache)
+        
+        guard cacheStatus == kCVReturnSuccess, let cache = textureCache else {
+            renderSubtitleWithCPU(cgImage: cgImage, into: pixelBuffer, style: style)
+            return
+        }
+        
+        var metalTextureRef: CVMetalTexture?
+        let texStatus = CVMetalTextureCacheCreateTextureFromImage(
+            kCFAllocatorDefault,
+            cache,
+            pixelBuffer,
+            nil,
+            .bgra8Unorm,
+            bufferWidth,
+            bufferHeight,
+            0,
+            &metalTextureRef
+        )
+        
+        if texStatus == kCVReturnSuccess, let metalTextureRef = metalTextureRef {
+            pixelBufferTexture = CVMetalTextureGetTexture(metalTextureRef)
+        }
+        
+        guard let renderTexture = pixelBufferTexture else {
+            // Fallback to CPU rendering
+            renderSubtitleWithCPU(cgImage: cgImage, into: pixelBuffer, style: style)
+            return
+        }
+        
+        // Create command buffer and render encoder
+        guard let commandBuffer = commandQueue.makeCommandBuffer(),
+              let renderEncoder = commandBuffer.makeRenderCommandEncoder(
+                descriptor: createRenderPassDescriptor(texture: renderTexture)
+              ) else {
+            return
+        }
+        
+        renderEncoder.setRenderPipelineState(pipelineState)
+        renderEncoder.setFragmentTexture(metalTexture, index: 0)
+        renderEncoder.setFragmentSamplerState(samplerState, index: 0)
+        
+        // Draw quad covering subtitle area
+        drawSubtitleQuad(encoder: renderEncoder)
+        
+        renderEncoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+    
+    private func createMetalTextureFromCIImage(_ ciImage: CIImage, device: MTLDevice, colorSpace: CGColorSpace) -> MTLTexture? {
+        let ciContext = CIContext(mtlDevice: device)
+        
+        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
+            return nil
+        }
+        
+        let textureLoader = MTKTextureLoader(device: device)
+        do {
+            return try textureLoader.newTexture(cgImage: cgImage, options: [:])
+        } catch {
+            Logger.shared.log("Failed to create Metal texture: \(error)", type: "Error")
+            return nil
+        }
+    }
+    
+    private func createRenderPassDescriptor(texture: MTLTexture) -> MTLRenderPassDescriptor {
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = texture
+        descriptor.colorAttachments[0].loadAction = .load
+        descriptor.colorAttachments[0].storeAction = .store
+        descriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
+        return descriptor
+    }
+    
+    private func drawSubtitleQuad(encoder: MTLRenderCommandEncoder) {
+        let vertices: [Float] = [
+            -1.0, -1.0, 0.0, 1.0, 0.0, 1.0,
+             1.0, -1.0, 0.0, 1.0, 1.0, 1.0,
+            -1.0,  1.0, 0.0, 1.0, 0.0, 0.0,
+             1.0,  1.0, 0.0, 1.0, 1.0, 0.0
+        ]
+        
+        guard let device = metalDevice else { return }
+        guard let vertexBuffer = device.makeBuffer(bytes: vertices, length: vertices.count * MemoryLayout<Float>.size, options: []) else { return }
+        
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+    }
+    
+    private func renderSubtitleWithCPU(cgImage: CGImage, into pixelBuffer: CVPixelBuffer, style: SubtitleStyle) {
+        let bufferWidth = CVPixelBufferGetWidth(pixelBuffer)
+        let bufferHeight = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        
+        guard let context = CGContext(
+            data: CVPixelBufferGetBaseAddress(pixelBuffer),
+            width: bufferWidth,
+            height: bufferHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: cachedColorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else {
+            return
+        }
+        
+        let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let bottomMargin = max(CGFloat(bufferHeight) * 0.08, style.fontSize * 1.4)
+        let horizontalMargin = max(CGFloat(bufferWidth) * 0.02, style.fontSize * 0.8)
+        let availableWidth = max(CGFloat(bufferWidth) - horizontalMargin * 2.0, 1.0)
+        let scale = min(1.0, availableWidth / imageSize.width)
+        
+        let renderWidth = imageSize.width * scale
+        let renderHeight = imageSize.height * scale
+        
+        var xPosition = (CGFloat(bufferWidth) - renderWidth) / 2.0
+        if xPosition < horizontalMargin {
+            xPosition = horizontalMargin
+        }
+        if xPosition + renderWidth > CGFloat(bufferWidth) - horizontalMargin {
+            xPosition = max(horizontalMargin, CGFloat(bufferWidth) - horizontalMargin - renderWidth)
+        }
+        
+        let yPosition = CGFloat(bufferHeight) - renderHeight - bottomMargin
+        let renderRect = CGRect(x: xPosition, y: yPosition, width: renderWidth, height: renderHeight)
+        
+        context.draw(cgImage, in: renderRect)
     }
 }
 
