@@ -1093,6 +1093,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if !tracks.isEmpty {
             subtitleButton.isHidden = false
             Logger.shared.log("Subtitle button made visible for embedded tracks", type: "Info")
+            
+            // Apply default subtitle settings if enabled
+            let settings = Settings.shared
+            if settings.enableSubtitlesByDefault {
+                // Try to find matching language track
+                let preferredLang = settings.defaultSubtitleLanguage
+                if let matchingTrack = tracks.first(where: { $0.1.lowercased().contains(preferredLang.lowercased()) }) {
+                    Logger.shared.log("Auto-enabling subtitle track: \(matchingTrack.0) - \(matchingTrack.1)", type: "Info")
+                    renderer.setSubtitleTrack(id: matchingTrack.0)
+                } else {
+                    Logger.shared.log("Preferred subtitle language '\(preferredLang)' not found, subtitles remain disabled", type: "Info")
+                }
+            }
         }
         
         var trackActions: [UIAction] = []
@@ -1672,11 +1685,12 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
     }
     
     func renderer(_ renderer: MPVSoftwareRenderer, getSubtitleStyle: Void) -> SubtitleStyle {
+        let settings = Settings.shared
         let style = SubtitleStyle(
             foregroundColor: subtitleModel.foregroundColor,
             strokeColor: subtitleModel.strokeColor,
-            strokeWidth: subtitleModel.strokeWidth,
-            fontSize: subtitleModel.fontSize,
+            strokeWidth: settings.subtitleSize.strokeWidth,
+            fontSize: settings.subtitleSize.fontSize,
             isVisible: subtitleModel.isVisible
         )
         return style

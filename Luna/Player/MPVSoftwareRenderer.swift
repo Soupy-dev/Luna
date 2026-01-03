@@ -28,11 +28,22 @@ struct SubtitleStyle {
     let fontSize: CGFloat
     let isVisible: Bool
     
+    static func fromSettings() -> SubtitleStyle {
+        let settings = Settings.shared
+        return SubtitleStyle(
+            foregroundColor: .white,
+            strokeColor: .black,
+            strokeWidth: settings.subtitleSize.strokeWidth,
+            fontSize: settings.subtitleSize.fontSize,
+            isVisible: false
+        )
+    }
+    
     static let `default` = SubtitleStyle(
         foregroundColor: .white,
         strokeColor: .black,
-        strokeWidth: 1.0,
-        fontSize: 38.0,
+        strokeWidth: 3.5,
+        fontSize: 48.0,
         isVisible: false
     )
 }

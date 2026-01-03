@@ -11,7 +11,36 @@ enum Appearance: String, CaseIterable, Identifiable {
     
     var id: String { self.rawValue }
 }
+
+enum SubtitleSize: String, CaseIterable, Identifiable {
+    case small = "Small"
+    case medium = "Medium"
+    case large = "Large"
+    case extraLarge = "Extra Large"
+    
+    var id: String { self.rawValue }
+    
+    var fontSize: CGFloat {
+        switch self {
+        case .small: return 32.0
+        case .medium: return 42.0
+        case .large: return 52.0
+        case .extraLarge: return 64.0
+        }
+    }
+    
+    var strokeWidth: CGFloat {
+        switch self {
+        case .small: return 2.5
+        case .medium: return 3.0
+        case .large: return 3.5
+        case .extraLarge: return 4.0
+        }
+    }
+}
 class Settings: ObservableObject {
+    static let shared = Settings()
+    
     @Published var accentColor: Color {
         didSet {
             saveAccentColor(accentColor)
@@ -24,7 +53,26 @@ class Settings: ObservableObject {
         }
     }
     
-    init() {
+    // Subtitle Settings
+    @Published var enableSubtitlesByDefault: Bool {
+        didSet {
+            UserDefaults.standard.set(enableSubtitlesByDefault, forKey: "enableSubtitlesByDefault")
+        }
+    }
+    
+    @Published var defaultSubtitleLanguage: String {
+        didSet {
+            UserDefaults.standard.set(defaultSubtitleLanguage, forKey: "defaultSubtitleLanguage")
+        }
+    }
+    
+    @Published var subtitleSize: SubtitleSize {
+        didSet {
+            UserDefaults.standard.set(subtitleSize.rawValue, forKey: "subtitleSize")
+        }
+    }
+    
+    private init() {
         if let colorData = UserDefaults.standard.data(forKey: "accentColor"),
            let uiColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData) {
             self.accentColor = Color(uiColor)
@@ -37,6 +85,17 @@ class Settings: ObservableObject {
         } else {
             self.selectedAppearance = .system
         }
+        
+        // Load subtitle settings
+        self.enableSubtitlesByDefault = UserDefaults.standard.bool(forKey: "enableSubtitlesByDefault")
+        self.defaultSubtitleLanguage = UserDefaults.standard.string(forKey: "defaultSubtitleLanguage") ?? "eng"
+        if let sizeRawValue = UserDefaults.standard.string(forKey: "subtitleSize"),
+           let size = SubtitleSize(rawValue: sizeRawValue) {
+            self.subtitleSize = size
+        } else {
+            self.subtitleSize = .large
+        }
+        
         updateAppearance()
     }
     

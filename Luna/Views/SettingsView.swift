@@ -135,6 +135,10 @@ struct SettingsView: View {
                     Text("Media Player")
                 }
                 
+                NavigationLink(destination: SubtitleSettingsView()) {
+                    Text("Subtitles")
+                }
+                
                 NavigationLink(destination: AlternativeUIView()) {
                     Text("Appearance")
                 }
