@@ -10,6 +10,7 @@ import Libmpv
 import CoreMedia
 import CoreVideo
 import AVFoundation
+import CoreImage
 import Metal
 import MetalKit
 
@@ -100,7 +101,7 @@ final class MPVSoftwareRenderer {
     private var poolWidth: Int = 0
     private var poolHeight: Int = 0
     private var preAllocatedBuffers: [CVPixelBuffer] = []
-    private let maxPreAllocatedBuffers = 12
+    private let maxPreAllocatedBuffers = 6
     
     private var currentPreset: PlayerPreset?
     private var currentURL: URL?
@@ -136,6 +137,8 @@ final class MPVSoftwareRenderer {
     private var pendingSubtitleImage: (key: SubtitleRenderKey, image: CGImage, size: CGSize)?
     private let subtitleImageLock = NSLock()
     private let cachedColorSpace = CGColorSpaceCreateDeviceRGB()
+    private var sharedCIContext: CIContext?
+    private var sharedMetalTextureCache: CVMetalTextureCache?
     private var isAppActive: Bool = true
     private var lastForegroundTime: CFTimeInterval = 0
     
@@ -1844,6 +1847,15 @@ final class MPVSoftwareRenderer {
         samplerDescriptor.minFilter = .linear
         samplerDescriptor.mipFilter = .linear
         metalSamplerState = device.makeSamplerState(descriptor: samplerDescriptor)
+
+        // Reuse a single texture cache for subtitle rendering
+        var cache: CVMetalTextureCache?
+        let cacheStatus = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &cache)
+        if cacheStatus == kCVReturnSuccess {
+            sharedMetalTextureCache = cache
+        } else {
+            Logger.shared.log("Failed to create shared Metal texture cache (status: \(cacheStatus))", type: "Warn")
+        }
     }
     
     private func renderSubtitleWithMetal(cgImage: CGImage, into pixelBuffer: CVPixelBuffer, style: SubtitleStyle) {
@@ -1867,11 +1879,13 @@ final class MPVSoftwareRenderer {
             return
         }
         
-        // Create Metal texture from subtitle CGImage
+        // Create Metal texture from subtitle CGImage using shared CIContext
+        let ciContext = sharedCIContext ?? CIContext(mtlDevice: metalDevice)
+        sharedCIContext = ciContext
         let ciImage = CIImage(cgImage: cgImage)
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         
-        guard let metalTexture = createMetalTextureFromCIImage(ciImage, device: metalDevice, colorSpace: colorSpace) else {
+        guard let metalTexture = createMetalTextureFromCIImage(ciImage, device: metalDevice, colorSpace: colorSpace, ciContext: ciContext) else {
             // Fallback to CPU rendering
             renderSubtitleWithCPU(cgImage: cgImage, into: pixelBuffer, style: style)
             return
@@ -1879,10 +1893,7 @@ final class MPVSoftwareRenderer {
         
         // Create Metal texture for pixel buffer
         var pixelBufferTexture: MTLTexture?
-        var textureCache: CVMetalTextureCache?
-        let cacheStatus = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, metalDevice, nil, &textureCache)
-        
-        guard cacheStatus == kCVReturnSuccess, let cache = textureCache else {
+        guard let cache = sharedMetalTextureCache else {
             renderSubtitleWithCPU(cgImage: cgImage, into: pixelBuffer, style: style)
             return
         }
@@ -1937,12 +1948,9 @@ final class MPVSoftwareRenderer {
         
         renderEncoder.endEncoding()
         commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
     }
     
-    private func createMetalTextureFromCIImage(_ ciImage: CIImage, device: MTLDevice, colorSpace: CGColorSpace) -> MTLTexture? {
-        let ciContext = CIContext(mtlDevice: device)
-        
+    private func createMetalTextureFromCIImage(_ ciImage: CIImage, device: MTLDevice, colorSpace: CGColorSpace, ciContext: CIContext) -> MTLTexture? {
         guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
             return nil
         }

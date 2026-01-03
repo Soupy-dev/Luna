@@ -22,19 +22,19 @@ enum SubtitleSize: String, CaseIterable, Identifiable {
     
     var fontSize: CGFloat {
         switch self {
-        case .small: return 42.0   // previously medium
-        case .medium: return 52.0  // previously large
-        case .large: return 64.0   // previously extra large
-        case .extraLarge: return 76.0 // bumped to stay above large
+        case .small: return 38.0   // trimmed slightly for compact default
+        case .medium: return 48.0  // modest reduction from prior large
+        case .large: return 60.0   // reduced for less screen coverage
+        case .extraLarge: return 72.0 // keep a big option but slightly smaller
         }
     }
     
     var strokeWidth: CGFloat {
         switch self {
-        case .small: return 1.5
-        case .medium: return 1.8
-        case .large: return 2.0
-        case .extraLarge: return 2.5
+        case .small: return 1.3
+        case .medium: return 1.6
+        case .large: return 1.9
+        case .extraLarge: return 2.3
         }
     }
 }
