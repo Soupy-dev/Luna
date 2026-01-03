@@ -119,7 +119,7 @@ final class MPVSoftwareRenderer {
     private var cachedSubtitleText: NSAttributedString?
     private var subtitleRenderCache: SubtitleRenderCache?
     private var lastRenderDimensions: CGSize = .zero
-    private let subtitleUpdateInterval: Double = 0.5
+    private let subtitleUpdateInterval: Double = 0.7
     private var lastPixelBufferCreateWidth: Int = -1
     private var lastPixelBufferCreateHeight: Int = -1
     private var cachedVideoSize: CGSize = .zero
@@ -609,7 +609,8 @@ final class MPVSoftwareRenderer {
         
         CVPixelBufferUnlockBaseAddress(buffer, [])
         
-        if let style = delegate?.renderer(self, getSubtitleStyle: ()), style.isVisible {
+        // Skip subtitle rendering when paused to reduce thermal load (subtitles don't change while paused)
+        if let style = delegate?.renderer(self, getSubtitleStyle: ()), style.isVisible && !isPaused {
             let currentTime = cachedPosition
             let timeDelta = abs(currentTime - lastSubtitleCheckTime)
             
@@ -794,9 +795,12 @@ final class MPVSoftwareRenderer {
         }
         
         context.saveGState()
-        context.interpolationQuality = .medium
-        context.setAllowsAntialiasing(true)
-        context.setShouldAntialias(true)
+        // Reduced from .medium to .low for thermal efficiency
+        context.interpolationQuality = .low
+        // Disable antialiasing when playing for thermal efficiency
+        let enableAA = isPaused
+        context.setAllowsAntialiasing(enableAA)
+        context.setShouldAntialias(enableAA)
         
         let imageSize = subtitleImage.size
         let bottomMargin = max(CGFloat(effectiveHeight) * 0.08, style.fontSize * 1.4)
@@ -917,7 +921,8 @@ final class MPVSoftwareRenderer {
             let paddedSize = CGSize(width: boundingRect.width + padding * 2.0, height: boundingRect.height + padding * 2.0)
             let textRect = CGRect(origin: CGPoint(x: padding, y: padding), size: boundingRect.size)
             
-            UIGraphicsBeginImageContextWithOptions(paddedSize, false, 2.0)
+            // Reduced from 2.0x to 1.5x for thermal efficiency while maintaining crispness
+            UIGraphicsBeginImageContextWithOptions(paddedSize, false, 1.5)
             defer { UIGraphicsEndImageContext() }
             
             if strokeRadius > 0, let ctx = UIGraphicsGetCurrentContext() {
