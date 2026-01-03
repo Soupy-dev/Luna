@@ -441,6 +441,7 @@ final class VLCRenderer {
     }
     
     init(displayLayer: AVSampleBufferDisplayLayer) { }
+    func getRenderingView() -> UIView { UIView() }
     func start() throws { throw RendererError.vlcInitializationFailed }
     func stop() { }
     func load(url: URL, with preset: PlayerPreset, headers: [String: String]?) { }
