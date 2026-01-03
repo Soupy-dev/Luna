@@ -1228,11 +1228,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
         // Embedded subtitles flow
         let embeddedTracks = renderer.getSubtitleTracks()
+            Logger.shared.log("subtitleButtonTapped: embedded flow, tracks=\(embeddedTracks.count)", type: "Info")
         guard !embeddedTracks.isEmpty else {
             Logger.shared.log("subtitleButtonTapped: no embedded tracks available", type: "Info")
             showControlsTemporarily()
             return
         }
+
+        Logger.shared.log("subtitleButtonTapped: presenting action sheet for embedded tracks", type: "Info")
 
         let alert = UIAlertController(title: "Select Subtitle", message: nil, preferredStyle: .actionSheet)
 

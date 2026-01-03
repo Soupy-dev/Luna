@@ -320,6 +320,22 @@ final class MPVSoftwareRenderer {
             }
         }
     }
+
+    private func setPropertyWithStatus(name: String, value: String) -> Int32 {
+        guard let handle = mpv else { return -1 }
+        let status = value.withCString { valuePointer in
+            name.withCString { namePointer in
+                mpv_set_property_string(handle, namePointer, valuePointer)
+            }
+        }
+        if status < 0 {
+            let errString = String(cString: mpv_error_string(status))
+            Logger.shared.log("Failed to set property \(name)=\(value) (status=\(status), error=\(errString))", type: "Error")
+        } else {
+            Logger.shared.log("MPV property set: \(name)=\(value) (status=\(status))", type: "Info")
+        }
+        return status
+    }
     
     private func clearProperty(name: String) {
         guard let handle = mpv else { return }
@@ -380,7 +396,9 @@ final class MPVSoftwareRenderer {
             ("dheight", MPV_FORMAT_INT64),
             ("duration", MPV_FORMAT_DOUBLE),
             ("time-pos", MPV_FORMAT_DOUBLE),
-            ("pause", MPV_FORMAT_FLAG)
+            ("pause", MPV_FORMAT_FLAG),
+            ("sid", MPV_FORMAT_INT64),
+            ("sub-visibility", MPV_FORMAT_FLAG)
         ]
         
         for (name, format) in properties {
@@ -1279,6 +1297,23 @@ final class MPVSoftwareRenderer {
                     delegate?.renderer(self, didChangePause: isPaused)
                 }
             }
+        case "sid":
+            var sidValue: Int64 = -1
+            let status = getProperty(handle: handle, name: name, format: MPV_FORMAT_INT64, value: &sidValue)
+            if status >= 0 {
+                Logger.shared.log("MPV property change: sid=\(sidValue)", type: "Info")
+                delegate?.renderer(self, subtitleTrackDidChange: Int(sidValue))
+            } else {
+                Logger.shared.log("Failed to read sid property (status=\(status))", type: "Warn")
+            }
+        case "sub-visibility":
+            var flag: Int32 = 0
+            let status = getProperty(handle: handle, name: name, format: MPV_FORMAT_FLAG, value: &flag)
+            if status >= 0 {
+                Logger.shared.log("MPV property change: sub-visibility=\(flag)", type: "Info")
+            } else {
+                Logger.shared.log("Failed to read sub-visibility (status=\(status))", type: "Warn")
+            }
         default:
             break
         }
@@ -1597,19 +1632,16 @@ final class MPVSoftwareRenderer {
     
     func setSubtitleTrack(id: Int) {
         Logger.shared.log("MPVSoftwareRenderer: Setting subtitle track to ID \(id)", type: "Info")
-        
-        // MPV operations must be on main thread
-        if Thread.isMainThread {
-            setProperty(name: "sid", value: String(id))
-            setProperty(name: "sub-visibility", value: "yes")
-            Logger.shared.log("MPVSoftwareRenderer: Subtitle track set to \(id), visibility=yes", type: "Info")
-            delegate?.renderer(self, subtitleTrackDidChange: id)
-        } else {
+
+        eventQueue.async { [weak self] in
+            guard let self, let handle = self.mpv else { return }
+
+            let sidStatus = self.commandSync(handle, ["set", "sid", String(id)])
+            let visStatus = self.commandSync(handle, ["set", "sub-visibility", "yes"])
+            Logger.shared.log("MPVSoftwareRenderer: setSubtitleTrack applied via commandSync sidStatus=\(sidStatus) visStatus=\(visStatus)", type: "Info")
+
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.setProperty(name: "sid", value: String(id))
-                self.setProperty(name: "sub-visibility", value: "yes")
-                Logger.shared.log("MPVSoftwareRenderer: Subtitle track set to \(id), visibility=yes (from bg thread)", type: "Info")
                 self.delegate?.renderer(self, subtitleTrackDidChange: id)
             }
         }
