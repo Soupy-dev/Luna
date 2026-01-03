@@ -66,7 +66,7 @@ final class PlayerSettingsStore: ObservableObject {
     @Published var inAppPlayer: InAppPlayer {
         didSet { 
             // Map InAppPlayer to PlayerChoice in Settings
-            let playerChoice: PlayerChoice = didSet == .vlc ? .vlc : .mpv
+            let playerChoice: PlayerChoice = inAppPlayer == .vlc ? .vlc : .mpv
             Settings.shared.playerChoice = playerChoice
             UserDefaults.standard.set(inAppPlayer.rawValue, forKey: "inAppPlayer")
         }
