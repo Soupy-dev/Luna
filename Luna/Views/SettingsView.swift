@@ -136,7 +136,7 @@ struct SettingsView: View {
                 }
                 
                 NavigationLink(destination: SubtitleSettingsView()) {
-                    Text("Subtitles")
+                    Text("Subtitles/Audio")
                 }
                 
                 NavigationLink(destination: AlternativeUIView()) {
@@ -296,8 +296,26 @@ struct SubtitleSettingsView: View {
             } footer: {
                 Text("Choose the subtitle text size. Current: \(settings.subtitleSize.rawValue)")
             }
+
+            Section {
+                NavigationLink(destination: SubtitleAudioLanguageSelectionView(
+                    selectedLanguage: $settings.preferredAnimeAudioLanguage,
+                    languages: subtitleLanguages
+                )) {
+                    HStack {
+                        Text("Preferred Anime Audio")
+                        Spacer()
+                        Text(subtitleLanguages.first { $0.0 == settings.preferredAnimeAudioLanguage }?.1 ?? "Japanese")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            } header: {
+                Text("Anime Audio")
+            } footer: {
+                Text("Used to auto-select audio tracks for anime titles when available. Defaults to Japanese.")
+            }
         }
-        .navigationTitle("Subtitles")
+        .navigationTitle("Subtitles/Audio")
     }
 }
 
@@ -324,5 +342,31 @@ struct SubtitleLanguageSelectionView: View {
             }
         }
         .navigationTitle("Subtitle Language")
+    }
+}
+
+struct SubtitleAudioLanguageSelectionView: View {
+    @StateObject private var accentColorManager = AccentColorManager.shared
+    @Binding var selectedLanguage: String
+    let languages: [(String, String)]
+    
+    var body: some View {
+        List {
+            ForEach(languages, id: \.0) { language in
+                HStack {
+                    Text(language.1)
+                    Spacer()
+                    if selectedLanguage == language.0 {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(accentColorManager.currentAccentColor)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selectedLanguage = language.0
+                }
+            }
+        }
+        .navigationTitle("Anime Audio Language")
     }
 }

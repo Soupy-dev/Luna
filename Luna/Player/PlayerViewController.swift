@@ -11,6 +11,7 @@ import AVFoundation
 
 final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate {
     private let playerLogId = UUID().uuidString.prefix(8)
+    private let trackerManager = TrackerManager.shared
 
     private let videoContainer: UIView = {
         let v = UIView()
@@ -303,6 +304,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var initialPreset: PlayerPreset?
     private var initialHeaders: [String: String]?
     private var initialSubtitles: [String]?
+    private var userSelectedAudioTrack = false
     
     private var subtitleURLs: [String] = []
     private var currentSubtitleIndex: Int = 0
@@ -523,6 +525,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
         logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
+        userSelectedAudioTrack = false
         renderer.load(url: url, with: preset, headers: headers)
         if let info = mediaInfo {
             prepareSeekToLastPosition(for: info)
@@ -1056,7 +1059,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func updateAudioTracksMenu() {
-        let tracks = renderer.getAudioTracks()
+        let detailedTracks = renderer.getAudioTracksDetailed()
+        let tracks = detailedTracks.map { ($0.0, $0.1) }
         
         var trackActions: [UIAction] = []
         
@@ -1072,14 +1076,35 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                     title: name,
                     state: .off
                 ) { [weak self] _ in
+                    self?.userSelectedAudioTrack = true
                     self?.renderer.setAudioTrack(id: id)
                     self?.updateAudioTracksMenu()
                 }
             }
         }
+
+        // Auto-select preferred anime audio language when applicable
+        if isAnimeContent() && !userSelectedAudioTrack {
+            let preferredLang = Settings.shared.preferredAnimeAudioLanguage.lowercased()
+            if let matching = detailedTracks.first(where: { !$0.2.isEmpty && $0.2.lowercased().contains(preferredLang) }) {
+                Logger.shared.log("Auto-selecting anime audio track id=\(matching.0) lang=\(matching.2)", type: "Info")
+                userSelectedAudioTrack = true
+                renderer.setAudioTrack(id: matching.0)
+            }
+        }
         
         let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: trackActions)
         audioButton.menu = audioMenu
+    }
+
+    private func isAnimeContent() -> Bool {
+        guard let info = mediaInfo else { return false }
+        switch info {
+        case .movie:
+            return false
+        case .episode(let showId, _, _):
+            return trackerManager.cachedAniListId(for: showId) != nil
+        }
     }
     
     private func updateSubtitleTracksMenu() {

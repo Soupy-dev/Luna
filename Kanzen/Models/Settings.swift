@@ -22,19 +22,19 @@ enum SubtitleSize: String, CaseIterable, Identifiable {
     
     var fontSize: CGFloat {
         switch self {
-        case .small: return 32.0
-        case .medium: return 42.0
-        case .large: return 52.0
-        case .extraLarge: return 64.0
+        case .small: return 42.0   // previously medium
+        case .medium: return 52.0  // previously large
+        case .large: return 64.0   // previously extra large
+        case .extraLarge: return 76.0 // bumped to stay above large
         }
     }
     
     var strokeWidth: CGFloat {
         switch self {
-        case .small: return 2.5
-        case .medium: return 3.0
-        case .large: return 3.5
-        case .extraLarge: return 4.0
+        case .small: return 3.0
+        case .medium: return 3.5
+        case .large: return 4.0
+        case .extraLarge: return 4.5
         }
     }
 }
@@ -71,6 +71,12 @@ class Settings: ObservableObject {
             UserDefaults.standard.set(subtitleSize.rawValue, forKey: "subtitleSize")
         }
     }
+
+    @Published var preferredAnimeAudioLanguage: String {
+        didSet {
+            UserDefaults.standard.set(preferredAnimeAudioLanguage, forKey: "preferredAnimeAudioLanguage")
+        }
+    }
     
     init() {
         if let colorData = UserDefaults.standard.data(forKey: "accentColor"),
@@ -95,6 +101,8 @@ class Settings: ObservableObject {
         } else {
             self.subtitleSize = .large
         }
+
+        self.preferredAnimeAudioLanguage = UserDefaults.standard.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn"
         
         updateAppearance()
     }

@@ -1341,6 +1341,10 @@ final class MPVSoftwareRenderer {
             } else {
                 currentEmbeddedSubtitleText = nil
             }
+            // Force subtitle refresh for back-to-back dialogue
+            subtitleRenderCache = nil
+            cachedSubtitleText = nil
+            lastSubtitleCheckTime = -1.0
         default:
             break
         }
@@ -1370,8 +1374,9 @@ final class MPVSoftwareRenderer {
         // Strip ASS tags for simple rendering
         let cleanText = stripASSTags(from: text)
         
+        let font = UIFont(name: "Helvetica Neue", size: style.fontSize) ?? UIFont.systemFont(ofSize: style.fontSize, weight: .bold)
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.boldSystemFont(ofSize: style.fontSize),
+            .font: font,
             .foregroundColor: style.foregroundColor,
             .strokeColor: style.strokeColor,
             .strokeWidth: -style.strokeWidth
@@ -1450,10 +1455,10 @@ final class MPVSoftwareRenderer {
     }
     
     // MARK: - Audio Track Controls
-    func getAudioTracks() -> [(Int, String)] {
+    func getAudioTracksDetailed() -> [(Int, String, String)] {
         guard let handle = mpv else { return [] }
         
-        var result: [(Int, String)] = []
+        var result: [(Int, String, String)] = []
         var trackNumber = 1  // For user-friendly numbering
         
         var node = mpv_node()
@@ -1542,7 +1547,7 @@ final class MPVSoftwareRenderer {
                 
                 if !isDuplicate {
                     Logger.shared.log("Added audio track: ID=\(trackId), Display='\(displayName)'", type: "Debug")
-                    result.append((trackId, displayName))
+                    result.append((trackId, displayName, trackLang))
                     trackNumber += 1
                 } else {
                     Logger.shared.log("Skipped duplicate audio track: ID=\(trackId), Display='\(displayName)'", type: "Debug")
@@ -1552,6 +1557,10 @@ final class MPVSoftwareRenderer {
         
         Logger.shared.log("getAudioTracks returning \(result.count) tracks", type: "Debug")
         return result
+    }
+
+    func getAudioTracks() -> [(Int, String)] {
+        return getAudioTracksDetailed().map { ($0.0, $0.1) }
     }
     
     private func languageCodeToName(_ code: String) -> String {
