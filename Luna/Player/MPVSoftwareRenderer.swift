@@ -119,13 +119,14 @@ final class MPVSoftwareRenderer {
     private var cachedSubtitleText: NSAttributedString?
     private var subtitleRenderCache: SubtitleRenderCache?
     private var lastRenderDimensions: CGSize = .zero
-    private let subtitleUpdateInterval: Double = 0.7
+    private let subtitleUpdateInterval: Double = 1.0
     private var lastPixelBufferCreateWidth: Int = -1
     private var lastPixelBufferCreateHeight: Int = -1
     private var cachedVideoSize: CGSize = .zero
     private var lastVideoSizeCheckTime: CFTimeInterval = 0
     private var pendingSubtitleImage: (key: SubtitleRenderKey, image: CGImage, size: CGSize)?
     private let subtitleImageLock = NSLock()
+    private let cachedColorSpace = CGColorSpaceCreateDeviceRGB()
     
     var isPausedState: Bool {
         return isPaused
@@ -173,8 +174,10 @@ final class MPVSoftwareRenderer {
         // Reduce threads from 8 to 4 for thermal efficiency
         setOption(name: "vd-lavc-threads", value: "4")
         setOption(name: "cache", value: "yes")
-        setOption(name: "demuxer-max-bytes", value: "150M")
-        setOption(name: "demuxer-readahead-secs", value: "20")
+        setOption(name: "demuxer-max-bytes", value: "30M")
+        setOption(name: "demuxer-readahead-secs", value: "5")
+        setOption(name: "framedrop", value: "vo")
+        setOption(name: "video-sync", value: "audio")
         setOption(name: "subs-fallback", value: "yes")
         setOption(name: "sub-ass", value: "yes")
         setOption(name: "embeddedfonts", value: "yes")
@@ -497,7 +500,7 @@ final class MPVSoftwareRenderer {
         
         // Cache video size to avoid repeated mpv queries
         let currentTime = CACurrentMediaTime()
-        if currentTime - lastVideoSizeCheckTime > 0.5 {
+        if currentTime - lastVideoSizeCheckTime > 1.0 {
             cachedVideoSize = currentVideoSize()
             lastVideoSizeCheckTime = currentTime
         }
@@ -609,13 +612,12 @@ final class MPVSoftwareRenderer {
         
         CVPixelBufferUnlockBaseAddress(buffer, [])
         
-        // Skip subtitle rendering when paused to reduce thermal load (subtitles don't change while paused)
-        if let style = delegate?.renderer(self, getSubtitleStyle: ()), style.isVisible && !isPaused {
+        if let style = delegate?.renderer(self, getSubtitleStyle: ()), style.isVisible {
             let currentTime = cachedPosition
             let timeDelta = abs(currentTime - lastSubtitleCheckTime)
             
-            // Only check for new subtitle text periodically
-            if timeDelta >= subtitleUpdateInterval {
+            // Only check for new subtitle text when playing (skip when paused to reduce thermal load)
+            if !isPaused && timeDelta >= subtitleUpdateInterval {
                 lastSubtitleCheckTime = currentTime
                 // Check for external subtitle first
                 cachedSubtitleText = delegate?.renderer(self, getSubtitleForTime: currentTime)
@@ -628,7 +630,7 @@ final class MPVSoftwareRenderer {
                 }
             }
             
-            // Burn cached subtitle image if text exists and hasn't expired from cache
+            // Burn cached subtitle image if text exists (works when paused and playing)
             if let attributedText = cachedSubtitleText, attributedText.length > 0 {
                 if let cache = subtitleRenderCache {
                     // Quickly burn cached image without re-rendering
@@ -695,7 +697,6 @@ final class MPVSoftwareRenderer {
         }
         
         let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
         
         guard let context = CGContext(
             data: baseAddress,
@@ -703,7 +704,7 @@ final class MPVSoftwareRenderer {
             height: bufferHeight,
             bitsPerComponent: 8,
             bytesPerRow: bytesPerRow,
-            space: colorSpace,
+            space: cachedColorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
         ) else {
             return
@@ -779,7 +780,6 @@ final class MPVSoftwareRenderer {
         }
         
         let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
         
         guard let context = CGContext(
             data: baseAddress,
@@ -787,7 +787,7 @@ final class MPVSoftwareRenderer {
             height: bufferHeight,
             bitsPerComponent: 8,
             bytesPerRow: bytesPerRow,
-            space: colorSpace,
+            space: cachedColorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
         ) else {
             Logger.shared.log("Failed to create CGContext for subtitle rendering", type: "Error")
@@ -965,9 +965,8 @@ final class MPVSoftwareRenderer {
     }
     
     private func colorKey(_ color: UIColor) -> String {
-        let rgbSpace = CGColorSpaceCreateDeviceRGB()
         let cgColor = color.cgColor
-        let converted = cgColor.converted(to: rgbSpace, intent: .defaultIntent, options: nil) ?? cgColor
+        let converted = cgColor.converted(to: cachedColorSpace, intent: .defaultIntent, options: nil) ?? cgColor
         guard let components = converted.components else {
             return "unknown"
         }
