@@ -10,8 +10,8 @@ target 'Luna' do
   
   # VLC player framework - GPU-accelerated video playback
   # Required for VLCRenderer feature (thermal optimization)
-  # iOS only - tvOS uses MPV renderer
-  pod 'MobileVLCKit', :platforms => [:ios]
+  # iOS only - tvOS uses MPV renderer (conditional compilation in VLCRenderer.swift)
+  pod 'MobileVLCKit'
   
 end
 
