@@ -806,14 +806,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if isClosing { return }
         brightnessContainer.isHidden = true
         brightnessContainer.alpha = 0.0
-    
-            func rendererDidChangeTracks(_ renderer: MPVSoftwareRenderer) {
-                if isClosing { return }
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.updateAudioTracksMenu()
-                }
-            }
+    }
     @objc private func handleHoldGesture(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
         case .began:
