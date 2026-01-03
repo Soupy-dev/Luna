@@ -124,8 +124,8 @@
 		13FAA1042FFF010400AAAAAA /* AniListService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAA0042FFF000400AAAAAA /* AniListService.swift */; };
 		14AAA0023FFF000200AAAAAA /* CatalogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AAA0013FFF000100AAAAAA /* CatalogManager.swift */; };
 		14AAA0043FFF000400AAAAAA /* CatalogsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */; };
+		2F0A1B002F0A1B002F0A1B00 /* VLCRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F0A1B012F0A1B002F0A1B01 /* VLCRenderer.swift */; };
 /* End PBXBuildFile section */
-	2F0A1B002F0A1B002F0A1B00 /* VLCRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F0A1B012F0A1B002F0A1B01 /* VLCRenderer.swift */; };
 
 /* Begin PBXCopyFilesBuildPhase section */
 		12F745372EB539F000889684 /* Embed Frameworks */ = {
@@ -258,8 +258,8 @@
 		13FAA0042FFF000400AAAAAA /* AniListService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AniListService.swift; sourceTree = "<group>"; };
 		14AAA0013FFF000100AAAAAA /* CatalogManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogManager.swift; sourceTree = "<group>"; };
 		14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogsSettingsView.swift; sourceTree = "<group>"; };
+		2F0A1B012F0A1B002F0A1B01 /* VLCRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VLCRenderer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
-	2F0A1B012F0A1B002F0A1B01 /* VLCRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VLCRenderer.swift; sourceTree = "<group>"; };
 
 /* Begin PBXFrameworksBuildPhase section */
 		13F072582E4B2D3300EF90EB /* Frameworks */ = {
@@ -1002,13 +1002,13 @@
 				13E1EDD52ED9E65F00087629 /* readingMode.swift in Sources */,
 				13E1EDED2ED9E66000087629 /* contentView.swift in Sources */,
 				13F187AC2E6F38CE00747F7E /* LibraryManager.swift in Sources */,
+				2F0A1B002F0A1B002F0A1B00 /* VLCRenderer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-			2F0A1B002F0A1B002F0A1B00 /* VLCRenderer.swift in Sources */,
 		13F072682E4B2D3700EF90EB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 129CC9062EBA1D4600D2D84B /* Build.xcconfig */;
