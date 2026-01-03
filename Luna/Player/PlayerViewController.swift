@@ -284,6 +284,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var progressModel = ProgressModel()
 
     private var containerTapGesture: UITapGestureRecognizer?
+    private var leftDoubleTapGesture: UITapGestureRecognizer?
+    private var rightDoubleTapGesture: UITapGestureRecognizer?
 
     private var brightnessLevel: Float = 1.0
     private let twoFingerSettingKey = "mpvTwoFingerTapEnabled"
@@ -723,11 +725,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let leftDoubleTap = UITapGestureRecognizer(target: self, action: #selector(leftSideDoubleTapped))
         leftDoubleTap.numberOfTapsRequired = 2
         leftDoubleTap.delegate = self
+        leftDoubleTapGesture = leftDoubleTap
         videoContainer.addGestureRecognizer(leftDoubleTap)
         
         let rightDoubleTap = UITapGestureRecognizer(target: self, action: #selector(rightSideDoubleTapped))
         rightDoubleTap.numberOfTapsRequired = 2
         rightDoubleTap.delegate = self
+        rightDoubleTapGesture = rightDoubleTap
         videoContainer.addGestureRecognizer(rightDoubleTap)
         
         #if !os(tvOS)
@@ -1589,6 +1593,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }
         }
         #endif
+        
+        // Filter double-tap gestures by screen side
+        let location = touch.location(in: videoContainer)
+        let isLeftSide = location.x < videoContainer.bounds.width / 2
+        
+        if gestureRecognizer === leftDoubleTapGesture {
+            return isLeftSide
+        } else if gestureRecognizer === rightDoubleTapGesture {
+            return !isLeftSide
+        }
+        
         return true
     }
     
