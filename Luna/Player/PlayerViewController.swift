@@ -808,6 +808,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         brightnessContainer.alpha = 0.0
     }
 
+#else
+    // tvOS stub to satisfy shared call sites when brightness UI is unavailable
+    private func updateBrightnessControlVisibility() { }
 #endif
 
     @objc private func handleHoldGesture(_ gesture: UILongPressGestureRecognizer) {

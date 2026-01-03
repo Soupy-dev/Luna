@@ -624,7 +624,7 @@ struct MediaDetailView: View {
                                         )
                                     }
                                     Logger.shared.log("Season \(season.seasonNumber): \(seasonEpisodes.count) episodes with AniList numbering", type: "Anime")
-                                    for (idx, ep) in seasonEpisodes.prefix(3).enumerated() {
+                                    for (_, ep) in seasonEpisodes.prefix(3).enumerated() {
                                         Logger.shared.log("  S\(ep.seasonNumber)E\(ep.episodeNumber): \(ep.name)", type: "Anime")
                                     }
                                     seasonCache[season.seasonNumber] = seasonEpisodes

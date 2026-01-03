@@ -1490,7 +1490,6 @@ final class MPVSoftwareRenderer {
             var trackLang: String = ""
             var trackTitle: String = ""
             var trackCodec: String = ""
-            var trackChannels: String = ""
             
             let mapCount = Int(trackNode.u.list?.pointee.num ?? 0)
             guard let keysPtr = trackNode.u.list?.pointee.keys,
@@ -1514,9 +1513,6 @@ final class MPVSoftwareRenderer {
                     } else if key == "codec", value.format == MPV_FORMAT_STRING,
                               let codecStr = value.u.string.map({ String(cString: $0) }) {
                         trackCodec = codecStr
-                    } else if key == "audio-channels", value.format == MPV_FORMAT_STRING,
-                              let channelsStr = value.u.string.map({ String(cString: $0) }) {
-                        trackChannels = channelsStr
                     }
                 }
             }
@@ -1813,6 +1809,11 @@ final class MPVSoftwareRenderer {
             }
         }
         
+        guard let library = library else {
+            Logger.shared.log("Failed to create Metal library — no shader functions available", type: "Error")
+            return
+        }
+
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexShader")
         pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentShader")
