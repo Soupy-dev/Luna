@@ -517,10 +517,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         self.initialPreset = preset
         self.initialHeaders = headers
         self.initialSubtitles = subtitles
-        Logger.shared.log("PlayerViewController init with \(subtitles?.count ?? 0) subtitle URLs", type: "Info")
-        if let subs = subtitles, !subs.isEmpty {
-            Logger.shared.log("Subtitle URLs in player init: \(subs)", type: "Info")
-        }
     }
     
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
@@ -1061,16 +1057,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func updateAudioTracksMenu() {
         let detailedTracks = renderer.getAudioTracksDetailed()
         let tracks = detailedTracks.map { ($0.0, $0.1) }
-
-        Logger.shared.log(
-            "updateAudioTracksMenu: tracks=\(tracks.count) userSelectedAudioTrack=\(userSelectedAudioTrack) isAnime=\(isAnimeContent())",
-            type: "Info"
-        )
-        
         var trackActions: [UIAction] = []
         
         if tracks.isEmpty {
-            Logger.shared.log("Audio tracks not yet available; waiting for track-list update", type: "Info")
             let loadingAction = UIAction(title: "Loading audio tracks...", attributes: [.disabled], state: .off) { _ in }
             let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: [loadingAction])
             audioButton.menu = audioMenu
@@ -1092,9 +1081,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if isAnimeContent() && !userSelectedAudioTrack {
             let preferredLang = Settings.shared.preferredAnimeAudioLanguage.lowercased()
             let preferredLangName = languageName(for: preferredLang)
-            Logger.shared.log("Anime detected, auto-selecting audio language: \(preferredLang)", type: "Info")
-            let trackLog = detailedTracks.map { "id=\($0.0) name=\($0.1) lang=\($0.2)" }.joined(separator: ", ")
-            Logger.shared.log("Available audio tracks with languages: \(trackLog)", type: "Debug")
 
             if let matching = detailedTracks.first(where: {
                 let langCode = $0.2.lowercased()
@@ -1105,16 +1091,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 if !preferredLangName.isEmpty && title.contains(preferredLangName.lowercased()) { return true }
                 return false
             }) {
-                Logger.shared.log("Auto-selected anime audio track id=\(matching.0) lang=\(matching.2)", type: "Info")
                 userSelectedAudioTrack = true
                 renderer.setAudioTrack(id: matching.0)
-            } else {
-                Logger.shared.log("Preferred audio language '\(preferredLang)' not found in tracks", type: "Info")
             }
-        } else if !isAnimeContent() {
-            Logger.shared.log("Not anime content, skipping auto audio selection", type: "Debug")
-        } else if userSelectedAudioTrack {
-            Logger.shared.log("User already selected audio track; skipping auto selection", type: "Debug")
         }
         
         let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: trackActions)
@@ -1152,12 +1131,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard subtitleURLs.isEmpty else { return }
 
         let tracks = renderer.getSubtitleTracks()
-        Logger.shared.log("updateSubtitleTracksMenu: Found \(tracks.count) embedded subtitle tracks", type: "Info")
         
         // Show subtitle button if we have embedded tracks
         if !tracks.isEmpty {
             subtitleButton.isHidden = false
-            Logger.shared.log("Subtitle button made visible for embedded tracks", type: "Info")
             
             // Apply default subtitle settings if enabled
             let settings = Settings.shared
@@ -1165,10 +1142,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 // Try to find matching language track
                 let preferredLang = settings.defaultSubtitleLanguage
                 if let matchingTrack = tracks.first(where: { $0.1.lowercased().contains(preferredLang.lowercased()) }) {
-                    Logger.shared.log("Auto-enabling subtitle track: \(matchingTrack.0) - \(matchingTrack.1)", type: "Info")
                     renderer.setSubtitleTrack(id: matchingTrack.0)
-                } else {
-                    Logger.shared.log("Preferred subtitle language '\(preferredLang)' not found, subtitles remain disabled", type: "Info")
                 }
             }
         }
@@ -1180,7 +1154,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             image: UIImage(systemName: "xmark"),
             state: .off
         ) { [weak self] _ in
-            Logger.shared.log("Disabling embedded subtitles", type: "Info")
             self?.renderer.disableSubtitles()
             self?.updateSubtitleTracksMenu()
         }
@@ -1198,7 +1171,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                     image: UIImage(systemName: "captions.bubble"),
                     state: .off
                 ) { [weak self] _ in
-                    Logger.shared.log("User selected embedded subtitle track: \(id) - \(name)", type: "Info")
                     self?.renderer.setSubtitleTrack(id: id)
                     self?.updateSubtitleTracksMenu()
                 }
@@ -1206,17 +1178,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             trackActions.append(contentsOf: subtitleActions)
         }
         
-        Logger.shared.log("Setting subtitle menu with \(trackActions.count) actions", type: "Info")
         let subtitleMenu = UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: trackActions)
         subtitleButton.menu = subtitleMenu
-        Logger.shared.log("Subtitle menu assigned to button", type: "Info")
     }
     private func loadSubtitles(_ urls: [String]) {
-        Logger.shared.log("loadSubtitles called with \(urls.count) URLs", type: "Info")
         subtitleURLs = urls
         
         if !urls.isEmpty {
-            Logger.shared.log("Setting up subtitle button and loading first subtitle", type: "Info")
             subtitleButton.isHidden = false
             currentSubtitleIndex = 0
             subtitleModel.isVisible = true

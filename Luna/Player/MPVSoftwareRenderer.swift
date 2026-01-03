@@ -55,6 +55,7 @@ private struct SubtitleRenderKey: Equatable {
     let foreground: String
     let stroke: String
     let strokeWidth: CGFloat
+    let maxWidth: CGFloat
 }
 
 private struct SubtitleRenderCache {
@@ -74,6 +75,7 @@ final class MPVSoftwareRenderer {
     private let renderQueue = DispatchQueue(label: "mpv.software.render", qos: .userInitiated)
     private let eventQueue = DispatchQueue(label: "mpv.software.events", qos: .utility)
     private let stateQueue = DispatchQueue(label: "mpv.software.state", attributes: .concurrent)
+    private let subtitleRenderQueue = DispatchQueue(label: "mpv.subtitle.render", qos: .utility)
     private let eventQueueGroup = DispatchGroup()
     private let renderQueueKey = DispatchSpecificKey<Void>()
     
@@ -122,6 +124,8 @@ final class MPVSoftwareRenderer {
     private var lastPixelBufferCreateHeight: Int = -1
     private var cachedVideoSize: CGSize = .zero
     private var lastVideoSizeCheckTime: CFTimeInterval = 0
+    private var pendingSubtitleImage: (key: SubtitleRenderKey, image: CGImage, size: CGSize)?
+    private let subtitleImageLock = NSLock()
     
     var isPausedState: Bool {
         return isPaused
@@ -755,6 +759,7 @@ final class MPVSoftwareRenderer {
         let effectiveWidth = Int(max(cappedWidth, 1))
         let effectiveHeight = Int(max(cappedHeight, 1))
         
+        // Get subtitle image (uses cache or queues async rendering)
         guard let subtitleImage = makeSubtitleImage(from: attributedText, style: style, maxWidth: CGFloat(effectiveWidth) * 0.9) else {
             return
         }
@@ -824,12 +829,37 @@ final class MPVSoftwareRenderer {
             fontSize: style.fontSize,
             foreground: colorKey(style.foregroundColor),
             stroke: colorKey(style.strokeColor),
-            strokeWidth: style.strokeWidth
+            strokeWidth: style.strokeWidth,
+            maxWidth: maxWidth
         )
-        if let cache = subtitleRenderCache, cache.key == key {
-            return (cache.image, cache.size)
+        
+        // Check if we have a cached image for this text
+        let cachedResult: (image: CGImage, size: CGSize)? = subtitleImageLock.withLock {
+            if let cache = subtitleRenderCache, cache.key == key {
+                return (cache.image, cache.size)
+            }
+            return nil
         }
         
+        if let cachedResult = cachedResult {
+            return cachedResult
+        }
+        
+        // Queue async subtitle generation to reduce thermal load; allows next frame to pick it up
+        subtitleRenderQueue.async { [weak self] in
+            self?.generateSubtitleImage(from: attributedText, style: style, maxWidth: maxWidth, key: key)
+        }
+        
+        // Return pending image only if it matches current text
+        return subtitleImageLock.withLock {
+            if let pending = pendingSubtitleImage, pending.key == key {
+                return (pending.image, pending.size)
+            }
+            return nil
+        }
+    }
+    
+    private func generateSubtitleImage(from attributedText: NSAttributedString, style: SubtitleStyle, maxWidth: CGFloat, key: SubtitleRenderKey) -> (image: CGImage, size: CGSize)? {
         return autoreleasepool {
             let mutable = NSMutableAttributedString(attributedString: attributedText)
             let fullRange = NSRange(location: 0, length: mutable.length)
@@ -878,15 +908,12 @@ final class MPVSoftwareRenderer {
             
             if strokeRadius > 0, let ctx = UIGraphicsGetCurrentContext() {
                 ctx.saveGState()
+                // Reduced to 4 corner offsets (50% less work) for thermal efficiency
                 let offsets: [CGPoint] = [
-                    CGPoint(x: -strokeRadius, y: 0),
-                    CGPoint(x: strokeRadius, y: 0),
-                    CGPoint(x: 0, y: -strokeRadius),
-                    CGPoint(x: 0, y: strokeRadius),
                     CGPoint(x: -strokeRadius, y: -strokeRadius),
-                    CGPoint(x: strokeRadius, y: strokeRadius),
+                    CGPoint(x: strokeRadius, y: -strokeRadius),
                     CGPoint(x: -strokeRadius, y: strokeRadius),
-                    CGPoint(x: strokeRadius, y: -strokeRadius)
+                    CGPoint(x: strokeRadius, y: strokeRadius)
                 ]
                 let strokeText = NSMutableAttributedString(attributedString: mutable)
                 strokeText.addAttribute(.foregroundColor, value: style.strokeColor, range: fullRange)
@@ -907,8 +934,14 @@ final class MPVSoftwareRenderer {
             }
             
             let cache = SubtitleRenderCache(key: key, image: image, size: paddedSize)
-            subtitleRenderCache = cache
-            return (image, paddedSize)
+            let result = (image, paddedSize)
+            subtitleImageLock.withLock {
+                // Make result available immediately for next frame via pending image
+                self.pendingSubtitleImage = (key: key, image: image, size: paddedSize)
+                // Then update cache for future frames with same text
+                self.subtitleRenderCache = cache
+            }
+            return result
         }
     }
     
