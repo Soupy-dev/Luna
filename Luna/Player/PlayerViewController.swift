@@ -305,7 +305,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var initialHeaders: [String: String]?
     private var initialSubtitles: [String]?
     private var userSelectedAudioTrack = false
-    private var pendingAutoAudioSelection = true
     
     private var subtitleURLs: [String] = []
     private var currentSubtitleIndex: Int = 0
@@ -527,7 +526,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
         logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
         userSelectedAudioTrack = false
-        pendingAutoAudioSelection = true
         renderer.load(url: url, with: preset, headers: headers)
         if let info = mediaInfo {
             prepareSeekToLastPosition(for: info)
@@ -1067,47 +1065,46 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         var trackActions: [UIAction] = []
         
         if tracks.isEmpty {
-            // Even if we can't find tracks, the button should be enabled
-            // This might indicate a timing issue or stream without proper metadata
-            Logger.shared.log("Warning: No audio tracks found in stream", type: "Warn")
-            let defaultAction = UIAction(title: "No tracks detected (check stream)", state: .off) { _ in }
-            trackActions.append(defaultAction)
-        } else {
-            trackActions = tracks.map { (id, name) in
-                UIAction(
-                    title: name,
-                    state: .off
-                ) { [weak self] _ in
-                    self?.userSelectedAudioTrack = true
-                    self?.pendingAutoAudioSelection = false
-                    self?.renderer.setAudioTrack(id: id)
-                    self?.updateAudioTracksMenu()
-                }
+            Logger.shared.log("Audio tracks not yet available; waiting for track-list update", type: "Info")
+            let loadingAction = UIAction(title: "Loading audio tracks...", attributes: [.disabled], state: .off) { _ in }
+            let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: [loadingAction])
+            audioButton.menu = audioMenu
+            return
+        }
+
+        trackActions = tracks.map { (id, name) in
+            UIAction(
+                title: name,
+                state: .off
+            ) { [weak self] _ in
+                self?.userSelectedAudioTrack = true
+                self?.renderer.setAudioTrack(id: id)
+                self?.updateAudioTracksMenu()
             }
         }
 
         // Auto-select preferred anime audio language when applicable
-        if isAnimeContent() && !userSelectedAudioTrack && pendingAutoAudioSelection {
+        if isAnimeContent() && !userSelectedAudioTrack {
             let preferredLang = Settings.shared.preferredAnimeAudioLanguage.lowercased()
-            Logger.shared.log("Anime detected, looking for audio language: \(preferredLang)", type: "Info")
+            let preferredLangName = languageName(for: preferredLang)
+            Logger.shared.log("Anime detected, auto-selecting audio language: \(preferredLang)", type: "Info")
             let trackLog = detailedTracks.map { "id=\($0.0) name=\($0.1) lang=\($0.2)" }.joined(separator: ", ")
             Logger.shared.log("Available audio tracks with languages: \(trackLog)", type: "Debug")
-            let preferredLangName = languageName(for: preferredLang)
+
             if let matching = detailedTracks.first(where: {
                 let langCode = $0.2.lowercased()
                 let title = $0.1.lowercased()
-                if !langCode.isEmpty && langCode.contains(preferredLang) { return true }
-                if !langCode.isEmpty && !preferredLangName.isEmpty && langCode.contains(preferredLangName.lowercased()) { return true }
-                if !title.isEmpty && title.contains(preferredLang) { return true }
-                if !title.isEmpty && !preferredLangName.isEmpty && title.contains(preferredLangName.lowercased()) { return true }
+                if !preferredLang.isEmpty && langCode.contains(preferredLang) { return true }
+                if !preferredLangName.isEmpty && langCode.contains(preferredLangName.lowercased()) { return true }
+                if !preferredLang.isEmpty && title.contains(preferredLang) { return true }
+                if !preferredLangName.isEmpty && title.contains(preferredLangName.lowercased()) { return true }
                 return false
             }) {
-                Logger.shared.log("Auto-selecting anime audio track id=\(matching.0) lang=\(matching.2)", type: "Info")
+                Logger.shared.log("Auto-selected anime audio track id=\(matching.0) lang=\(matching.2)", type: "Info")
                 userSelectedAudioTrack = true
-                pendingAutoAudioSelection = false
                 renderer.setAudioTrack(id: matching.0)
             } else {
-                Logger.shared.log("No matching audio track found for language \(preferredLang)", type: "Info")
+                Logger.shared.log("Preferred audio language '\(preferredLang)' not found in tracks", type: "Info")
             }
         } else if !isAnimeContent() {
             Logger.shared.log("Not anime content, skipping auto audio selection", type: "Debug")
