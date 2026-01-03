@@ -161,6 +161,17 @@ final class MPVSoftwareRenderer {
         setOption(name: "embeddedfonts", value: "yes")
         setOption(name: "blend-subtitles", value: "yes")
         setOption(name: "sub-visibility", value: "no")
+        // Force visible, readable defaults for embedded subs
+        setOption(name: "sub-ass-override", value: "force")
+        setOption(name: "sub-scale-by-window", value: "yes")
+        setOption(name: "sub-use-margins", value: "no")
+        setOption(name: "sub-pos", value: "92")
+        setOption(name: "sub-font-size", value: "36")
+        setOption(name: "sub-color", value: "#FFFFFFFF")
+        setOption(name: "sub-border-color", value: "#FF000000")
+        setOption(name: "sub-border-size", value: "2")
+        setOption(name: "sub-shadow-color", value: "#80000000")
+        setOption(name: "sub-shadow-offset", value: "1")
         
         let initStatus = mpv_initialize(handle)
         guard initStatus >= 0 else {
@@ -1664,6 +1675,19 @@ final class MPVSoftwareRenderer {
                     Logger.shared.log("MPVSoftwareRenderer: fallback failed, no subtitle tracks found", type: "Error")
                 }
             }
+
+            // Reinforce visibility/style to avoid invisible ASS styling
+            _ = self.commandSync(handle, ["set", "sub-visibility", "yes"])
+            _ = self.commandSync(handle, ["set", "sub-ass-override", "force"])
+            _ = self.commandSync(handle, ["set", "sub-scale-by-window", "yes"])
+            _ = self.commandSync(handle, ["set", "sub-use-margins", "no"])
+            _ = self.commandSync(handle, ["set", "sub-pos", "92"])
+            _ = self.commandSync(handle, ["set", "sub-font-size", "36"])
+            _ = self.commandSync(handle, ["set", "sub-color", "#FFFFFFFF"])
+            _ = self.commandSync(handle, ["set", "sub-border-color", "#FF000000"])
+            _ = self.commandSync(handle, ["set", "sub-border-size", "2"])
+            _ = self.commandSync(handle, ["set", "sub-shadow-color", "#80000000"])
+            _ = self.commandSync(handle, ["set", "sub-shadow-offset", "1"])
 
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
