@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-	1A1A1A1A1A1A1A1A1A1A1A1A /* VLCRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A1A1A1A1A1A1A1A1A1A1A1B /* VLCRenderer.swift */; };
+	
 		12201F512EBE918D0033073C /* ServiceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12201F502EBE91870033073C /* ServiceStore.swift */; };
 		12201F542EBE922D0033073C /* ServiceModels.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 12201F522EBE922D0033073C /* ServiceModels.xcdatamodeld */; };
 		129CC90C2EBA920C00D2D84B /* Bundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 129CC90B2EBA920A00D2D84B /* Bundle.swift */; };
@@ -125,6 +125,7 @@
 		14AAA0023FFF000200AAAAAA /* CatalogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AAA0013FFF000100AAAAAA /* CatalogManager.swift */; };
 		14AAA0043FFF000400AAAAAA /* CatalogsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */; };
 /* End PBXBuildFile section */
+	2F0A1B002F0A1B002F0A1B00 /* VLCRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F0A1B012F0A1B002F0A1B01 /* VLCRenderer.swift */; };
 
 /* Begin PBXCopyFilesBuildPhase section */
 		12F745372EB539F000889684 /* Embed Frameworks */ = {
@@ -258,6 +259,7 @@
 		14AAA0013FFF000100AAAAAA /* CatalogManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogManager.swift; sourceTree = "<group>"; };
 		14AAA0033FFF000300AAAAAA /* CatalogsSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogsSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+	2F0A1B012F0A1B002F0A1B01 /* VLCRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VLCRenderer.swift; sourceTree = "<group>"; };
 
 /* Begin PBXFrameworksBuildPhase section */
 		13F072582E4B2D3300EF90EB /* Frameworks */ = {
@@ -285,6 +287,7 @@
 				1324E7B52E940BD70036B5F5 /* PlayerViewController.swift */,
 				1324E7B42E940BD70036B5F5 /* MPVSoftwareRenderer.swift */,
 				1324E7B62E940BD70036B5F5 /* SampleBufferDisplayView.swift */,
+				2F0A1B012F0A1B002F0A1B01 /* VLCRenderer.swift */,
 			);
 			path = Player;
 			sourceTree = "<group>";
@@ -1005,6 +1008,7 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+			2F0A1B002F0A1B002F0A1B00 /* VLCRenderer.swift in Sources */,
 		13F072682E4B2D3700EF90EB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 129CC9062EBA1D4600D2D84B /* Build.xcconfig */;
