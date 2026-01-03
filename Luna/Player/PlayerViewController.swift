@@ -1061,6 +1061,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func updateAudioTracksMenu() {
         let detailedTracks = renderer.getAudioTracksDetailed()
         let tracks = detailedTracks.map { ($0.0, $0.1) }
+
+        Logger.shared.log(
+            "updateAudioTracksMenu: tracks=\(tracks.count) userSelectedAudioTrack=\(userSelectedAudioTrack) isAnime=\(isAnimeContent())",
+            type: "Info"
+        )
         
         var trackActions: [UIAction] = []
         
@@ -1108,6 +1113,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }
         } else if !isAnimeContent() {
             Logger.shared.log("Not anime content, skipping auto audio selection", type: "Debug")
+        } else if userSelectedAudioTrack {
+            Logger.shared.log("User already selected audio track; skipping auto selection", type: "Debug")
         }
         
         let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: trackActions)
