@@ -1580,14 +1580,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             guard let self = self else { return }
             self.isSeeking = editing
             if !editing {
-                self.renderer.seek(to: max(0, self.progressModel.position))
+                self.rendererSeek(to: max(0, self.progressModel.position))
             }
         })))
         
         progressHostingController = host
         addChild(host)
         host.view.translatesAutoresizingMaskIntoConstraints = false
-        host.view.backgroundColor = .clear
+        host.view.backgroundColor = UIColor.clear
         host.view.isOpaque = false
         progressContainer.addSubview(host.view)
         NSLayoutConstraint.activate([
@@ -1910,7 +1910,7 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
             } else {
                 self.loadingIndicator.stopAnimating()
                 self.loadingIndicator.alpha = 0.0
-                self.updatePlayPauseButton(isPaused: self.renderer.isPausedState)
+                self.updatePlayPauseButton(isPaused: self.rendererIsPausedState())
             }
         }
     }
