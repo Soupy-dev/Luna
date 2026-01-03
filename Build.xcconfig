@@ -5,6 +5,9 @@
 //  Created by Dominic on 04.11.25.
 //
 
+// Include CocoaPods configuration (dynamically based on build configuration)
+#include? "Pods/Target Support Files/Pods-Luna/Pods-Luna.${CONFIGURATION}.xcconfig"
+
 APP_NAME = Luna
 DEVELOPMENT_TEAM = 399LMK6Q2Y
 BUNDLE_IDENTIFIER = me.cranci.solar
@@ -13,4 +16,5 @@ CODE_SIGN_ENTITLEMENTS = Luna/Luna.entitlements
 
 // Optional local overrides (ignored in Git)
 #include? "Build.local.xcconfig"
+
 
