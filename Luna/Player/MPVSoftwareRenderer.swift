@@ -127,6 +127,8 @@ final class MPVSoftwareRenderer {
     private var pendingSubtitleImage: (key: SubtitleRenderKey, image: CGImage, size: CGSize)?
     private let subtitleImageLock = NSLock()
     private let cachedColorSpace = CGColorSpaceCreateDeviceRGB()
+    private var isAppActive: Bool = true
+    private var lastForegroundTime: CFTimeInterval = 0
     
     var isPausedState: Bool {
         return isPaused
@@ -148,10 +150,36 @@ final class MPVSoftwareRenderer {
         self.minRenderInterval = 1.0 / CFTimeInterval(cappedFPS)
         
         renderQueue.setSpecific(key: renderQueueKey, value: ())
+        
+        // Observe app lifecycle for thermal optimization
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
     }
     
     deinit {
+        NotificationCenter.default.removeObserver(self)
         stop()
+    }
+    
+    @objc private func handleAppDidEnterBackground() {
+        isAppActive = false
+        // Skip rendering while backgrounded to save battery/thermal load
+    }
+    
+    @objc private func handleAppWillEnterForeground() {
+        isAppActive = true
+        lastForegroundTime = CACurrentMediaTime()
+        // Debounce render scheduling on foreground to prevent burst rendering
     }
     
     func start() throws {
@@ -451,6 +479,9 @@ final class MPVSoftwareRenderer {
         renderQueue.async { [weak self] in
             guard let self, self.isRunning, !self.isStopping else { return }
             
+            // Skip rendering when app is backgrounded (thermal optimization)
+            guard self.isAppActive else { return }
+            
             let currentTime = CACurrentMediaTime()
             let timeSinceLastRender = currentTime - self.lastRenderTime
             if timeSinceLastRender < self.minRenderInterval {
@@ -650,7 +681,11 @@ final class MPVSoftwareRenderer {
         
         enqueue(buffer: buffer)
         
-        if preAllocatedBuffers.count < 2 {
+        // Delay buffer pre-allocation briefly after foreground return to avoid thermal burst
+        let timeSinceForeground = CACurrentMediaTime() - lastForegroundTime
+        let shouldPreAllocate = preAllocatedBuffers.count < 2 && (lastForegroundTime == 0 || timeSinceForeground > 2.0)
+        
+        if shouldPreAllocate {
             renderQueue.async { [weak self] in
                 self?.preAllocateBuffers()
             }
