@@ -142,7 +142,8 @@ final class MPVSoftwareRenderer {
         
         self.displayLayer = displayLayer
         let maxFPS = screen.maximumFramesPerSecond
-        let cappedFPS = min(maxFPS, 60)
+        // Cap at 30 FPS for thermal efficiency on mobile (50% less render cycles)
+        let cappedFPS = min(maxFPS, 30)
         self.minRenderInterval = 1.0 / CFTimeInterval(cappedFPS)
         
         renderQueue.setSpecific(key: renderQueueKey, value: ())
@@ -169,7 +170,8 @@ final class MPVSoftwareRenderer {
         setOption(name: "demuxer-thread", value: "yes")
         setOption(name: "ytdl", value: "yes")
         setOption(name: "profile", value: "fast")
-        setOption(name: "vd-lavc-threads", value: "8")
+        // Reduce threads from 8 to 4 for thermal efficiency
+        setOption(name: "vd-lavc-threads", value: "4")
         setOption(name: "cache", value: "yes")
         setOption(name: "demuxer-max-bytes", value: "150M")
         setOption(name: "demuxer-readahead-secs", value: "20")
@@ -474,15 +476,18 @@ final class MPVSoftwareRenderer {
             Logger.shared.log("MPVSoftwareRenderer: renderContext is nil in performRenderUpdate", type: "Warn")
             return
         }
+        
         let status = mpv_render_context_update(context)
         
         let updateFlags = UInt32(status)
         
+        // Render frame if there's a new frame AND video is playing (or new frame from seek)
         if updateFlags & MPV_RENDER_UPDATE_FRAME.rawValue != 0 {
             renderFrame()
         }
         
-        if status > 0 {
+        // Only schedule future renders when playing (don't loop renders while paused)
+        if status > 0 && !isPaused {
             scheduleRender()
         }
     }
