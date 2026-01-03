@@ -626,7 +626,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         setupLayout()
         
         // Add VLC rendering view if using VLC renderer
-        if let vlcRenderer = vlcRenderer, let vlcView = (renderer as? VLCRenderer)?.getRenderingView() {
+        if let vlc = vlcRenderer {
+            let vlcView = vlc.getRenderingView()
             videoContainer.addSubview(vlcView)
             vlcView.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
