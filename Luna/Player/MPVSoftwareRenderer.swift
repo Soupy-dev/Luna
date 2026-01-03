@@ -1314,19 +1314,12 @@ final class MPVSoftwareRenderer {
             let status = getProperty(handle: handle, name: name, format: MPV_FORMAT_FLAG, value: &flag)
             if status >= 0 {
                 let newPaused = flag != 0
-            } else {
-            case "sub-text":
-                // Extract embedded subtitle text for manual rendering
-                if let text = getStringProperty(handle: handle, name: "sub-text"), !text.isEmpty {
-                    currentEmbeddedSubtitleText = text
-                } else {
-                    currentEmbeddedSubtitleText = nil
+                if newPaused != isPaused {
+                    isPaused = newPaused
+                    delegate?.renderer(self, didChangePause: isPaused)
                 }
-                // Force subtitle refresh for back-to-back dialogue
-                subtitleRenderCache = nil
-                cachedSubtitleText = nil
-                lastSubtitleCheckTime = -1.0
-                Logger.shared.log("Failed to read sid property (status=\(status))", type: "Warn")
+            } else {
+                Logger.shared.log("Failed to read pause property (status=\(status))", type: "Warn")
             }
         case "sub-visibility":
             var flag: Int32 = 0
