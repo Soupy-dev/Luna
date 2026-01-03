@@ -1632,17 +1632,42 @@ final class MPVSoftwareRenderer {
     
     func setSubtitleTrack(id: Int) {
         Logger.shared.log("MPVSoftwareRenderer: Setting subtitle track to ID \(id)", type: "Info")
-
-        eventQueue.async { [weak self] in
+        renderQueue.async { [weak self] in
             guard let self, let handle = self.mpv else { return }
 
+            // Try mpv commands first (synchronous, thread-safe)
             let sidStatus = self.commandSync(handle, ["set", "sid", String(id)])
             let visStatus = self.commandSync(handle, ["set", "sub-visibility", "yes"])
-            Logger.shared.log("MPVSoftwareRenderer: setSubtitleTrack applied via commandSync sidStatus=\(sidStatus) visStatus=\(visStatus)", type: "Info")
+
+            // Fallback to property set if command failed
+            if sidStatus < 0 {
+                _ = self.setPropertyWithStatus(name: "sid", value: String(id))
+            }
+            if visStatus < 0 {
+                _ = self.setPropertyWithStatus(name: "sub-visibility", value: "yes")
+            }
+
+            // Read back sid to verify
+            var readSid: Int64 = -1
+            let readStatus = self.getProperty(handle: handle, name: "sid", format: MPV_FORMAT_INT64, value: &readSid)
+            Logger.shared.log("MPVSoftwareRenderer: subtitle track request id=\(id) sidStatus=\(sidStatus) visStatus=\(visStatus) readStatus=\(readStatus) readSid=\(readSid)", type: "Info")
+
+            // Hard fallback: if the requested track didn't stick, try the first available track
+            if readStatus < 0 || readSid != Int64(id) {
+                let tracks = self.getSubtitleTracks()
+                if let first = tracks.first {
+                    Logger.shared.log("MPVSoftwareRenderer: fallback to first subtitle track id=\(first.0)", type: "Warn")
+                    _ = self.commandSync(handle, ["set", "sid", String(first.0)])
+                    _ = self.commandSync(handle, ["set", "sub-visibility", "yes"])
+                    readSid = Int64(first.0)
+                } else {
+                    Logger.shared.log("MPVSoftwareRenderer: fallback failed, no subtitle tracks found", type: "Error")
+                }
+            }
 
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.delegate?.renderer(self, subtitleTrackDidChange: id)
+                self.delegate?.renderer(self, subtitleTrackDidChange: Int(readSid >= 0 ? readSid : Int64(id)))
             }
         }
     }
