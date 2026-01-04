@@ -696,9 +696,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         CATransaction.setDisableActions(true)
         displayLayer.frame = videoContainer.bounds
         // Only show displayLayer when using MPV renderer; hide when using VLC
-        // Keep the display layer visible for both MPV and VLC so PiP can capture frames
-        displayLayer.isHidden = false
-        displayLayer.opacity = 1.0
+        // Hide the MPV display layer when using VLC (VLC renders into its own view)
+        displayLayer.isHidden = (vlcRenderer != nil)
+        displayLayer.opacity = (vlcRenderer != nil) ? 0.0 : 1.0
         
         if let gradientLayer = controlsOverlayView.layer.sublayers?.first(where: { $0.name == "gradientLayer" }) {
             gradientLayer.frame = controlsOverlayView.bounds
@@ -828,6 +828,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         brightnessContainer.contentView.addSubview(brightnessSlider)
         brightnessContainer.contentView.addSubview(brightnessIcon)
     #endif
+
+        // Hide PiP control when VLC is active (PiP remains MPV-only)
+        pipButton.isHidden = (vlcRenderer != nil)
         
         NSLayoutConstraint.activate([
             videoContainer.topAnchor.constraint(equalTo: view.topAnchor),
@@ -1356,19 +1359,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func updateSubtitleTracksMenu() {
-        // If we already have external subtitle URLs, keep the external menu intact
+        // Always allow subtitle UI; keep external menu intact if already present
         guard subtitleURLs.isEmpty else { return }
 
         let tracks = rendererGetSubtitleTracks()
-        
-        // Show subtitle button if we have embedded tracks
+
+        // Always show the subtitle button so the user can view the menu even when empty
+        subtitleButton.isHidden = false
+
+        // Apply default subtitle settings if enabled and tracks exist
         if !tracks.isEmpty {
-            subtitleButton.isHidden = false
-            
-            // Apply default subtitle settings if enabled
             let settings = Settings.shared
             if settings.enableSubtitlesByDefault {
-                // Try to find matching language track
                 let preferredLang = settings.defaultSubtitleLanguage
                 if let matchingTrack = tracks.first(where: { $0.1.lowercased().contains(preferredLang.lowercased()) }) {
                     rendererSetSubtitleTrack(id: matchingTrack.0)
@@ -1389,11 +1391,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         trackActions.append(disableAction)
         
         if tracks.isEmpty {
-            // Don't disable - just inform the user
+            // Inform the user; keep menu available
             let noTracksAction = UIAction(title: "No subtitles in stream", state: .off) { _ in }
             trackActions.append(noTracksAction)
         } else {
-            // Use map to properly capture values in closures (same pattern as audio tracks)
             let subtitleActions = tracks.map { (id, name) in
                 UIAction(
                     title: name,
@@ -1504,14 +1505,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
         // Embedded subtitles flow
         let embeddedTracks = rendererGetSubtitleTracks()
-            Logger.shared.log("subtitleButtonTapped: embedded flow, tracks=\(embeddedTracks.count)", type: "Info")
-        guard !embeddedTracks.isEmpty else {
-            Logger.shared.log("subtitleButtonTapped: no embedded tracks available", type: "Info")
-            showControlsTemporarily()
-            return
-        }
-
-        Logger.shared.log("subtitleButtonTapped: presenting action sheet for embedded tracks", type: "Info")
+        Logger.shared.log("subtitleButtonTapped: embedded flow, tracks=\(embeddedTracks.count)", type: "Info")
 
         let alert = UIAlertController(title: "Select Subtitle", message: nil, preferredStyle: .actionSheet)
 
@@ -1522,12 +1516,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
         alert.addAction(disable)
 
-        for (id, name) in embeddedTracks {
-            alert.addAction(UIAlertAction(title: name, style: .default) { [weak self] _ in
-                Logger.shared.log("Embedded subtitle selected via action sheet: id=\(id) name=\(name)", type: "Info")
-                self?.rendererSetSubtitleTrack(id: id)
-                self?.updateSubtitleTracksMenu()
-            })
+        if embeddedTracks.isEmpty {
+            alert.addAction(UIAlertAction(title: "No subtitles in stream", style: .cancel, handler: nil))
+        } else {
+            for (id, name) in embeddedTracks {
+                alert.addAction(UIAlertAction(title: name, style: .default) { [weak self] _ in
+                    Logger.shared.log("Embedded subtitle selected via action sheet: id=\(id) name=\(name)", type: "Info")
+                    self?.rendererSetSubtitleTrack(id: id)
+                    self?.updateSubtitleTracksMenu()
+                })
+            }
         }
 
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
@@ -1861,13 +1859,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func pipTapped() {
-        guard let pip = pipController else { return }
+        guard vlcRenderer == nil, let pip = pipController else { return }
         if pip.isPictureInPictureActive {
             pip.stopPictureInPicture()
         } else if pip.isPictureInPicturePossible {
             pip.startPictureInPicture()
-        } else {
-            presentErrorAlert(title: "Picture in Picture Unavailable", message: "Your device does not support Picture in Picture.")
         }
     }
     
@@ -2121,7 +2117,7 @@ extension PlayerViewController: PiPControllerDelegate {
     @objc private func appDidEnterBackground() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let pip = self.pipController else { return }
-            if pip.isPictureInPicturePossible && !pip.isPictureInPictureActive {
+            if self.vlcRenderer == nil, pip.isPictureInPicturePossible && !pip.isPictureInPictureActive {
                 self.logMPV("Entering background; starting PiP")
                 pip.startPictureInPicture()
             }
@@ -2131,7 +2127,7 @@ extension PlayerViewController: PiPControllerDelegate {
     @objc private func appWillEnterForeground() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let pip = self.pipController else { return }
-            if pip.isPictureInPictureActive {
+            if self.vlcRenderer == nil, pip.isPictureInPictureActive {
                 self.logMPV("Returning to foreground; stopping PiP")
                 pip.stopPictureInPicture()
             }

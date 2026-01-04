@@ -95,8 +95,8 @@ final class VLCRenderer: NSObject {
                 throw RendererError.vlcInitializationFailed
             }
             
-            // Configure the media player to render to the provided display layer for PiP support
-            mediaPlayer.drawable = displayLayer
+            // Render directly into the VLC view (stable video output)
+            mediaPlayer.drawable = vlcView
             
             // Set up event handling
             NotificationCenter.default.addObserver(
