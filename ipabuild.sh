@@ -52,43 +52,40 @@ else
     XCODE_PROJECT="-project $WORKING_LOCATION/$APPLICATION_NAME.xcodeproj"
 fi
 
-xcodebuild $XCODE_PROJECT \
+# Create archive (required for proper IPA structure)
+ARCHIVE_PATH="$WORKING_LOCATION/build/$APPLICATION_NAME$OUTPUT_SUFFIX.xcarchive"
+
+xcodebuild archive \
+    $XCODE_PROJECT \
     -scheme "$APPLICATION_NAME" \
     -configuration Release \
-    -derivedDataPath "$WORKING_LOCATION/build/DerivedData$PLATFORM" \
+    -archivePath "$ARCHIVE_PATH" \
     -destination "$XCODE_DESTINATION" \
     -sdk "$SDK" \
-    clean build \
-    CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED="NO" \
-    -runFirstLaunchCheck=NO \
-    -skipMacroValidation \
-    -allowProvisioningUpdates \
+    CODE_SIGN_IDENTITY="" \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGNING_ALLOWED=NO \
     ENABLE_USER_SCRIPT_SANDBOXING=NO
 
-DD_APP_PATH="$WORKING_LOCATION/build/DerivedData$PLATFORM/Build/Products/$PLATFORM_DIR/$APPLICATION_NAME.app"
-TARGET_APP="$WORKING_LOCATION/build/$APPLICATION_NAME$OUTPUT_SUFFIX.app"
+# Extract app from archive (correct path: Products/Applications)
+APP_PATH="$ARCHIVE_PATH/Products/Applications/$APPLICATION_NAME.app"
 
-cp -r "$DD_APP_PATH" "$TARGET_APP"
-
-codesign --remove "$TARGET_APP" 2>/dev/null || true
-if [ -e "$TARGET_APP/_CodeSignature" ]; then
-    rm -rf "$TARGET_APP/_CodeSignature"
-fi
-if [ -e "$TARGET_APP/embedded.mobileprovision" ]; then
-    rm -rf "$TARGET_APP/embedded.mobileprovision"
-fi
-
-mkdir Payload
-cp -r "$TARGET_APP" "Payload/$APPLICATION_NAME.app"
-
-# Verify Info.plist exists
-if [ ! -f "Payload/$APPLICATION_NAME.app/Info.plist" ]; then
-    echo "Error: Info.plist not found in app bundle"
+if [ ! -d "$APP_PATH" ]; then
+    echo "Error: App not found at $APP_PATH"
     exit 1
 fi
 
-# Create IPA - must preserve symlinks and use compression
+# Create Payload directory and copy app
+mkdir Payload
+cp -r "$APP_PATH" "Payload/$APPLICATION_NAME.app"
+
+# Remove code signature
+rm -rf "Payload/$APPLICATION_NAME.app/_CodeSignature" 2>/dev/null || true
+rm -f "Payload/$APPLICATION_NAME.app/embedded.mobileprovision" 2>/dev/null || true
+
+# Create IPA (preserve symlinks with -y, recursive with -r)
 zip -qry "$APPLICATION_NAME$OUTPUT_SUFFIX.ipa" Payload
 
-rm -rf "$TARGET_APP"
+# Cleanup
 rm -rf Payload
+rm -rf "$ARCHIVE_PATH"
