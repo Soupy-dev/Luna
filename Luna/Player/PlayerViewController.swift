@@ -69,6 +69,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         v.backgroundColor = UIColor(white: 0.0, alpha: 0.4)
         v.alpha = 0.0
         v.isUserInteractionEnabled = false
+        v.isHidden = true
         return v
     }()
     
@@ -1750,6 +1751,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         updateBrightnessControlVisibility()
         
         DispatchQueue.main.async {
+            self.controlsOverlayView.isHidden = false
             UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
                 self.centerPlayPauseButton.alpha = 1.0
                 self.controlsOverlayView.alpha = 1.0
@@ -1800,6 +1802,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 #if !os(tvOS)
                 self.brightnessContainer.alpha = 0.0
 #endif
+            } completion: { _ in
+                self.controlsOverlayView.isHidden = true
             }
         }
 
