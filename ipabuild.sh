@@ -81,15 +81,8 @@ fi
 mkdir Payload
 cp -r "$TARGET_APP" "Payload/$APPLICATION_NAME.app"
 
-# Don't strip the binary - can cause invalid format errors
-# if [ -f "Payload/$APPLICATION_NAME.app/$APPLICATION_NAME" ]; then
-#     strip "Payload/$APPLICATION_NAME.app/$APPLICATION_NAME" 2>/dev/null || true
-# fi
-
-# Use proper zip options for IPA format
-cd Payload
-zip -qry "../$APPLICATION_NAME$OUTPUT_SUFFIX.ipa" .
-cd ..
+# Create IPA with proper structure (Payload/ must be at root of zip)
+zip -qr "$APPLICATION_NAME$OUTPUT_SUFFIX.ipa" Payload
 
 rm -rf "$TARGET_APP"
 rm -rf Payload
