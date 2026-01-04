@@ -38,8 +38,8 @@ final class VLCRenderer: NSObject {
     private let eventQueue = DispatchQueue(label: "vlc.renderer.events", qos: .utility)
     private let stateQueue = DispatchQueue(label: "vlc.renderer.state", attributes: .concurrent)
     
-    // VLC rendering view - this is what we'll add to the view hierarchy
-    private let vlcView = UIView()
+    // VLC rendering container - uses OpenGL rendering
+    private let vlcView: UIView
     
     private var vlcInstance: VLCMediaList?
     private var mediaPlayer: VLCMediaPlayer?
@@ -60,6 +60,8 @@ final class VLCRenderer: NSObject {
     
     init(displayLayer: AVSampleBufferDisplayLayer) {
         self.displayLayer = displayLayer
+        // Create a UIView container that VLC will render into
+        self.vlcView = UIView()
         super.init()
         setupVLCView()
     }
@@ -73,6 +75,7 @@ final class VLCRenderer: NSObject {
     private func setupVLCView() {
         vlcView.backgroundColor = .black
         vlcView.clipsToBounds = true
+        vlcView.isUserInteractionEnabled = false  // Allow touches to pass through to controls
     }
     
     /// Return the VLC view to be added to the view hierarchy
@@ -86,12 +89,13 @@ final class VLCRenderer: NSObject {
         guard !isRunning else { return }
         
         do {
-            mediaPlayer = VLCMediaPlayer(options: ["--video-on-top"])
+            // Initialize VLC with proper options for video rendering
+            mediaPlayer = VLCMediaPlayer()
             guard let mediaPlayer = mediaPlayer else {
                 throw RendererError.vlcInitializationFailed
             }
             
-            // Set the drawing view - VLC will render into this UIView
+            // Configure the media player to render to the view
             mediaPlayer.drawable = vlcView
             
             // Set up event handling

@@ -123,6 +123,24 @@ extension JSController {
                 Logger.shared.log("JSON parsing error: \(error.localizedDescription)", type: "Error")
             }
             
+            // Validate the URL string - don't treat error strings as valid URLs
+            if jsonString.lowercased() == "error" || jsonString.lowercased() == "undefined" || jsonString.isEmpty {
+                Logger.shared.log("Received invalid stream response: \(jsonString)", type: "Error")
+                DispatchQueue.main.async {
+                    completion((nil, nil, nil))
+                }
+                return
+            }
+            
+            // Check if the string is a valid URL format
+            if !jsonString.hasPrefix("http://") && !jsonString.hasPrefix("https://") && !jsonString.hasPrefix("blob:") {
+                Logger.shared.log("Invalid stream URL format: \(jsonString)", type: "Error")
+                DispatchQueue.main.async {
+                    completion((nil, nil, nil))
+                }
+                return
+            }
+            
             Logger.shared.log("Starting stream from: \(jsonString)", type: "Stream")
             DispatchQueue.main.async {
                 completion(([jsonString], nil, nil))

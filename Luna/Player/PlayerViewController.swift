@@ -626,19 +626,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 #endif
         setupLayout()
         
-        // Add VLC rendering view if using VLC renderer
-        if let vlc = vlcRenderer {
-            let vlcView = vlc.getRenderingView()
-            videoContainer.addSubview(vlcView)
-            vlcView.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                vlcView.topAnchor.constraint(equalTo: videoContainer.topAnchor),
-                vlcView.bottomAnchor.constraint(equalTo: videoContainer.bottomAnchor),
-                vlcView.leadingAnchor.constraint(equalTo: videoContainer.leadingAnchor),
-                vlcView.trailingAnchor.constraint(equalTo: videoContainer.trailingAnchor)
-            ])
-        }
-        
         setupActions()
         setupHoldGesture()
         setupDoubleTapSkipGestures()
@@ -807,6 +794,20 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         displayLayer.backgroundColor = UIColor.black.cgColor
         
         videoContainer.layer.addSublayer(displayLayer)
+        
+        // Add VLC rendering view FIRST (before all UI elements) so it renders behind controls
+        if let vlc = vlcRenderer {
+            let vlcView = vlc.getRenderingView()
+            videoContainer.addSubview(vlcView)
+            vlcView.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                vlcView.topAnchor.constraint(equalTo: videoContainer.topAnchor),
+                vlcView.bottomAnchor.constraint(equalTo: videoContainer.bottomAnchor),
+                vlcView.leadingAnchor.constraint(equalTo: videoContainer.leadingAnchor),
+                vlcView.trailingAnchor.constraint(equalTo: videoContainer.trailingAnchor)
+            ])
+        }
+        
         videoContainer.addSubview(dimmingView)
         videoContainer.addSubview(controlsOverlayView)
         videoContainer.addSubview(loadingIndicator)
