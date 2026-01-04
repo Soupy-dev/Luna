@@ -81,8 +81,14 @@ fi
 mkdir Payload
 cp -r "$TARGET_APP" "Payload/$APPLICATION_NAME.app"
 
-# Create IPA with proper structure (Payload/ must be at root of zip)
-zip -qr "$APPLICATION_NAME$OUTPUT_SUFFIX.ipa" Payload
+# Verify Info.plist exists
+if [ ! -f "Payload/$APPLICATION_NAME.app/Info.plist" ]; then
+    echo "Error: Info.plist not found in app bundle"
+    exit 1
+fi
+
+# Create IPA - must preserve symlinks and use compression
+zip -qry "$APPLICATION_NAME$OUTPUT_SUFFIX.ipa" Payload
 
 rm -rf "$TARGET_APP"
 rm -rf Payload
