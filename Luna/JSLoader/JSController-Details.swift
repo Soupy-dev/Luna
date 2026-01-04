@@ -160,26 +160,29 @@ extension JSController {
                 }
                 hasLeftEpisodesGroup = true
                 
-                if let jsonOfEpisodes = result.toString(),
-                   let dataEpisodes = jsonOfEpisodes.data(using: .utf8) {
-                    do {
-                        if let array = try JSONSerialization.jsonObject(with: dataEpisodes, options: []) as? [[String: Any]] {
-                            episodeLinks = array.map { item -> EpisodeLink in
-                                EpisodeLink(
-                                    number: item["number"] as? Int ?? 0,
-                                    title: "",
-                                    href: item["href"] as? String ?? "",
-                                    duration: nil
-                                )
-                            }
-                        } else {
-                            Logger.shared.log("Failed to parse JSON of extractEpisodes", type: "Error")
-                        }
-                    } catch {
-                        Logger.shared.log("JSON parsing error of extractEpisodes: \(error)", type: "Error")
+                // Accept either a JS array/object or a JSON string
+                if let array = result.toArray() as? [[String: Any]] {
+                    episodeLinks = array.map { item -> EpisodeLink in
+                        EpisodeLink(
+                            number: item["number"] as? Int ?? 0,
+                            title: "",
+                            href: item["href"] as? String ?? "",
+                            duration: nil
+                        )
                     }
-                } else {
-                    Logger.shared.log("Result is not a string of extractEpisodes", type: "Error")
+                } else if let jsonOfEpisodes = result.toString(),
+                          jsonOfEpisodes.hasPrefix("<") == false,
+                          let dataEpisodes = jsonOfEpisodes.data(using: .utf8) {
+                    if let array = try? JSONSerialization.jsonObject(with: dataEpisodes, options: []) as? [[String: Any]] {
+                        episodeLinks = array.map { item -> EpisodeLink in
+                            EpisodeLink(
+                                number: item["number"] as? Int ?? 0,
+                                title: "",
+                                href: item["href"] as? String ?? "",
+                                duration: nil
+                            )
+                        }
+                    }
                 }
                 dispatchGroup.leave()
             }
@@ -266,27 +269,29 @@ extension JSController {
                     return
                 }
                 hasCompleted = true
-                
-                if let jsonOfEpisodes = result.toString(),
-                   let dataEpisodes = jsonOfEpisodes.data(using: .utf8) {
-                    do {
-                        if let array = try JSONSerialization.jsonObject(with: dataEpisodes, options: []) as? [[String: Any]] {
-                            episodeLinks = array.map { item -> EpisodeLink in
-                                EpisodeLink(
-                                    number: item["number"] as? Int ?? 0,
-                                    title: "",
-                                    href: item["href"] as? String ?? "",
-                                    duration: nil
-                                )
-                            }
-                        } else {
-                            Logger.shared.log("Failed to parse JSON of extractEpisodes", type: "Error")
-                        }
-                    } catch {
-                        Logger.shared.log("JSON parsing error of extractEpisodes: \(error)", type: "Error")
+                // Accept either a JS array/object or a JSON string
+                if let array = result.toArray() as? [[String: Any]] {
+                    episodeLinks = array.map { item -> EpisodeLink in
+                        EpisodeLink(
+                            number: item["number"] as? Int ?? 0,
+                            title: "",
+                            href: item["href"] as? String ?? "",
+                            duration: nil
+                        )
                     }
-                } else {
-                    Logger.shared.log("Result is not a string of extractEpisodes", type: "Error")
+                } else if let jsonOfEpisodes = result.toString(),
+                          jsonOfEpisodes.hasPrefix("<") == false,
+                          let dataEpisodes = jsonOfEpisodes.data(using: .utf8) {
+                    if let array = try? JSONSerialization.jsonObject(with: dataEpisodes, options: []) as? [[String: Any]] {
+                        episodeLinks = array.map { item -> EpisodeLink in
+                            EpisodeLink(
+                                number: item["number"] as? Int ?? 0,
+                                title: "",
+                                href: item["href"] as? String ?? "",
+                                duration: nil
+                            )
+                        }
+                    }
                 }
                 
                 DispatchQueue.main.async {

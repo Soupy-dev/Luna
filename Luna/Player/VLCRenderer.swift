@@ -174,16 +174,19 @@ final class VLCRenderer: NSObject {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             
-            var urlString = url.absoluteString
-            
-            // Apply HTTP headers if provided
+            // Keep the URL untouched; apply headers via VLC media options
+            let media = VLCMedia(url: url)
             if let headers = headers, !headers.isEmpty {
-                // VLC media options for HTTP headers
-                let headerStrings = headers.map { "\($0.key): \($0.value)" }
-                urlString = urlString + "?:http-user-agent=" + (headers["User-Agent"] ?? "VLC")
+                if let ua = headers["User-Agent"], !ua.isEmpty {
+                    media.addOption(":http-user-agent=\(ua)")
+                }
+                if let referer = headers["Referer"], !referer.isEmpty {
+                    media.addOption(":http-referrer=\(referer)")
+                }
+                if let cookie = headers["Cookie"], !cookie.isEmpty {
+                    media.addOption(":http-cookie=\(cookie)")
+                }
             }
-            
-            let media = VLCMedia(url: URL(string: urlString) ?? url)
             self.currentMedia = media
             
             player.media = media
