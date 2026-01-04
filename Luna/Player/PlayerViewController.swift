@@ -696,8 +696,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         CATransaction.setDisableActions(true)
         displayLayer.frame = videoContainer.bounds
         // Only show displayLayer when using MPV renderer; hide when using VLC
-        displayLayer.isHidden = (vlcRenderer != nil)
-        displayLayer.opacity = (vlcRenderer != nil) ? 0.0 : 1.0
+        // Keep the display layer visible for both MPV and VLC so PiP can capture frames
+        displayLayer.isHidden = false
+        displayLayer.opacity = 1.0
         
         if let gradientLayer = controlsOverlayView.layer.sublayers?.first(where: { $0.name == "gradientLayer" }) {
             gradientLayer.frame = controlsOverlayView.bounds
@@ -1860,17 +1861,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func pipTapped() {
-        // PiP is not supported with VLC renderer; only works with MPV
-        if vlcRenderer != nil {
-            presentErrorAlert(title: "Picture in Picture Unavailable", message: "Picture in Picture is not supported with the libVLC player.")
-            return
-        }
-        
         guard let pip = pipController else { return }
         if pip.isPictureInPictureActive {
             pip.stopPictureInPicture()
         } else if pip.isPictureInPicturePossible {
             pip.startPictureInPicture()
+        } else {
+            presentErrorAlert(title: "Picture in Picture Unavailable", message: "Your device does not support Picture in Picture.")
         }
     }
     
@@ -1937,6 +1934,7 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
             } else {
                 self.loadingIndicator.stopAnimating()
                 self.loadingIndicator.alpha = 0.0
+                self.centerPlayPauseButton.isHidden = false
                 self.updatePlayPauseButton(isPaused: self.rendererIsPausedState())
             }
         }
@@ -2028,6 +2026,7 @@ extension PlayerViewController: VLCRendererDelegate {
             } else {
                 self.loadingIndicator.stopAnimating()
                 self.loadingIndicator.alpha = 0.0
+                self.centerPlayPauseButton.isHidden = false
                 self.updatePlayPauseButton(isPaused: self.rendererIsPausedState())
             }
         }
