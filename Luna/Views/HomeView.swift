@@ -4,6 +4,7 @@
 
 import SwiftUI
 import Kingfisher
+import Luna
 
 
 struct HomeView: View {
@@ -13,7 +14,7 @@ struct HomeView: View {
     
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
     
-    @StateObject private var homeViewModel = HomeViewModel.shared
+    @StateObject private var homeViewModel = Luna.HomeViewModel.shared
     @ObservedObject private var catalogManager = CatalogManager.shared
     @StateObject private var tmdbService = TMDBService.shared
     @StateObject private var contentFilter = TMDBContentFilter.shared
