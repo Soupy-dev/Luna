@@ -94,9 +94,9 @@ struct ModulesSearchResultsSheet: View {
     
     private var displayTitle: String {
         if let episode = selectedEpisode {
-            // If animeSeasonTitle is provided, use "AniList Title E##" format
-            if let seasonTitle = animeSeasonTitle {
-                return "\(seasonTitle) E\(episode.episodeNumber)"
+            // If animeSeasonTitle is provided (non-nil), use "Title E##" format for anime
+            if animeSeasonTitle != nil {
+                return "\(mediaTitle) E\(episode.episodeNumber)"
             }
             // For regular shows, use "Title S#E#" format
             return "\(mediaTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
