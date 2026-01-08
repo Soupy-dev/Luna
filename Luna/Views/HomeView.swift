@@ -1,9 +1,6 @@
 //
 //  HomeView.swift
 //  Sora
-//
-//  Created by Francesco on 07/08/25.
-//
 
 import SwiftUI
 import Kingfisher
@@ -31,6 +28,8 @@ struct HomeView: View {
         580
 #endif
     }
+
+    private var ambientColor: Color { homeViewModel.ambientColor }
     
     var body: some View {
         if #available(iOS 16.0, *) {
@@ -162,7 +161,7 @@ struct HomeView: View {
     private var heroGradientOverlay: some View {
         LinearGradient(
             gradient: Gradient(stops: [
-                .init(color: homeViewModel.ambientColor.opacity(0.0), location: 0.0),
+                .init(color: ambientColor.opacity(0.0), location: 0.0),
                 .init(color: ambientColor.opacity(0.4), location: 0.2),
                 .init(color: ambientColor.opacity(0.7), location: 0.6),
                 .init(color: ambientColor.opacity(1), location: 1.0)
@@ -334,7 +333,13 @@ struct HomeView: View {
         .background(Color.clear)
     }
     
-
+    private func loadContent() {
+        homeViewModel.loadContent(
+            tmdbService: tmdbService,
+            catalogManager: catalogManager,
+            contentFilter: contentFilter
+        )
+    }
 
 }
 

@@ -82,7 +82,7 @@ struct ScheduleView: View {
                 .foregroundColor(.secondary)
                 .padding(.horizontal)
             Button("Retry") {
-                Task { await loadSchedule() }
+                Task { await viewModel.loadSchedule(localTimeZone: showLocalScheduleTime) }
             }
             .buttonStyle(.bordered)
             .tint(accentColorManager.currentAccentColor)
@@ -136,8 +136,8 @@ struct ScheduleView: View {
             Toggle("Local time", isOn: $showLocalScheduleTime)
                 .labelsHidden()
                 .tint(accentColorManager.currentAccentColor)
-                .onChange(of: showLocalScheduleTime) { _ in
-                    regroupBuckets()
+                .onChange(of: showLocalScheduleTime) { newValue in
+                    viewModel.regroupBuckets(localTimeZone: newValue)
                 }
         }
         .padding()
