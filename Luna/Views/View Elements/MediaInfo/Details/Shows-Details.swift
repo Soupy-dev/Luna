@@ -10,9 +10,12 @@ import Kingfisher
 
 struct TVShowSeasonsSection: View {
     let tvShow: TMDBTVShowWithSeasons?
+    let isAnime: Bool
     @Binding var selectedSeason: TMDBSeason?
     @Binding var seasonDetail: TMDBSeasonDetail?
     @Binding var selectedEpisodeForSearch: TMDBEpisode?
+    var animeEpisodes: [AniListEpisode]? = nil
+    var animeSeasonTitles: [Int: String]? = nil
     let tmdbService: TMDBService
     
     @State private var isLoadingSeason = false
@@ -339,13 +342,57 @@ struct TVShowSeasonsSection: View {
     
     private func loadSeasonDetails(tvShowId: Int, season: TMDBSeason) {
         isLoadingSeason = true
+        seasonDetail = nil
+        selectedEpisodeForSearch = nil
         
         Task {
             do {
-                let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShowId, seasonNumber: season.seasonNumber)
-                await MainActor.run {
-                    self.seasonDetail = detail
-                    self.isLoadingSeason = false
+                // For anime, build season detail from cached AniList episodes
+                if isAnime, let animeEpisodes = animeEpisodes {
+                    let seasonEpisodes = animeEpisodes.filter { $0.seasonNumber == season.seasonNumber }
+                    
+                    let tmdbEpisodes: [TMDBEpisode] = seasonEpisodes.map { aniEp in
+                        TMDBEpisode(
+                            id: tvShowId * 1000 + season.seasonNumber * 100 + aniEp.number,
+                            name: aniEp.title,
+                            overview: aniEp.description,
+                            stillPath: aniEp.stillPath,
+                            episodeNumber: aniEp.number,
+                            seasonNumber: aniEp.seasonNumber,
+                            airDate: aniEp.airDate,
+                            runtime: nil,
+                            voteAverage: 0,
+                            voteCount: 0
+                        )
+                    }
+                    
+                    let detail = TMDBSeasonDetail(
+                        id: season.id,
+                        name: season.name,
+                        overview: season.overview ?? "",
+                        posterPath: season.posterPath,
+                        seasonNumber: season.seasonNumber,
+                        airDate: season.airDate,
+                        episodes: tmdbEpisodes
+                    )
+                    
+                    await MainActor.run {
+                        self.seasonDetail = detail
+                        self.isLoadingSeason = false
+                        if let firstEpisode = detail.episodes.first {
+                            self.selectedEpisodeForSearch = firstEpisode
+                        }
+                    }
+                } else {
+                    // For regular TV shows, fetch from TMDB
+                    let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShowId, seasonNumber: season.seasonNumber)
+                    await MainActor.run {
+                        self.seasonDetail = detail
+                        self.isLoadingSeason = false
+                        if let firstEpisode = detail.episodes.first {
+                            self.selectedEpisodeForSearch = firstEpisode
+                        }
+                    }
                 }
             } catch {
                 await MainActor.run {
