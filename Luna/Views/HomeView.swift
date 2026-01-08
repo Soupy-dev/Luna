@@ -539,15 +539,14 @@ struct ContinueWatchingCard: View {
     
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
     
-    @State private var backdropURL: String?
-    @State private var logoURL: String?
+    @State private var posterURL: String?
     @State private var title: String = ""
     @State private var isHovering: Bool = false
     @State private var isLoaded: Bool = false
     @State private var showingServices = false
     
-    private var cardWidth: CGFloat { isTvOS ? 380 : 260 }
-    private var cardHeight: CGFloat { isTvOS ? 220 : 146 }
+    private var cardWidth: CGFloat { isTvOS ? 280 : 180 }
+    private var cardHeight: CGFloat { isTvOS ? 420 : 270 }
     private var logoMaxWidth: CGFloat { isTvOS ? 200 : 140 }
     private var logoMaxHeight: CGFloat { isTvOS ? 60 : 40 }
     
@@ -555,89 +554,70 @@ struct ContinueWatchingCard: View {
         Button(action: {
             showingServices = true
         }) {
-            ZStack(alignment: .bottomLeading) {
+            VStack(spacing: isTvOS ? 10 : 6) {
+                // Poster
                 ZStack {
-                    if let backdropURL = backdropURL {
-                        KFImage(URL(string: backdropURL))
+                    if let posterURL = posterURL {
+                        KFImage(URL(string: posterURL))
                             .placeholder {
-                                backdropPlaceholder
+                                posterPlaceholder
                             }
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                     } else {
-                        backdropPlaceholder
+                        posterPlaceholder
                     }
                 }
-                .frame(width: cardWidth, height: cardHeight)
+                .frame(width: cardWidth, height: cardWidth * 1.5)
                 .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: isTvOS ? 12 : 8))
                 
-                LinearGradient(
-                    gradient: Gradient(stops: [
-                        .init(color: .clear, location: 0.0),
-                        .init(color: .black.opacity(0.3), location: 0.4),
-                        .init(color: .black.opacity(0.85), location: 1.0)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                
-                VStack(alignment: .leading, spacing: isTvOS ? 10 : 6) {
-                    Spacer()
+                // Title and info
+                VStack(alignment: .leading, spacing: isTvOS ? 6 : 4) {
+                    Text(title)
+                        .font(isTvOS ? .headline : .subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                     
-                    HStack(alignment: .bottom, spacing: isTvOS ? 12 : 8) {
-                        if let logoURL = logoURL {
-                            KFImage(URL(string: logoURL))
-                                .placeholder {
-                                    titleText
-                                }
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxWidth: logoMaxWidth, maxHeight: logoMaxHeight, alignment: .leading)
-                        } else {
-                            titleText
+                    HStack(spacing: isTvOS ? 8 : 6) {
+                        
+                        Spacer()
+                        if !item.isMovie, let season = item.seasonNumber, let episode = item.episodeNumber {
+                            Text("S\(season) E\(episode)")
+                                .font(isTvOS ? .caption : .caption2)
+                                .fontWeight(.medium)
+                                .foregroundColor(.secondary)
                         }
                         
                         Spacer()
                         
-                        if !item.isMovie, let season = item.seasonNumber, let episode = item.episodeNumber {
-                            Text("S\(season) E\(episode)")
-                                .font(isTvOS ? .subheadline : .caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.white.opacity(0.9))
-                        }
-                    }
-                    
-                    HStack(spacing: isTvOS ? 12 : 8) {
-                        GeometryReader { geometry in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.white.opacity(0.3))
-                                    .frame(height: isTvOS ? 6 : 4)
-                                
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.white)
-                                    .frame(width: geometry.size.width * item.progress, height: isTvOS ? 6 : 4)
-                            }
-                        }
-                        .frame(height: isTvOS ? 6 : 4)
-                        
                         Text(item.remainingTime)
                             .font(.caption2)
-                            .fontWeight(.medium)
-                            .foregroundColor(.white.opacity(0.8))
-                            .fixedSize()
+                            .foregroundColor(.secondary)
                     }
+                    
+                    // Progress bar
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(height: isTvOS ? 4 : 3)
+                            
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.accentColor)
+                                .frame(width: geometry.size.width * item.progress, height: isTvOS ? 4 : 3)
+                        }
+                    }
+                    .frame(height: isTvOS ? 4 : 3)
                 }
-                .padding(isTvOS ? 16 : 12)
+                .frame(width: cardWidth)
             }
-            .frame(width: cardWidth, height: cardHeight)
-            .clipShape(RoundedRectangle(cornerRadius: isTvOS ? 16 : 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: isTvOS ? 16 : 12)
-                    .stroke(Color.white.opacity(isHovering ? 0.5 : 0.2), lineWidth: isHovering ? 2 : 1)
-            )
-            .shadow(color: .black.opacity(0.3), radius: isHovering ? 12 : 6, x: 0, y: isHovering ? 8 : 4)
-            .scaleEffect(isHovering ? 1.02 : 1.0)
+            .frame(width: cardWidth)
+            .clipShape(RoundedRectangle(cornerRadius: isTvOS ? 12 : 8))
+            .shadow(color: .black.opacity(0.2), radius: isHovering ? 8 : 4, x: 0, y: isHovering ? 6 : 3)
+            .scaleEffect(isHovering ? 1.05 : 1.0)
             .animation(.easeInOut(duration: 0.2), value: isHovering)
             .modifier(ContinuousHoverModifier(isHovering: $isHovering))
         }
@@ -675,18 +655,7 @@ struct ContinueWatchingCard: View {
     }
     
     @ViewBuilder
-    private var titleText: some View {
-        Text(title)
-            .font(isTvOS ? .title3 : .subheadline)
-            .fontWeight(.bold)
-            .foregroundColor(.white)
-            .lineLimit(2)
-            .multilineTextAlignment(.leading)
-            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-    }
-    
-    @ViewBuilder
-    private var backdropPlaceholder: some View {
+    private var posterPlaceholder: some View {
         Rectangle()
             .fill(
                 LinearGradient(
@@ -708,30 +677,20 @@ struct ContinueWatchingCard: View {
         do {
             if item.isMovie {
                 async let detailsTask = tmdbService.getMovieDetails(id: item.tmdbId)
-                async let imagesTask = tmdbService.getMovieImages(id: item.tmdbId, preferredLanguage: selectedLanguage)
-                
-                let (details, images) = try await (detailsTask, imagesTask)
+                let details = try await detailsTask
                 
                 await MainActor.run {
                     self.title = details.title
-                    self.backdropURL = details.fullBackdropURL ?? details.fullPosterURL
-                    if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
-                        self.logoURL = logo.fullURL
-                    }
+                    self.posterURL = details.fullPosterURL
                     self.isLoaded = true
                 }
             } else {
                 async let detailsTask = tmdbService.getTVShowDetails(id: item.tmdbId)
-                async let imagesTask = tmdbService.getTVShowImages(id: item.tmdbId, preferredLanguage: selectedLanguage)
-                
-                let (details, images) = try await (detailsTask, imagesTask)
+                let details = try await detailsTask
                 
                 await MainActor.run {
                     self.title = details.name
-                    self.backdropURL = details.fullBackdropURL ?? details.fullPosterURL
-                    if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
-                        self.logoURL = logo.fullURL
-                    }
+                    self.posterURL = details.fullPosterURL
                     self.isLoaded = true
                 }
             }
