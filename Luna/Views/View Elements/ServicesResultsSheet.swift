@@ -54,6 +54,7 @@ final class ModulesSearchResultsViewModel: ObservableObject {
     var pendingStreamURL: String?
     var pendingHeaders: [String: String]?
     var pendingDefaultSubtitle: String?
+    var pendingServiceHref: String?
     
     init() {
         highQualityThreshold = UserDefaults.standard.object(forKey: "highQualityThreshold") as? Double ?? 0.9
@@ -66,6 +67,7 @@ final class ModulesSearchResultsViewModel: ObservableObject {
         pendingJSController = nil
         selectedSeasonIndex = 0
         isFetchingStreams = false
+        pendingServiceHref = nil
     }
     
     func resetStreamState() {
@@ -73,6 +75,7 @@ final class ModulesSearchResultsViewModel: ObservableObject {
         showingStreamMenu = false
         pendingSubtitles = nil
         pendingService = nil
+        pendingServiceHref = nil
     }
 }
 
@@ -437,7 +440,8 @@ struct ModulesSearchResultsSheet: View {
                         defaultSubtitle: option.subtitle,
                         service: service,
                         streamURL: option.url,
-                        headers: option.headers
+                        headers: option.headers,
+                        serviceHref: viewModel.pendingServiceHref
                     )
                 }
             }
@@ -498,7 +502,7 @@ struct ModulesSearchResultsSheet: View {
                 viewModel.showingSubtitlePicker = false
                 if let service = viewModel.pendingService,
                    let streamURL = viewModel.pendingStreamURL {
-                    playStreamURL(streamURL, service: service, subtitle: option.url, headers: viewModel.pendingHeaders)
+                    playStreamURL(streamURL, service: service, subtitle: option.url, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
                 }
             }
         }
@@ -506,13 +510,14 @@ struct ModulesSearchResultsSheet: View {
             viewModel.showingSubtitlePicker = false
             if let service = viewModel.pendingService,
                let streamURL = viewModel.pendingStreamURL {
-                playStreamURL(streamURL, service: service, subtitle: nil, headers: viewModel.pendingHeaders)
+                playStreamURL(streamURL, service: service, subtitle: nil, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
             }
         }
         Button("Cancel", role: .cancel) {
             viewModel.subtitleOptions = []
             viewModel.pendingStreamURL = nil
             viewModel.pendingHeaders = nil
+            viewModel.pendingServiceHref = nil
         }
     }
     
@@ -787,6 +792,7 @@ struct ModulesSearchResultsSheet: View {
                 Logger.shared.log("Stream fetch result - Streams: \(streams?.count ?? 0), Sources: \(sources?.count ?? 0)", type: "Stream")
                 self.viewModel.streamFetchProgress = "Processing stream data..."
                 
+                self.viewModel.pendingServiceHref = episodeHref
                 self.processStreamResult(streams: streams, subtitles: subtitles, sources: sources, service: service)
                 self.viewModel.resetPickerState()
             }
@@ -963,7 +969,8 @@ struct ModulesSearchResultsSheet: View {
                 defaultSubtitle: firstStream.subtitle,
                 service: service,
                 streamURL: firstStream.url,
-                headers: firstStream.headers
+                headers: firstStream.headers,
+                serviceHref: viewModel.pendingServiceHref
             )
         } else if let streamURL = extractSingleStreamURL(streams: streams, sources: sources) {
             resolveSubtitleSelection(
@@ -971,7 +978,8 @@ struct ModulesSearchResultsSheet: View {
                 defaultSubtitle: nil,
                 service: service,
                 streamURL: streamURL.url,
-                headers: streamURL.headers
+                headers: streamURL.headers,
+                serviceHref: viewModel.pendingServiceHref
             )
         } else {
             Logger.shared.log("Failed to create URL from stream string", type: "Error")
@@ -1054,20 +1062,20 @@ struct ModulesSearchResultsSheet: View {
     }
     
     @MainActor
-    private func resolveSubtitleSelection(subtitles: [String]?, defaultSubtitle: String?, service: Service, streamURL: String, headers: [String: String]?) {
+    private func resolveSubtitleSelection(subtitles: [String]?, defaultSubtitle: String?, service: Service, streamURL: String, headers: [String: String]?, serviceHref: String? = nil) {
         guard let subtitles = subtitles, !subtitles.isEmpty else {
-            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers)
+            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
             return
         }
         
         let options = parseSubtitleOptions(from: subtitles)
         guard !options.isEmpty else {
-            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers)
+            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
             return
         }
         
         if options.count == 1 {
-            playStreamURL(streamURL, service: service, subtitle: options[0].url, headers: headers)
+            playStreamURL(streamURL, service: service, subtitle: options[0].url, headers: headers, serviceHref: serviceHref)
             return
         }
         
@@ -1075,6 +1083,7 @@ struct ModulesSearchResultsSheet: View {
         viewModel.pendingStreamURL = streamURL
         viewModel.pendingHeaders = headers
         viewModel.pendingService = service
+        viewModel.pendingServiceHref = serviceHref
         viewModel.pendingDefaultSubtitle = defaultSubtitle
         viewModel.isFetchingStreams = false
         viewModel.showingSubtitlePicker = true
@@ -1105,7 +1114,7 @@ struct ModulesSearchResultsSheet: View {
         return options
     }
     
-    private func playStreamURL(_ url: String, service: Service, subtitle: String?, headers: [String: String]?) {
+    private func playStreamURL(_ url: String, service: Service, subtitle: String?, headers: [String: String]?, serviceHref: String? = nil) {
         viewModel.resetStreamState()
         
         Task { @MainActor in
@@ -1150,6 +1159,19 @@ struct ModulesSearchResultsSheet: View {
             
             let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
             let inAppPlayer = (inAppRaw == "mpv") ? "mpv" : "Normal"
+            
+            // Record service usage
+            if isMovie {
+                ProgressManager.shared.recordMovieServiceInfo(movieId: tmdbId, serviceId: service.id, href: serviceHref)
+            } else if let episode = selectedEpisode {
+                ProgressManager.shared.recordEpisodeServiceInfo(
+                    showId: tmdbId,
+                    seasonNumber: episode.seasonNumber,
+                    episodeNumber: episode.episodeNumber,
+                    serviceId: service.id,
+                    href: serviceHref
+                )
+            }
             
             if inAppPlayer == "mpv" {
                 let preset = PlayerPreset.presets.first
