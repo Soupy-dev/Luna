@@ -18,6 +18,10 @@ struct ContentView: View {
                     HomeView()
                 }
                 
+                Tab("Schedule", systemImage: "calendar") {
+                    ScheduleView()
+                }
+                
                 Tab("Library", systemImage: "books.vertical.fill") {
                     LibraryView()
                 }
@@ -49,6 +53,12 @@ struct ContentView: View {
                 .tabItem {
                     Image(systemName: "house.fill")
                     Text("Home")
+                }
+            
+            ScheduleView()
+                .tabItem {
+                    Image(systemName: "calendar")
+                    Text("Schedule")
                 }
             
             LibraryView()

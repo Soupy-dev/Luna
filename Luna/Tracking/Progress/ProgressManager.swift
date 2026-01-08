@@ -90,6 +90,15 @@ struct EpisodeProgressSnapshot {
     let lastUpdated: Date
 }
 
+// Continue watching item
+struct ContinueWatchingItem: Identifiable {
+    let id: String
+    let tmdbId: Int
+    let isMovie: Bool
+    let progress: Double
+    let lastUpdated: Date
+}
+
 // MARK: - ProgressManager
 
 final class ProgressManager: ObservableObject {
@@ -479,6 +488,56 @@ final class ProgressManager: ObservableObject {
             Logger.shared.log("Marked previous episodes as unwatched for S\(seasonNumber) up to E\(episodeNumber - 1)", type: "Progress")
         }
         saveProgressData()
+    }
+
+    // MARK: - Continue Watching
+    
+    func getContinueWatchingItems() -> [ContinueWatchingItem] {
+        var items: [ContinueWatchingItem] = []
+        
+        accessQueue.sync {
+            // Add movies
+            let movies = self.progressData.movieProgress
+                .filter { $0.progress > 0.05 && $0.progress < 0.85 }
+                .map { movie in
+                    ContinueWatchingItem(
+                        id: "movie_\(movie.id)",
+                        tmdbId: movie.id,
+                        isMovie: true,
+                        progress: movie.progress,
+                        lastUpdated: movie.lastUpdated
+                    )
+                }
+            
+            // Add episodes (grouped by show, keep most recent)
+            var showMap: [Int: EpisodeProgressEntry] = [:]
+            for episode in self.progressData.episodeProgress where episode.progress > 0.05 && episode.progress < 0.85 {
+                if let existing = showMap[episode.showId] {
+                    if episode.lastUpdated > existing.lastUpdated {
+                        showMap[episode.showId] = episode
+                    }
+                } else {
+                    showMap[episode.showId] = episode
+                }
+            }
+            
+            let episodes = showMap.values.map { episode in
+                ContinueWatchingItem(
+                    id: "episode_\(episode.showId)",
+                    tmdbId: episode.showId,
+                    isMovie: false,
+                    progress: episode.progress,
+                    lastUpdated: episode.lastUpdated
+                )
+            }
+            
+            items = (movies + episodes)
+                .sorted { $0.lastUpdated > $1.lastUpdated }
+                .prefix(6)
+                .map { $0 }
+        }
+        
+        return items
     }
 
     // MARK: - AVPlayer Extension
