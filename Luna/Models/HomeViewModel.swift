@@ -143,7 +143,7 @@ final class HomeViewModel: ObservableObject {
                                 firstAirDate: show.firstAirDate,
                                 voteAverage: show.voteAverage,
                                 popularity: show.popularity,
-                                adult: show.adult,
+                                adult: nil,
                                 genreIds: show.genreIds
                             )
                         },
@@ -160,7 +160,7 @@ final class HomeViewModel: ObservableObject {
                                 firstAirDate: show.firstAirDate,
                                 voteAverage: show.voteAverage,
                                 popularity: show.popularity,
-                                adult: show.adult,
+                                adult: nil,
                                 genreIds: show.genreIds
                             )
                         },
@@ -177,7 +177,7 @@ final class HomeViewModel: ObservableObject {
                                 firstAirDate: show.firstAirDate,
                                 voteAverage: show.voteAverage,
                                 popularity: show.popularity,
-                                adult: show.adult,
+                                adult: nil,
                                 genreIds: show.genreIds
                             )
                         },
@@ -194,7 +194,7 @@ final class HomeViewModel: ObservableObject {
                                 firstAirDate: show.firstAirDate,
                                 voteAverage: show.voteAverage,
                                 popularity: show.popularity,
-                                adult: show.adult,
+                                adult: nil,
                                 genreIds: show.genreIds
                             )
                         },
