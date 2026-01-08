@@ -261,9 +261,32 @@ struct EpisodeCell: View {
                 }) {
                     Label("Mark Previous as Watched", systemImage: "chevron.left.slash.chevron.right")
                 }
+                
+                Button(action: {
+                    ProgressManager.shared.markPreviousEpisodesAsUnwatched(
+                        showId: showId,
+                        seasonNumber: episode.seasonNumber,
+                        episodeNumber: episode.episodeNumber
+                    )
+                    onResetProgress()
+                }) {
+                    Label("Mark Previous as Not Watched", systemImage: "arrow.uturn.backward")
+                }
             }
             
-            if progress < 0.95 {
+            if isWatched {
+                Button(action: {
+                    ProgressManager.shared.markEpisodeAsUnwatched(
+                        showId: showId,
+                        seasonNumber: episode.seasonNumber,
+                        episodeNumber: episode.episodeNumber
+                    )
+                    onResetProgress()
+                    isWatched = false
+                }) {
+                    Label("Mark as Not Watched", systemImage: "eye.slash")
+                }
+            } else {
                 Button(action: {
                     ProgressManager.shared.markEpisodeAsWatched(
                         showId: showId,
