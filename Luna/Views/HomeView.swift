@@ -69,8 +69,8 @@ struct HomeView: View {
             }
         }
         .onChangeComp(of: contentFilter.filterHorror) { _, _ in
-            if hasLoadedContent {
-                loadContent()
+            if homeViewModel.hasLoadedContent {
+                homeViewModel.loadContent(tmdbService: tmdbService, catalogManager: catalogManager, contentFilter: contentFilter)
             }
         }
         .sheet(isPresented: $showingSettings) {
@@ -176,7 +176,7 @@ struct HomeView: View {
     
     @ViewBuilder
     private var heroContentInfo: some View {
-        if let hero = heroContent {
+        if let hero = homeViewModel.heroContent {
             VStack(alignment: .center, spacing: isTvOS ? 30 : 12) {
                 HStack {
                     Text(hero.isMovie ? "Movie" : "TV Series")
