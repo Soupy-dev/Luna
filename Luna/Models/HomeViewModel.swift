@@ -79,14 +79,142 @@ final class HomeViewModel: ObservableObject {
                 await MainActor.run {
                     self.catalogResults = [
                         "trending": results.0,
-                        "popularMovies": results.1.map { TMDBSearchResult(from: $0, mediaType: "movie") },
-                        "nowPlayingMovies": results.2.map { TMDBSearchResult(from: $0, mediaType: "movie") },
-                        "upcomingMovies": results.3.map { TMDBSearchResult(from: $0, mediaType: "movie") },
-                        "popularTVShows": results.4.map { TMDBSearchResult(from: $0, mediaType: "tv") },
-                        "onTheAirTV": results.5.map { TMDBSearchResult(from: $0, mediaType: "tv") },
-                        "airingTodayTV": results.6.map { TMDBSearchResult(from: $0, mediaType: "tv") },
-                        "topRatedTVShows": results.7.map { TMDBSearchResult(from: $0, mediaType: "tv") },
-                        "topRatedMovies": results.8.map { TMDBSearchResult(from: $0, mediaType: "movie") },
+                        "popularMovies": results.1.map { movie in
+                            TMDBSearchResult(
+                                id: movie.id,
+                                mediaType: "movie",
+                                title: movie.title,
+                                name: nil,
+                                overview: movie.overview,
+                                posterPath: movie.posterPath,
+                                backdropPath: movie.backdropPath,
+                                releaseDate: movie.releaseDate,
+                                firstAirDate: nil,
+                                voteAverage: movie.voteAverage,
+                                popularity: movie.popularity,
+                                adult: movie.adult,
+                                genreIds: movie.genreIds
+                            )
+                        },
+                        "nowPlayingMovies": results.2.map { movie in
+                            TMDBSearchResult(
+                                id: movie.id,
+                                mediaType: "movie",
+                                title: movie.title,
+                                name: nil,
+                                overview: movie.overview,
+                                posterPath: movie.posterPath,
+                                backdropPath: movie.backdropPath,
+                                releaseDate: movie.releaseDate,
+                                firstAirDate: nil,
+                                voteAverage: movie.voteAverage,
+                                popularity: movie.popularity,
+                                adult: movie.adult,
+                                genreIds: movie.genreIds
+                            )
+                        },
+                        "upcomingMovies": results.3.map { movie in
+                            TMDBSearchResult(
+                                id: movie.id,
+                                mediaType: "movie",
+                                title: movie.title,
+                                name: nil,
+                                overview: movie.overview,
+                                posterPath: movie.posterPath,
+                                backdropPath: movie.backdropPath,
+                                releaseDate: movie.releaseDate,
+                                firstAirDate: nil,
+                                voteAverage: movie.voteAverage,
+                                popularity: movie.popularity,
+                                adult: movie.adult,
+                                genreIds: movie.genreIds
+                            )
+                        },
+                        "popularTVShows": results.4.map { show in
+                            TMDBSearchResult(
+                                id: show.id,
+                                mediaType: "tv",
+                                title: nil,
+                                name: show.name,
+                                overview: show.overview,
+                                posterPath: show.posterPath,
+                                backdropPath: show.backdropPath,
+                                releaseDate: nil,
+                                firstAirDate: show.firstAirDate,
+                                voteAverage: show.voteAverage,
+                                popularity: show.popularity,
+                                adult: show.adult,
+                                genreIds: show.genreIds
+                            )
+                        },
+                        "onTheAirTV": results.5.map { show in
+                            TMDBSearchResult(
+                                id: show.id,
+                                mediaType: "tv",
+                                title: nil,
+                                name: show.name,
+                                overview: show.overview,
+                                posterPath: show.posterPath,
+                                backdropPath: show.backdropPath,
+                                releaseDate: nil,
+                                firstAirDate: show.firstAirDate,
+                                voteAverage: show.voteAverage,
+                                popularity: show.popularity,
+                                adult: show.adult,
+                                genreIds: show.genreIds
+                            )
+                        },
+                        "airingTodayTV": results.6.map { show in
+                            TMDBSearchResult(
+                                id: show.id,
+                                mediaType: "tv",
+                                title: nil,
+                                name: show.name,
+                                overview: show.overview,
+                                posterPath: show.posterPath,
+                                backdropPath: show.backdropPath,
+                                releaseDate: nil,
+                                firstAirDate: show.firstAirDate,
+                                voteAverage: show.voteAverage,
+                                popularity: show.popularity,
+                                adult: show.adult,
+                                genreIds: show.genreIds
+                            )
+                        },
+                        "topRatedTVShows": results.7.map { show in
+                            TMDBSearchResult(
+                                id: show.id,
+                                mediaType: "tv",
+                                title: nil,
+                                name: show.name,
+                                overview: show.overview,
+                                posterPath: show.posterPath,
+                                backdropPath: show.backdropPath,
+                                releaseDate: nil,
+                                firstAirDate: show.firstAirDate,
+                                voteAverage: show.voteAverage,
+                                popularity: show.popularity,
+                                adult: show.adult,
+                                genreIds: show.genreIds
+                            )
+                        },
+                        "topRatedMovies": results.8.map { movie in
+                            TMDBSearchResult(
+                                id: movie.id,
+                                mediaType: "movie",
+                                title: movie.title,
+                                name: nil,
+                                overview: movie.overview,
+                                posterPath: movie.posterPath,
+                                backdropPath: movie.backdropPath,
+                                releaseDate: movie.releaseDate,
+                                firstAirDate: nil,
+                                voteAverage: movie.voteAverage,
+                                popularity: movie.popularity,
+                                adult: movie.adult,
+                                genreIds: movie.genreIds
+                            )
+                        },
                         "trendingAnime": results.9,
                         "popularAnime": results.10,
                         "topRatedAnime": results.11,
