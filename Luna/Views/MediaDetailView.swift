@@ -114,18 +114,25 @@ struct MediaDetailView: View {
         }
         .sheet(isPresented: $showingSearchResults) {
             ModulesSearchResultsSheet(
-                mediaTitle: searchResult.displayTitle,
+                mediaTitle: {
+                    // For anime with selected episode, use AniList season title as base
+                    if isAnimeShow,
+                       let episode = selectedEpisodeForSearch,
+                       let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                        return seasonTitle
+                    }
+                    return searchResult.displayTitle
+                }(),
                 originalTitle: romajiTitle,
                 isMovie: searchResult.isMovie,
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: searchResult.id,
                 animeSeasonTitle: {
-                    // For anime, use the AniList season title instead of TMDB title
-                    guard isAnimeShow,
-                          let episode = selectedEpisodeForSearch,
-                          let seasonTitle = animeSeasonTitles?[episode.seasonNumber]
-                    else { return nil }
-                    return seasonTitle
+                    // Pass non-nil if anime to trigger E## format instead of S#E#
+                    if isAnimeShow, selectedEpisodeForSearch != nil {
+                        return "anime" // Any non-nil value works as a flag
+                    }
+                    return nil
                 }()
             )
         }
