@@ -103,6 +103,7 @@
 		13F072B82E4B2D9200EF90EB /* LevenshteinDistance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F072962E4B2D9100EF90EB /* LevenshteinDistance.swift */; };
 		13F072B92E4B2D9200EF90EB /* TMDBModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F072992E4B2D9200EF90EB /* TMDBModels.swift */; };
 		13F072BA2E4B2D9200EF90EB /* TMDBService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F0729A2E4B2D9200EF90EB /* TMDBService.swift */; };
+		13F072C22E4B2D9200EF90EB /* AniListService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F072C12E4B2D9200EF90EB /* AniListService.swift */; };
 		13F187AC2E6F38CE00747F7E /* LibraryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F187A42E6F38CE00747F7E /* LibraryManager.swift */; };
 		13F187AD2E6F38CE00747F7E /* LibraryItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F187A62E6F38CE00747F7E /* LibraryItem.swift */; };
 		13F187AE2E6F38CE00747F7E /* LibraryCollection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F187A72E6F38CE00747F7E /* LibraryCollection.swift */; };
@@ -228,6 +229,7 @@
 		13F072962E4B2D9100EF90EB /* LevenshteinDistance.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LevenshteinDistance.swift; sourceTree = "<group>"; };
 		13F072992E4B2D9200EF90EB /* TMDBModels.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBModels.swift; sourceTree = "<group>"; };
 		13F0729A2E4B2D9200EF90EB /* TMDBService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBService.swift; sourceTree = "<group>"; };
+		13F072C12E4B2D9200EF90EB /* AniListService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AniListService.swift; sourceTree = "<group>"; };
 		13F187A42E6F38CE00747F7E /* LibraryManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LibraryManager.swift; sourceTree = "<group>"; };
 		13F187A62E6F38CE00747F7E /* LibraryItem.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LibraryItem.swift; sourceTree = "<group>"; };
 		13F187A72E6F38CE00747F7E /* LibraryCollection.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LibraryCollection.swift; sourceTree = "<group>"; };
@@ -671,6 +673,7 @@
 			children = (
 				13F072982E4B2D9200EF90EB /* Models */,
 				13F0729A2E4B2D9200EF90EB /* TMDBService.swift */,
+				13F072C12E4B2D9200EF90EB /* AniListService.swift */,
 				13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */,
 			);
 			path = TMDB;
@@ -883,6 +886,7 @@
 				13E1EDDD2ED9E66000087629 /* KanzenOutputFormatter.swift in Sources */,
 				13830AF22E55F51300B3CDE4 /* AlternativeUIView.swift in Sources */,
 				13F072BA2E4B2D9200EF90EB /* TMDBService.swift in Sources */,
+				13F072C22E4B2D9200EF90EB /* AniListService.swift in Sources */,
 				13E1EDE82ED9E66000087629 /* MainMenu.swift in Sources */,
 				13E1EDE32ED9E66000087629 /* readerSettingsView.swift in Sources */,
 				13F0725F2E4B2D3300EF90EB /* SoraApp.swift in Sources */,
