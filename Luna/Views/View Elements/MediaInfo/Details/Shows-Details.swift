@@ -132,7 +132,7 @@ struct TVShowSeasonsSection: View {
                 isMovie: false,
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: tvShow?.id ?? 0,
-                animeSeasonTitle: nil
+                animeSeasonTitle: currentSeasonTitle
             )
         }
         .alert("No Active Services", isPresented: $showingNoServicesAlert) {
