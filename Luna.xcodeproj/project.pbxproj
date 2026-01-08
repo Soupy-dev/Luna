@@ -558,6 +558,7 @@
 				13B6F3472EA4C82600DECD2B /* Info.plist */,
 				1324E7B22E940BD70036B5F5 /* Player */,
 				13F5B5902E73090000565E75 /* Models */,
+				AA9999902F10000000AA9990 /* ViewModels */,
 				1375466E2E5F078B00B29944 /* Tracking */,
 				13F072972E4B2D9200EF90EB /* TMDB */,
 				13F072952E4B2D9100EF90EB /* Algorithm */,
@@ -768,10 +769,17 @@
 				13F5B5932E730B0200565E75 /* Library */,
 				13F5B5912E73090000565E75 /* HomeSection.swift */,
 				AA5555502F10000000AA5550 /* CatalogManager.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		AA9999902F10000000AA9990 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
 				AA7777702F10000000AA7770 /* HomeViewModel.swift */,
 				AA8888802F10000000AA8880 /* ScheduleViewModel.swift */,
 			);
-			path = Models;
+			path = ViewModels;
 			sourceTree = "<group>";
 		};
 		13F5B5932E730B0200565E75 /* Library */ = {
