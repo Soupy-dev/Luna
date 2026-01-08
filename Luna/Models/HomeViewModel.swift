@@ -64,11 +64,11 @@ final class HomeViewModel: ObservableObject {
                 async let airingTodayTV = tmdbService.getAiringTodayTVShows()
                 async let topRatedTV = tmdbService.getTopRatedTVShows()
                 async let topRatedM = tmdbService.getTopRatedMovies()
-                async let trendingAnime = tmdbService.getTrendingAnime()
-                async let popularAnime = tmdbService.getPopularAnime()
-                async let topRatedAnime = tmdbService.getTopRatedAnime()
-                async let airingAnime = tmdbService.getAiringAnime()
-                async let upcomingAnime = tmdbService.getUpcomingAnime()
+                async let trendingAnime = AniListService.shared.fetchAnimeCatalog(.trending, tmdbService: tmdbService)
+                async let popularAnime = AniListService.shared.fetchAnimeCatalog(.popular, tmdbService: tmdbService)
+                async let topRatedAnime = AniListService.shared.fetchAnimeCatalog(.topRated, tmdbService: tmdbService)
+                async let airingAnime = AniListService.shared.fetchAnimeCatalog(.airing, tmdbService: tmdbService)
+                async let upcomingAnime = AniListService.shared.fetchAnimeCatalog(.upcoming, tmdbService: tmdbService)
                 
                 let results = try await (
                     trending, popularM, nowPlayingM, upcomingM, popularTV, onTheAirTV,
