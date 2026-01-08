@@ -9,8 +9,6 @@ import Foundation
 import Combine
 
 final class ScheduleViewModel: ObservableObject {
-    static let shared = ScheduleViewModel()
-    
     @Published var isLoading = true
     @Published var errorMessage: String?
     @Published var scheduleEntries: [AniListAiringScheduleEntry] = []
@@ -20,7 +18,7 @@ final class ScheduleViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let scheduleDaysAhead = 7
     
-    private init() {}
+    init() {}
     
     func loadSchedule(localTimeZone: Bool) async {
         await MainActor.run {

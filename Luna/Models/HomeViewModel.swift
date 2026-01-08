@@ -10,8 +10,6 @@ import SwiftUI
 import Combine
 
 final class HomeViewModel: ObservableObject {
-    static let shared = HomeViewModel()
-    
     @Published var catalogResults: [String: [TMDBSearchResult]] = [:]
     @Published var isLoading = true
     @Published var errorMessage: String?
@@ -23,7 +21,7 @@ final class HomeViewModel: ObservableObject {
     
     private var cancellables = Set<AnyCancellable>()
     
-    private init() {
+    init() {
         // Monitor progress manager for continue watching updates
         ProgressManager.shared.$episodeProgressList
             .receive(on: DispatchQueue.main)

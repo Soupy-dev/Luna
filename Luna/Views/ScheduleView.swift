@@ -11,7 +11,7 @@ import Kingfisher
 
 struct ScheduleView: View {
     @AppStorage("showLocalScheduleTime") private var showLocalScheduleTime = true
-    @StateObject private var viewModel = ScheduleViewModel.shared
+    @StateObject private var viewModel = ScheduleViewModel()
     @StateObject private var accentColorManager = AccentColorManager.shared
     
     private let dayChangeTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
