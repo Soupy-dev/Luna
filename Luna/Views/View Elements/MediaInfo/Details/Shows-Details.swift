@@ -309,6 +309,14 @@ struct TVShowSeasonsSection: View {
     
     private func episodeTapAction(episode: TMDBEpisode) {
         selectedEpisodeForSearch = episode
+        
+        // Ensure current season title is set before opening search
+        if let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+            currentSeasonTitle = seasonTitle
+        } else {
+            currentSeasonTitle = nil
+        }
+        
         searchInServicesForEpisode(episode: episode)
     }
     
