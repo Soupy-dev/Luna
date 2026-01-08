@@ -112,7 +112,7 @@ struct AniListDate: Codable {
     let day: Int?
 }
 
-struct AniListAnime: Codable {
+struct AniListMediaEntry: Codable {
     let id: Int
     let title: AniListTitle
     let episodes: Int?
@@ -143,7 +143,18 @@ struct AniListRelations: Codable {
 
 struct AniListRelationEdge: Codable {
     let relationType: String
-    let node: AniListAnime
+    let node: AniListRelatedAnime
+}
+
+struct AniListRelatedAnime: Codable {
+    let id: Int
+    let title: AniListTitle
+    
+    struct AniListTitle: Codable {
+        let romaji: String?
+        let english: String?
+        let native: String?
+    }
 }
 
 struct AniListAiringSchedule: Codable {
