@@ -544,6 +544,9 @@ struct ContinueWatchingCard: View {
     @State private var isHovering: Bool = false
     @State private var isLoaded: Bool = false
     @State private var showingServices = false
+    @State private var isAnime: Bool = false
+    @State private var animeSeasonTitle: String?
+    @State private var showingDetails = false
     
     private var cardWidth: CGFloat { isTvOS ? 280 : 120 }
     private var cardHeight: CGFloat { isTvOS ? 380 : 180 }
@@ -624,6 +627,19 @@ struct ContinueWatchingCard: View {
         }, else: { view in
             view.buttonStyle(PlainButtonStyle())
         })
+        .contextMenu {
+            Button(action: {
+                showingServices = true
+            }) {
+                Label("Resume", systemImage: "play.fill")
+            }
+            
+            Button(action: {
+                showingDetails = true
+            }) {
+                Label("Show Details", systemImage: "info.circle")
+            }
+        }
         .sheet(isPresented: $showingServices) {
             if isLoaded {
                 ModulesSearchResultsSheet(
@@ -643,8 +659,35 @@ struct ContinueWatchingCard: View {
                         voteCount: 0
                     ),
                     tmdbId: item.tmdbId,
-                    animeSeasonTitle: nil
+                    animeSeasonTitle: isAnime ? animeSeasonTitle : nil
                 )
+            }
+        }
+        .sheet(isPresented: $showingDetails) {
+            if isLoaded {
+                let searchResult = TMDBSearchResult(
+                    id: item.tmdbId,
+                    mediaType: item.isMovie ? "movie" : "tv",
+                    title: item.isMovie ? title : nil,
+                    name: item.isMovie ? nil : title,
+                    overview: nil,
+                    posterPath: nil,
+                    backdropPath: nil,
+                    releaseDate: nil,
+                    firstAirDate: nil,
+                    voteAverage: nil,
+                    popularity: 0.0,
+                    adult: nil,
+                    genreIds: nil
+                )
+                
+                let resumeHint = item.isMovie ? nil : EpisodeResumeHint(
+                    showId: item.tmdbId,
+                    season: item.seasonNumber ?? 1,
+                    episode: item.episodeNumber ?? 1
+                )
+                
+                MediaDetailView(searchResult: searchResult, resumeHint: resumeHint, autoPlay: false)
             }
         }
         .task {
@@ -686,10 +729,35 @@ struct ContinueWatchingCard: View {
                 async let detailsTask = tmdbService.getTVShowDetails(id: item.tmdbId)
                 let details = try await detailsTask
                 
+                // Check if this is anime
+                let animeFlag = detectAnime(from: details)
+                
                 await MainActor.run {
                     self.title = details.name
                     self.posterURL = details.fullPosterURL
+                    self.isAnime = animeFlag
                     self.isLoaded = true
+                }
+                
+                // If anime, fetch season titles from AniList
+                if animeFlag, let seasonNumber = item.seasonNumber {
+                    do {
+                        let aniDetails = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
+                            title: details.name,
+                            tmdbShowId: item.tmdbId,
+                            tmdbService: tmdbService,
+                            tmdbShowPoster: details.posterPath,
+                            token: nil
+                        )
+                        
+                        if let seasonTitle = aniDetails.seasons.first(where: { $0.seasonNumber == seasonNumber })?.title {
+                            await MainActor.run {
+                                self.animeSeasonTitle = seasonTitle
+                            }
+                        }
+                    } catch {
+                        Logger.shared.log("Failed to fetch anime season title: \(error.localizedDescription)", type: "Error")
+                    }
                 }
             }
         } catch {
@@ -698,5 +766,13 @@ struct ContinueWatchingCard: View {
                 self.isLoaded = true
             }
         }
+    }
+    
+    private func detectAnime(from detail: TMDBTVShowWithSeasons) -> Bool {
+        let genreAnime = detail.genres.contains { $0.id == 16 }
+        let asianCountries: Set<String> = ["JP", "CN", "KR", "TW"]
+        let hasAsianOrigin = (detail.originCountry ?? []).contains { asianCountries.contains($0) }
+        // Require animation genre AND Asian origin to avoid misclassifying western animation
+        return genreAnime && hasAsianOrigin
     }
 }
