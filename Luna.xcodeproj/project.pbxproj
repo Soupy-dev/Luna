@@ -769,17 +769,10 @@
 				13F5B5932E730B0200565E75 /* Library */,
 				13F5B5912E73090000565E75 /* HomeSection.swift */,
 				AA5555502F10000000AA5550 /* CatalogManager.swift */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
-		AA9999902F10000000AA9990 /* ViewModels */ = {
-			isa = PBXGroup;
-			children = (
 				AA7777702F10000000AA7770 /* HomeViewModel.swift */,
 				AA8888802F10000000AA8880 /* ScheduleViewModel.swift */,
 			);
-			path = ViewModels;
+			path = Models;
 			sourceTree = "<group>";
 		};
 		13F5B5932E730B0200565E75 /* Library */ = {
