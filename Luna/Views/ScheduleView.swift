@@ -46,14 +46,17 @@ struct ScheduleView: View {
         .navigationTitle("Schedule")
         .task {
             if viewModel.scheduleEntries.isEmpty {
-                await viewModel.loadSchedule()
+                await viewModel.loadSchedule(localTimeZone: showLocalScheduleTime)
             }
         }
         .refreshable {
-            await viewModel.loadSchedule()
+            await viewModel.loadSchedule(localTimeZone: showLocalScheduleTime)
+        }
+        .onChange(of: showLocalScheduleTime) { newValue in
+            viewModel.regroupBuckets(localTimeZone: newValue)
         }
         .onReceive(dayChangeTimer) { _ in
-            Task { await viewModel.handleDayChangeIfNeeded() }
+            Task { await viewModel.handleDayChangeIfNeeded(localTimeZone: showLocalScheduleTime) }
         }
     }
     

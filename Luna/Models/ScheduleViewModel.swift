@@ -22,7 +22,7 @@ final class ScheduleViewModel: ObservableObject {
     
     private init() {}
     
-    func loadSchedule() async {
+    func loadSchedule(localTimeZone: Bool) async {
         await MainActor.run {
             isLoading = true
             errorMessage = nil
@@ -34,7 +34,7 @@ final class ScheduleViewModel: ObservableObject {
                 isLoading = false
                 scheduleEntries = entries
                 currentDayAnchor = Date()
-                updateBuckets(with: entries)
+                updateBuckets(with: entries, localTimeZone: localTimeZone)
             }
         } catch {
             await MainActor.run {
@@ -44,8 +44,8 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
     
-    func updateBuckets(with entries: [AniListAiringScheduleEntry]) {
-        let calendar = makeCalendar()
+    func updateBuckets(with entries: [AniListAiringScheduleEntry], localTimeZone: Bool) {
+        let calendar = makeCalendar(localTimeZone: localTimeZone)
         let startOfToday = calendar.startOfDay(for: Date())
         
         var buckets: [DayBucket] = []
@@ -67,28 +67,28 @@ final class ScheduleViewModel: ObservableObject {
         dayBuckets = buckets
     }
     
-    func regroupBuckets() {
-        updateBuckets(with: scheduleEntries)
+    func regroupBuckets(localTimeZone: Bool) {
+        updateBuckets(with: scheduleEntries, localTimeZone: localTimeZone)
     }
     
-    func handleDayChangeIfNeeded() async {
-        let calendar = makeCalendar()
+    func handleDayChangeIfNeeded(localTimeZone: Bool) async {
+        let calendar = makeCalendar(localTimeZone: localTimeZone)
         let trackedDay = calendar.startOfDay(for: currentDayAnchor)
         let today = calendar.startOfDay(for: Date())
         
         if today != trackedDay {
-            await loadSchedule()
+            await loadSchedule(localTimeZone: localTimeZone)
         } else {
             await MainActor.run {
                 currentDayAnchor = Date()
-                updateBuckets(with: scheduleEntries)
+                updateBuckets(with: scheduleEntries, localTimeZone: localTimeZone)
             }
         }
     }
     
-    private func makeCalendar() -> Calendar {
+    private func makeCalendar(localTimeZone: Bool) -> Calendar {
         var calendar = Calendar.current
-        calendar.timeZone = .current
+        calendar.timeZone = localTimeZone ? .current : TimeZone(secondsFromGMT: 0)!
         return calendar
     }
 }
