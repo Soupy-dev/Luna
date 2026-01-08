@@ -122,6 +122,8 @@
 		AA4444442F10000000AA4444 /* ScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA4444402F10000000AA4440 /* ScheduleView.swift */; };
 		AA5555552F10000000AA5555 /* CatalogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5555502F10000000AA5550 /* CatalogManager.swift */; };
 		AA6666662F10000000AA6666 /* CatalogsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6666602F10000000AA6660 /* CatalogsSettingsView.swift */; };
+		AA7777712F10000000AA7771 /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7777702F10000000AA7770 /* HomeViewModel.swift */; };
+		AA8888812F10000000AA8881 /* ScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA8888802F10000000AA8880 /* ScheduleViewModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -253,6 +255,8 @@
 		AA3333302F10000000AA3330 /* TrackersSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackersSettingsView.swift; sourceTree = "<group>"; };
 		AA4444402F10000000AA4440 /* ScheduleView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ScheduleView.swift; sourceTree = "<group>"; };
 		AA5555502F10000000AA5550 /* CatalogManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogManager.swift; sourceTree = "<group>"; };
+		AA7777702F10000000AA7770 /* HomeViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
+		AA8888802F10000000AA8880 /* ScheduleViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ScheduleViewModel.swift; sourceTree = "<group>"; };
 		AA6666602F10000000AA6660 /* CatalogsSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogsSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -764,6 +768,8 @@
 				13F5B5932E730B0200565E75 /* Library */,
 				13F5B5912E73090000565E75 /* HomeSection.swift */,
 				AA5555502F10000000AA5550 /* CatalogManager.swift */,
+				AA7777702F10000000AA7770 /* HomeViewModel.swift */,
+				AA8888802F10000000AA8880 /* ScheduleViewModel.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -980,6 +986,8 @@
 				AA4444442F10000000AA4444 /* ScheduleView.swift in Sources */,
 				AA5555552F10000000AA5555 /* CatalogManager.swift in Sources */,
 				AA6666662F10000000AA6666 /* CatalogsSettingsView.swift in Sources */,
+				AA7777712F10000000AA7771 /* HomeViewModel.swift in Sources */,
+				AA8888812F10000000AA8881 /* ScheduleViewModel.swift in Sources */,
 				13F072B32E4B2D9200EF90EB /* ServicesResultsSheet.swift in Sources */,
 				13F072A52E4B2D9200EF90EB /* HomeView.swift in Sources */,
 				13E1EDDC2ED9E65F00087629 /* JavaScriptCore.swift in Sources */,
