@@ -117,13 +117,7 @@ struct MediaDetailView: View {
         }
         .sheet(isPresented: $showingSearchResults) {
             ModulesSearchResultsSheet(
-                mediaTitle: {
-                    // For anime, use the current season title if available (set when season is loaded)
-                    if isAnimeShow, let seasonTitle = currentSeasonTitle {
-                        return seasonTitle
-                    }
-                    return searchResult.displayTitle
-                }(),
+                mediaTitle: searchResult.displayTitle,
                 originalTitle: romajiTitle,
                 isMovie: searchResult.isMovie,
                 selectedEpisode: selectedEpisodeForSearch,
