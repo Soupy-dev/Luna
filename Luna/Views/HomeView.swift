@@ -12,7 +12,7 @@ struct HomeView: View {
     
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
     
-    @StateObject private var homeViewModel = Sora.HomeViewModel.shared
+    @StateObject private var homeViewModel = HomeViewModel.shared
     @ObservedObject private var catalogManager = CatalogManager.shared
     @StateObject private var tmdbService = TMDBService.shared
     @StateObject private var contentFilter = TMDBContentFilter.shared
