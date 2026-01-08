@@ -11,15 +11,9 @@ import Kingfisher
 
 struct ScheduleView: View {
     @AppStorage("showLocalScheduleTime") private var showLocalScheduleTime = true
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @State private var scheduleEntries: [AniListAiringScheduleEntry] = []
-    @State private var dayBuckets: [DayBucket] = []
-    @State private var currentDayAnchor = Date()
-    
+    @StateObject private var viewModel = ScheduleViewModel.shared
     @StateObject private var accentColorManager = AccentColorManager.shared
     
-    private let scheduleDaysAhead = 7
     private let dayChangeTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
     
     var body: some View {
@@ -39,11 +33,11 @@ struct ScheduleView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            if isLoading {
+            if viewModel.isLoading {
                 loadingView
-            } else if let errorMessage = errorMessage {
+            } else if let errorMessage = viewModel.errorMessage {
                 errorView(errorMessage)
-            } else if dayBuckets.isEmpty {
+            } else if viewModel.dayBuckets.isEmpty {
                 emptyStateView
             } else {
                 mainScheduleView
@@ -51,13 +45,15 @@ struct ScheduleView: View {
         }
         .navigationTitle("Schedule")
         .task {
-            await loadSchedule()
+            if viewModel.scheduleEntries.isEmpty {
+                await viewModel.loadSchedule()
+            }
         }
         .refreshable {
-            await loadSchedule()
+            await viewModel.loadSchedule()
         }
         .onReceive(dayChangeTimer) { _ in
-            Task { await handleDayChangeIfNeeded() }
+            Task { await viewModel.handleDayChangeIfNeeded() }
         }
     }
     
@@ -113,7 +109,7 @@ struct ScheduleView: View {
                 timeZoneToggleSection
                 
                 // Schedule days
-                ForEach(dayBuckets) { bucket in
+                ForEach(viewModel.dayBuckets) { bucket in
                     daySection(bucket: bucket)
                 }
             }
@@ -213,10 +209,6 @@ struct ScheduleView: View {
             }
             
             Spacer()
-            
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
         .padding()
         .background(Color.gray.opacity(0.15))
@@ -224,76 +216,6 @@ struct ScheduleView: View {
     }
     
     // MARK: - Data Loading
-    
-    private func loadSchedule() async {
-        await MainActor.run {
-            isLoading = true
-            errorMessage = nil
-        }
-        
-        do {
-            let entries = try await AniListService.shared.fetchAiringSchedule(daysAhead: scheduleDaysAhead)
-            await MainActor.run {
-                isLoading = false
-                scheduleEntries = entries
-                currentDayAnchor = Date()
-                updateBuckets(with: entries)
-            }
-        } catch {
-            await MainActor.run {
-                isLoading = false
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-    
-    private func updateBuckets(with entries: [AniListAiringScheduleEntry]) {
-        let calendar = makeCalendar()
-        let startOfToday = calendar.startOfDay(for: Date())
-        
-        var buckets: [DayBucket] = []
-        for offset in 0...scheduleDaysAhead {
-            guard let day = calendar.date(byAdding: .day, value: offset, to: startOfToday),
-                  let nextDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: day)) else {
-                continue
-            }
-            
-            let dayItems = entries
-                .filter { entry in
-                    entry.airingAt >= calendar.startOfDay(for: day) && entry.airingAt < nextDay
-                }
-                .sorted { $0.airingAt < $1.airingAt }
-            
-            buckets.append(DayBucket(date: calendar.startOfDay(for: day), items: dayItems))
-        }
-        
-        dayBuckets = buckets
-    }
-    
-    private func regroupBuckets() {
-        updateBuckets(with: scheduleEntries)
-    }
-    
-    private func handleDayChangeIfNeeded() async {
-        let calendar = makeCalendar()
-        let trackedDay = calendar.startOfDay(for: currentDayAnchor)
-        let today = calendar.startOfDay(for: Date())
-        
-        if today != trackedDay {
-            await loadSchedule()
-        } else {
-            await MainActor.run {
-                currentDayAnchor = Date()
-                updateBuckets(with: scheduleEntries)
-            }
-        }
-    }
-    
-    private func makeCalendar() -> Calendar {
-        var calendar = Calendar.current
-        calendar.timeZone = showLocalScheduleTime ? .current : TimeZone(secondsFromGMT: 0)!
-        return calendar
-    }
     
     private func formattedDay(_ date: Date) -> String {
         let calendar = Calendar.current
@@ -321,8 +243,3 @@ struct ScheduleView: View {
     }
 }
 
-private struct DayBucket: Identifiable {
-    let id = UUID()
-    let date: Date
-    let items: [AniListAiringScheduleEntry]
-}
