@@ -16,6 +16,7 @@ struct TVShowSeasonsSection: View {
     @Binding var selectedEpisodeForSearch: TMDBEpisode?
     var animeEpisodes: [AniListEpisode]? = nil
     var animeSeasonTitles: [Int: String]? = nil
+    @Binding var currentSeasonTitle: String?
     let tmdbService: TMDBService
     
     @State private var isLoadingSeason = false
@@ -377,6 +378,10 @@ struct TVShowSeasonsSection: View {
                     )
                     
                     await MainActor.run {
+                        // Update current season title for anime
+                        if let seasonTitle = animeSeasonTitles?[season.seasonNumber] {
+                            self.currentSeasonTitle = seasonTitle
+                        }
                         self.seasonDetail = detail
                         self.isLoadingSeason = false
                         if let firstEpisode = detail.episodes.first {
@@ -387,6 +392,7 @@ struct TVShowSeasonsSection: View {
                     // For regular TV shows, fetch from TMDB
                     let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShowId, seasonNumber: season.seasonNumber)
                     await MainActor.run {
+                        self.currentSeasonTitle = nil
                         self.seasonDetail = detail
                         self.isLoadingSeason = false
                         if let firstEpisode = detail.episodes.first {

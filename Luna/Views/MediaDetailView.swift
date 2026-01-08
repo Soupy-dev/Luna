@@ -32,6 +32,7 @@ struct MediaDetailView: View {
     @State private var isAnimeShow = false
     @State private var anilistEpisodes: [AniListEpisode]? = nil
     @State private var animeSeasonTitles: [Int: String]? = nil
+    @State private var currentSeasonTitle: String?
     
     @StateObject private var serviceManager = ServiceManager.shared
     @ObservedObject private var libraryManager = LibraryManager.shared
@@ -115,10 +116,8 @@ struct MediaDetailView: View {
         .sheet(isPresented: $showingSearchResults) {
             ModulesSearchResultsSheet(
                 mediaTitle: {
-                    // For anime with selected episode, use AniList season title as base
-                    if isAnimeShow,
-                       let episode = selectedEpisodeForSearch,
-                       let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                    // For anime, use the current season title if available (set when season is loaded)
+                    if isAnimeShow, let seasonTitle = currentSeasonTitle {
                         return seasonTitle
                     }
                     return searchResult.displayTitle
@@ -398,6 +397,7 @@ struct MediaDetailView: View {
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
                 animeEpisodes: anilistEpisodes,
                 animeSeasonTitles: animeSeasonTitles,
+                currentSeasonTitle: $currentSeasonTitle,
                 tmdbService: tmdbService
             )
         }
