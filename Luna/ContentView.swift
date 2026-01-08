@@ -31,7 +31,7 @@ struct ContentView: View {
                 }
             }
 #if !os(tvOS)
-            .tabBarMinimizeBehavior(.onScrollDown)
+            .tabBarMinimizeBehavior(.never)
 #endif
             .accentColor(accentColorManager.currentAccentColor)
             
