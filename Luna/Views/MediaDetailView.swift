@@ -29,6 +29,9 @@ struct MediaDetailView: View {
     @State private var selectedEpisodeForSearch: TMDBEpisode?
     @State private var romajiTitle: String?
     @State private var logoURL: String?
+    @State private var isAnimeShow = false
+    @State private var anilistEpisodes: [AniListEpisode]? = nil
+    @State private var animeSeasonTitles: [Int: String]? = nil
     
     @StateObject private var serviceManager = ServiceManager.shared
     @ObservedObject private var libraryManager = LibraryManager.shared
@@ -115,7 +118,15 @@ struct MediaDetailView: View {
                 originalTitle: romajiTitle,
                 isMovie: searchResult.isMovie,
                 selectedEpisode: selectedEpisodeForSearch,
-                tmdbId: searchResult.id
+                tmdbId: searchResult.id,
+                animeSeasonTitle: {
+                    // For anime, use the AniList season title instead of TMDB title
+                    guard isAnimeShow,
+                          let episode = selectedEpisodeForSearch,
+                          let seasonTitle = animeSeasonTitles?[episode.seasonNumber]
+                    else { return nil }
+                    return seasonTitle
+                }()
             )
         }
         .sheet(isPresented: $showingAddToCollection) {
@@ -440,10 +451,46 @@ struct MediaDetailView: View {
                     
                     let (detail, images, romaji) = try await (detailTask, imagesTask, romajiTask)
                     
+                    // Detect if this is an anime show: origin country JP and genre 16 (Animation)
+                    let isJapanese = detail.originCountry?.contains("JP") ?? false
+                    let isAnimation = detail.genres.contains { $0.id == 16 }
+                    let detectedAsAnime = isJapanese && isAnimation
+                    
+                    // Fetch AniList hybrid data for anime shows
+                    var animeData: AniListAnimeWithSeasons? = nil
+                    if detectedAsAnime {
+                        do {
+                            animeData = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
+                                title: detail.name,
+                                tmdbShowId: detail.id,
+                                tmdbService: tmdbService,
+                                tmdbShowPoster: detail.fullPosterURL,
+                                token: nil
+                            )
+                            Logger.shared.log("MediaDetailView: Fetched AniList hybrid data for \(detail.name) with \(animeData?.seasons.count ?? 0) seasons", type: "AniList")
+                        } catch {
+                            Logger.shared.log("MediaDetailView: Failed to fetch AniList data: \(error.localizedDescription)", type: "AniList")
+                        }
+                    }
+                    
                     await MainActor.run {
                         self.tvShowDetail = detail
                         self.synopsis = detail.overview ?? ""
                         self.romajiTitle = romaji
+                        self.isAnimeShow = detectedAsAnime
+                        
+                        // Store AniList season titles and episodes if available
+                        if let animeData = animeData {
+                            var seasonTitles: [Int: String] = [:]
+                            var allEpisodes: [AniListEpisode] = []
+                            for season in animeData.seasons {
+                                seasonTitles[season.seasonNumber] = season.title
+                                allEpisodes.append(contentsOf: season.episodes)
+                            }
+                            self.animeSeasonTitles = seasonTitles
+                            self.anilistEpisodes = allEpisodes
+                        }
+                        
                         if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
                             self.logoURL = logo.fullURL
                         }

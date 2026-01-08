@@ -82,6 +82,7 @@ struct ModulesSearchResultsSheet: View {
     let isMovie: Bool
     let selectedEpisode: TMDBEpisode?
     let tmdbId: Int
+    let animeSeasonTitle: String?
     
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var viewModel = ModulesSearchResultsViewModel()
@@ -90,6 +91,11 @@ struct ModulesSearchResultsSheet: View {
     
     private var displayTitle: String {
         if let episode = selectedEpisode {
+            // For anime, use "AniList Title E##" format
+            if let animeTitle = animeSeasonTitle {
+                return "\(animeTitle) E\(episode.episodeNumber)"
+            }
+            // For non-anime, use standard "Title S#E#" format
             return "\(mediaTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
         }
         return mediaTitle
