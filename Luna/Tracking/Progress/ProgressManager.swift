@@ -338,8 +338,7 @@ final class ProgressManager: ObservableObject {
             // Sync to trackers if just reached watched threshold
             if !previousWatchedState && entry.isWatched {
                 DispatchQueue.main.async {
-                    // TODO: Uncomment after porting TrackerManager from Luna-soupy
-                    // TrackerManager.shared.syncWatchProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, progress: entry.progress)
+                    TrackerManager.shared.syncWatchProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, progress: entry.progress)
                 }
             }
         }
@@ -406,8 +405,7 @@ final class ProgressManager: ObservableObject {
 
             // Sync to trackers
             DispatchQueue.main.async {
-                // TODO: Uncomment after porting TrackerManager from Luna-soupy
-                // TrackerManager.shared.syncWatchProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, progress: 1.0)
+                TrackerManager.shared.syncWatchProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, progress: 1.0)
             }
         }
         saveProgressData()
