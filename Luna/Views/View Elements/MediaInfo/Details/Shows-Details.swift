@@ -126,16 +126,21 @@ struct TVShowSeasonsSection: View {
             }
         }
         .sheet(isPresented: $showingSearchResults) {
-            // Get the season title for the selected episode
-            let seasonTitle = selectedEpisodeForSearch.flatMap { animeSeasonTitles?[$0.seasonNumber] }
+            // For anime, use the season-specific AniList title; otherwise use show name
+            let searchTitle: String
+            if isAnime, let episode = selectedEpisodeForSearch, let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                searchTitle = seasonTitle
+            } else {
+                searchTitle = tvShow?.name ?? "Unknown Show"
+            }
             
             ModulesSearchResultsSheet(
-                mediaTitle: tvShow?.name ?? "Unknown Show",
+                mediaTitle: searchTitle,
                 originalTitle: romajiTitle,
                 isMovie: false,
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: tvShow?.id ?? 0,
-                animeSeasonTitle: seasonTitle
+                animeSeasonTitle: isAnime ? "anime" : nil
             )
         }
         .alert("No Active Services", isPresented: $showingNoServicesAlert) {
