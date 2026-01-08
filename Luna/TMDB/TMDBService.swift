@@ -23,23 +23,36 @@ class TMDBService: ObservableObject {
     }
     
     // MARK: - Multi Search (Movies and TV Shows)
-    func searchMulti(query: String) async throws -> [TMDBSearchResult] {
+    func searchMulti(query: String, maxPages: Int = 2) async throws -> [TMDBSearchResult] {
         guard !query.isEmpty else { return [] }
         
         let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = "\(baseURL)/search/multi?api_key=\(apiKey)&query=\(encodedQuery)&language=\(currentLanguage)&include_adult=false"
+        var allResults: [TMDBSearchResult] = []
         
-        guard let url = URL(string: urlString) else {
-            throw TMDBError.invalidURL
+        // TMDB returns 20 results per page; fetch up to maxPages to get more results
+        for page in 1...maxPages {
+            let urlString = "\(baseURL)/search/multi?api_key=\(apiKey)&query=\(encodedQuery)&language=\(currentLanguage)&include_adult=false&page=\(page)"
+            
+            guard let url = URL(string: urlString) else {
+                throw TMDBError.invalidURL
+            }
+            
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                let response = try JSONDecoder().decode(TMDBSearchResponse.self, from: data)
+                let filtered = response.results.filter { $0.mediaType == "movie" || $0.mediaType == "tv" }
+                allResults.append(contentsOf: filtered)
+                
+                // Stop if we get fewer results than expected (last page)
+                if filtered.count < 20 {
+                    break
+                }
+            } catch {
+                throw TMDBError.networkError(error)
+            }
         }
         
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let response = try JSONDecoder().decode(TMDBSearchResponse.self, from: data)
-            return response.results.filter { $0.mediaType == "movie" || $0.mediaType == "tv" }
-        } catch {
-            throw TMDBError.networkError(error)
-        }
+        return allResults
     }
     
     // MARK: - Search Movies

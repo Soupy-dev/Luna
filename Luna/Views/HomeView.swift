@@ -545,8 +545,8 @@ struct ContinueWatchingCard: View {
     @State private var isLoaded: Bool = false
     @State private var showingServices = false
     
-    private var cardWidth: CGFloat { isTvOS ? 280 : 180 }
-    private var cardHeight: CGFloat { isTvOS ? 420 : 270 }
+    private var cardWidth: CGFloat { isTvOS ? 280 : 120 }
+    private var cardHeight: CGFloat { isTvOS ? 380 : 180 }
     private var logoMaxWidth: CGFloat { isTvOS ? 200 : 140 }
     private var logoMaxHeight: CGFloat { isTvOS ? 60 : 40 }
     
@@ -554,7 +554,7 @@ struct ContinueWatchingCard: View {
         Button(action: {
             showingServices = true
         }) {
-            VStack(spacing: isTvOS ? 10 : 6) {
+            VStack(spacing: isTvOS ? 4 : 2) {
                 // Poster
                 ZStack {
                     if let posterURL = posterURL {
@@ -570,24 +570,21 @@ struct ContinueWatchingCard: View {
                 }
                 .frame(width: cardWidth, height: cardWidth * 1.5)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: isTvOS ? 12 : 8))
+                .clipShape(RoundedRectangle(cornerRadius: isTvOS ? 8 : 6))
                 
-                // Title and info
-                VStack(alignment: .leading, spacing: isTvOS ? 6 : 4) {
-                    Text(title)
-                        .font(isTvOS ? .headline : .subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    
-                    HStack(spacing: isTvOS ? 8 : 6) {
+                // Title
+                Text(title)
+                    .font(isTvOS ? .caption : .caption2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.center)
+                    .frame(width: cardWidth)
                         
                         Spacer()
                         if !item.isMovie, let season = item.seasonNumber, let episode = item.episodeNumber {
-                            Text("S\(season) E\(episode)")
-                                .font(isTvOS ? .caption : .caption2)
-                                .fontWeight(.medium)
+                            Text("S\\(season)E\\(episode)")
+                                .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
                         
@@ -597,22 +594,23 @@ struct ContinueWatchingCard: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
+                    .frame(width: cardWidth)
                     
                     // Progress bar
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2)
+                            RoundedRectangle(cornerRadius: 1)
                                 .fill(Color.gray.opacity(0.3))
-                                .frame(height: isTvOS ? 4 : 3)
+                                .frame(height: 2)
                             
-                            RoundedRectangle(cornerRadius: 2)
+                            RoundedRectangle(cornerRadius: 1)
                                 .fill(Color.accentColor)
-                                .frame(width: geometry.size.width * item.progress, height: isTvOS ? 4 : 3)
+                                .frame(width: geometry.size.width * item.progress, height: 2)
                         }
                     }
-                    .frame(height: isTvOS ? 4 : 3)
+                    .frame(height: 2)
+                    .frame(width: cardWidth)
                 }
-                .frame(width: cardWidth)
             }
             .frame(width: cardWidth)
             .clipShape(RoundedRectangle(cornerRadius: isTvOS ? 12 : 8))
