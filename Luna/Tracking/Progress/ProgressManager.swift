@@ -97,6 +97,22 @@ struct ContinueWatchingItem: Identifiable {
     let isMovie: Bool
     let progress: Double
     let lastUpdated: Date
+    let seasonNumber: Int?
+    let episodeNumber: Int?
+    let currentTime: Double
+    let totalDuration: Double
+    
+    var remainingTime: String {
+        let remaining = max(0, totalDuration - currentTime)
+        let minutes = Int(remaining / 60)
+        if minutes < 60 {
+            return "\(minutes) min left"
+        } else {
+            let hours = minutes / 60
+            let mins = minutes % 60
+            return mins > 0 ? "\(hours)h \(mins)m left" : "\(hours)h left"
+        }
+    }
 }
 
 // MARK: - ProgressManager
@@ -505,7 +521,11 @@ final class ProgressManager: ObservableObject {
                         tmdbId: movie.id,
                         isMovie: true,
                         progress: movie.progress,
-                        lastUpdated: movie.lastUpdated
+                        lastUpdated: movie.lastUpdated,
+                        seasonNumber: nil,
+                        episodeNumber: nil,
+                        currentTime: movie.currentTime,
+                        totalDuration: movie.totalDuration
                     )
                 }
             
@@ -527,7 +547,11 @@ final class ProgressManager: ObservableObject {
                     tmdbId: episode.showId,
                     isMovie: false,
                     progress: episode.progress,
-                    lastUpdated: episode.lastUpdated
+                    lastUpdated: episode.lastUpdated,
+                    seasonNumber: episode.seasonNumber,
+                    episodeNumber: episode.episodeNumber,
+                    currentTime: episode.currentTime,
+                    totalDuration: episode.totalDuration
                 )
             }
             

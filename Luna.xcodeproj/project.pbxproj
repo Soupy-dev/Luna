@@ -116,6 +116,12 @@
 		13F5B5922E73090000565E75 /* HomeSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5912E73090000565E75 /* HomeSection.swift */; };
 		13F5B5952E730CB200565E75 /* TMDBContentFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */; };
 		13F5B5972E730CDB00565E75 /* TMDBFiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5962E730CDB00565E75 /* TMDBFiltersView.swift */; };
+		AA1111112F10000000AA1111 /* TrackerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1111102F10000000AA1110 /* TrackerManager.swift */; };
+		AA2222222F10000000AA2222 /* TrackerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2222202F10000000AA2220 /* TrackerModels.swift */; };
+		AA3333332F10000000AA3333 /* TrackersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3333302F10000000AA3330 /* TrackersSettingsView.swift */; };
+		AA4444442F10000000AA4444 /* ScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA4444402F10000000AA4440 /* ScheduleView.swift */; };
+		AA5555552F10000000AA5555 /* CatalogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5555502F10000000AA5550 /* CatalogManager.swift */; };
+		AA6666662F10000000AA6666 /* CatalogsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6666602F10000000AA6660 /* CatalogsSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -242,6 +248,12 @@
 		13F5B5912E73090000565E75 /* HomeSection.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HomeSection.swift; sourceTree = "<group>"; };
 		13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBContentFilter.swift; sourceTree = "<group>"; };
 		13F5B5962E730CDB00565E75 /* TMDBFiltersView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBFiltersView.swift; sourceTree = "<group>"; };
+		AA1111102F10000000AA1110 /* TrackerManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackerManager.swift; sourceTree = "<group>"; };
+		AA2222202F10000000AA2220 /* TrackerModels.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackerModels.swift; sourceTree = "<group>"; };
+		AA3333302F10000000AA3330 /* TrackersSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackersSettingsView.swift; sourceTree = "<group>"; };
+		AA4444402F10000000AA4440 /* ScheduleView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ScheduleView.swift; sourceTree = "<group>"; };
+		AA5555502F10000000AA5550 /* CatalogManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogManager.swift; sourceTree = "<group>"; };
+		AA6666602F10000000AA6660 /* CatalogsSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogsSettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -286,6 +298,7 @@
 			isa = PBXGroup;
 			children = (
 				1375466F2E5F079000B29944 /* Progress */,
+				AA7777702F10000000AA7770 /* Trackers */,
 			);
 			path = Tracking;
 			sourceTree = "<group>";
@@ -296,6 +309,15 @@
 				13B6F3442EA4C6BC00DECD2B /* ProgressManager.swift */,
 			);
 			path = Progress;
+			sourceTree = "<group>";
+		};
+		AA7777702F10000000AA7770 /* Trackers */ = {
+			isa = PBXGroup;
+			children = (
+				AA1111102F10000000AA1110 /* TrackerManager.swift */,
+				AA2222202F10000000AA2220 /* TrackerModels.swift */,
+			);
+			path = Trackers;
 			sourceTree = "<group>";
 		};
 		13E1ED992ED9E65F00087629 /* Kanzen */ = {
@@ -570,6 +592,7 @@
 				13F0727A2E4B2D9000EF90EB /* HomeView.swift */,
 				13F0727B2E4B2D9000EF90EB /* LibraryView.swift */,
 				13F0727C2E4B2D9000EF90EB /* MediaDetailView.swift */,
+				AA4444402F10000000AA4440 /* ScheduleView.swift */,
 				13F072C42E4B364B00EF90EB /* SettingsView */,
 				13F0727F2E4B2D9000EF90EB /* View Elements */,
 			);
@@ -710,6 +733,8 @@
 				13F072792E4B2D9000EF90EB /* ServicesView.swift */,
 				13F518422EBCE42B00DEF778 /* StorageView.swift */,
 				13F0727E2E4B2D9000EF90EB /* LoggerView.swift */,
+				AA3333302F10000000AA3330 /* TrackersSettingsView.swift */,
+				AA6666602F10000000AA6660 /* CatalogsSettingsView.swift */,
 			);
 			path = SettingsView;
 			sourceTree = "<group>";
@@ -738,6 +763,7 @@
 			children = (
 				13F5B5932E730B0200565E75 /* Library */,
 				13F5B5912E73090000565E75 /* HomeSection.swift */,
+				AA5555502F10000000AA5550 /* CatalogManager.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -948,6 +974,12 @@
 				13F072B82E4B2D9200EF90EB /* LevenshteinDistance.swift in Sources */,
 				13631B322E4F1A200035C39F /* ServiceSettingsView.swift in Sources */,
 				13E1EDD42ED9E65F00087629 /* mangaData.swift in Sources */,
+				AA1111112F10000000AA1111 /* TrackerManager.swift in Sources */,
+				AA2222222F10000000AA2222 /* TrackerModels.swift in Sources */,
+				AA3333332F10000000AA3333 /* TrackersSettingsView.swift in Sources */,
+				AA4444442F10000000AA4444 /* ScheduleView.swift in Sources */,
+				AA5555552F10000000AA5555 /* CatalogManager.swift in Sources */,
+				AA6666662F10000000AA6666 /* CatalogsSettingsView.swift in Sources */,
 				13F072B32E4B2D9200EF90EB /* ServicesResultsSheet.swift in Sources */,
 				13F072A52E4B2D9200EF90EB /* HomeView.swift in Sources */,
 				13E1EDDC2ED9E65F00087629 /* JavaScriptCore.swift in Sources */,

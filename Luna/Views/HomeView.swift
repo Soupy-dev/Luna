@@ -10,13 +10,7 @@ import Kingfisher
 
 struct HomeView: View {
     @State private var showingSettings = false
-    @State private var trendingContent: [TMDBSearchResult] = []
-    @State private var popularMovies: [TMDBMovie] = []
-    @State private var popularTVShows: [TMDBTVShow] = []
-    @State private var popularAnime: [TMDBTVShow] = []
-    @State private var topRatedMovies: [TMDBMovie] = []
-    @State private var topRatedTVShows: [TMDBTVShow] = []
-    @State private var topRatedAnime: [TMDBTVShow] = []
+    @State private var catalogResults: [String: [TMDBSearchResult]] = [:]
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var heroContent: TMDBSearchResult?
@@ -30,22 +24,13 @@ struct HomeView: View {
     
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
     
-    @AppStorage("homeSections") private var homeSectionsData: Data = {
-        if let data = try? JSONEncoder().encode(HomeSection.defaultSections) {
-            return data
-        }
-        return Data()
-    }()
-    
-    private var homeSections: [HomeSection] {
-        if let sections = try? JSONDecoder().decode([HomeSection].self, from: homeSectionsData) {
-            return sections.sorted { $0.order < $1.order }
-        }
-        return HomeSection.defaultSections
-    }
-    
+    @ObservedObject private var catalogManager = CatalogManager.shared
     @StateObject private var tmdbService = TMDBService.shared
     @StateObject private var contentFilter = TMDBContentFilter.shared
+    
+    private var enabledCatalogs: [Catalog] {
+        return catalogManager.getEnabledCatalogs()
+    }
     
     private var heroHeight: CGFloat {
 #if os(tvOS)
@@ -337,60 +322,18 @@ struct HomeView: View {
     @ViewBuilder
     private var contentSections: some View {
         VStack(spacing: 0) {
-            ForEach(homeSections.filter { $0.isEnabled }) { section in
-                switch section.id {
-                case "trending":
-                    if !trendingContent.isEmpty {
-                        let filteredTrending = trendingContent.filter { $0.id != heroContent?.id }
-                        MediaSection(
-                            title: section.title,
-                            items: Array(filteredTrending.prefix(15))
-                        )
-                    }
-                case "popularMovies":
-                    if !popularMovies.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: popularMovies.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                case "popularTVShows":
-                    if !popularTVShows.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: popularTVShows.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                case "popularAnime":
-                    if !popularAnime.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: popularAnime.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                case "topRatedMovies":
-                    if !topRatedMovies.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: topRatedMovies.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                case "topRatedTVShows":
-                    if !topRatedTVShows.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: topRatedTVShows.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                case "topRatedAnime":
-                    if !topRatedAnime.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: topRatedAnime.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                default:
-                    EmptyView()
+            // Display all enabled catalogs
+            ForEach(enabledCatalogs) { catalog in
+                if let items = catalogResults[catalog.id], !items.isEmpty {
+                    let limitedItems = Array(items.prefix(15))
+                    let displayItems = catalog.id == "trending"
+                        ? limitedItems.filter { $0.id != heroContent?.id }
+                        : limitedItems
+                    
+                    MediaSection(
+                        title: catalog.name,
+                        items: displayItems
+                    )
                 }
             }
             
@@ -408,25 +351,74 @@ struct HomeView: View {
             do {
                 async let trending = tmdbService.getTrending()
                 async let popularM = tmdbService.getPopularMovies()
+                async let nowPlayingM = tmdbService.getNowPlayingMovies()
+                async let upcomingM = tmdbService.getUpcomingMovies()
                 async let popularTV = tmdbService.getPopularTVShows()
-                async let popularA = tmdbService.getPopularAnime()
-                async let topRatedM = tmdbService.getTopRatedMovies()
+                async let onTheAirTV = tmdbService.getOnTheAirTVShows()
+                async let airingTodayTV = tmdbService.getAiringTodayTVShows()
                 async let topRatedTV = tmdbService.getTopRatedTVShows()
-                async let topRatedA = tmdbService.getTopRatedAnime()
+                async let topRatedM = tmdbService.getTopRatedMovies()
                 
-                let (trendingResult, popularMoviesResult, popularTVResult, popularAnimeResult, topRatedMoviesResult, topRatedTVResult, topRatedAnimeResult) = try await (trending, popularM, popularTV, popularA, topRatedM, topRatedTV, topRatedA)
+                async let trendingAnime = AniListService.shared.fetchAnimeCatalog(.trending, limit: 20, tmdbService: tmdbService)
+                async let popularAnime = AniListService.shared.fetchAnimeCatalog(.popular, limit: 20, tmdbService: tmdbService)
+                async let topRatedAnime = AniListService.shared.fetchAnimeCatalog(.topRated, limit: 20, tmdbService: tmdbService)
+                async let airingAnime = AniListService.shared.fetchAnimeCatalog(.airing, limit: 50, tmdbService: tmdbService)
+                async let upcomingAnime = AniListService.shared.fetchAnimeCatalog(.upcoming, limit: 50, tmdbService: tmdbService)
+                
+                let (
+                    trendingResult,
+                    popularMoviesResult,
+                    nowPlayingMoviesResult,
+                    upcomingMoviesResult,
+                    popularTVResult,
+                    onTheAirTVResult,
+                    airingTodayTVResult,
+                    topRatedTVResult,
+                    topRatedMoviesResult,
+                    trendingAnimeResult,
+                    popularAnimeResult,
+                    topRatedAnimeResult,
+                    airingAnimeResult,
+                    upcomingAnimeResult
+                ) = try await (
+                    trending,
+                    popularM,
+                    nowPlayingM,
+                    upcomingM,
+                    popularTV,
+                    onTheAirTV,
+                    airingTodayTV,
+                    topRatedTV,
+                    topRatedM,
+                    trendingAnime,
+                    popularAnime,
+                    topRatedAnime,
+                    airingAnime,
+                    upcomingAnime
+                )
                 
                 await MainActor.run {
                     withAnimation(.easeInOut(duration: 0.5)) {
-                        self.trendingContent = contentFilter.filterSearchResults(trendingResult)
-                        self.popularMovies = contentFilter.filterMovies(popularMoviesResult)
-                        self.popularTVShows = contentFilter.filterTVShows(popularTVResult)
-                        self.popularAnime = contentFilter.filterTVShows(popularAnimeResult)
-                        self.topRatedMovies = contentFilter.filterMovies(topRatedMoviesResult)
-                        self.topRatedTVShows = contentFilter.filterTVShows(topRatedTVResult)
-                        self.topRatedAnime = contentFilter.filterTVShows(topRatedAnimeResult)
+                        var updated: [String: [TMDBSearchResult]] = [:]
+                        updated["trending"] = contentFilter.filterSearchResults(trendingResult)
+                        updated["popularMovies"] = contentFilter.filterMovies(popularMoviesResult).map { $0.asSearchResult }
+                        updated["nowPlayingMovies"] = contentFilter.filterMovies(nowPlayingMoviesResult).map { $0.asSearchResult }
+                        updated["upcomingMovies"] = contentFilter.filterMovies(upcomingMoviesResult).map { $0.asSearchResult }
+                        updated["popularTVShows"] = contentFilter.filterTVShows(popularTVResult).map { $0.asSearchResult }
+                        updated["onTheAirTV"] = contentFilter.filterTVShows(onTheAirTVResult).map { $0.asSearchResult }
+                        updated["airingTodayTV"] = contentFilter.filterTVShows(airingTodayTVResult).map { $0.asSearchResult }
+                        updated["topRatedTVShows"] = contentFilter.filterTVShows(topRatedTVResult).map { $0.asSearchResult }
+                        updated["topRatedMovies"] = contentFilter.filterMovies(topRatedMoviesResult).map { $0.asSearchResult }
+                        updated["trendingAnime"] = contentFilter.filterSearchResults(trendingAnimeResult)
+                        updated["popularAnime"] = contentFilter.filterSearchResults(popularAnimeResult)
+                        updated["topRatedAnime"] = contentFilter.filterSearchResults(topRatedAnimeResult)
+                        updated["airingAnime"] = contentFilter.filterSearchResults(airingAnimeResult)
+                        updated["upcomingAnime"] = contentFilter.filterSearchResults(upcomingAnimeResult)
                         
-                        self.heroContent = self.trendingContent.first { $0.backdropPath != nil } ?? self.trendingContent.first
+                        self.catalogResults = updated
+                        
+                        let heroPool = !(updated["trending"] ?? []).isEmpty ? (updated["trending"] ?? []) : updated.values.flatMap { $0 }
+                        self.heroContent = heroPool.first { $0.backdropPath != nil } ?? heroPool.first
                         self.isLoading = false
                         self.hasLoadedContent = true
                     }
