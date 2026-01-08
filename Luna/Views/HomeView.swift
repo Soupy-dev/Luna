@@ -4,6 +4,7 @@
 
 import SwiftUI
 import Kingfisher
+import Sora
 
 struct HomeView: View {
     @State private var showingSettings = false
