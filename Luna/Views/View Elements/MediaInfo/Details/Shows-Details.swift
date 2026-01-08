@@ -126,16 +126,8 @@ struct TVShowSeasonsSection: View {
             }
         }
         .sheet(isPresented: $showingSearchResults) {
-            // For anime, use the season-specific AniList title; otherwise use show name
-            let searchTitle: String
-            if isAnime, let episode = selectedEpisodeForSearch, let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
-                searchTitle = seasonTitle
-            } else {
-                searchTitle = tvShow?.name ?? "Unknown Show"
-            }
-            
             ModulesSearchResultsSheet(
-                mediaTitle: searchTitle,
+                mediaTitle: getSearchTitle(),
                 originalTitle: romajiTitle,
                 isMovie: false,
                 selectedEpisode: selectedEpisodeForSearch,
@@ -148,6 +140,14 @@ struct TVShowSeasonsSection: View {
         } message: {
             Text("You don't have any active services. Please go to the Services tab to download and activate services.")
         }
+    }
+    
+    private func getSearchTitle() -> String {
+        // For anime, use the season-specific AniList title; otherwise use show name
+        if isAnime, let episode = selectedEpisodeForSearch, let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+            return seasonTitle
+        }
+        return tvShow?.name ?? "Unknown Show"
     }
     
     @ViewBuilder
