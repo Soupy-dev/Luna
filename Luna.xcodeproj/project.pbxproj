@@ -302,7 +302,7 @@
 			isa = PBXGroup;
 			children = (
 				1375466F2E5F079000B29944 /* Progress */,
-				AA7777702F10000000AA7770 /* Trackers */,
+				AA9999902F10000000AA9990 /* Trackers */,
 			);
 			path = Tracking;
 			sourceTree = "<group>";
@@ -315,7 +315,7 @@
 			path = Progress;
 			sourceTree = "<group>";
 		};
-		AA7777702F10000000AA7770 /* Trackers */ = {
+		AA9999902F10000000AA9990 /* Trackers */ = {
 			isa = PBXGroup;
 			children = (
 				AA1111102F10000000AA1110 /* TrackerManager.swift */,
