@@ -32,7 +32,6 @@ struct MediaDetailView: View {
     @State private var isAnimeShow = false
     @State private var anilistEpisodes: [AniListEpisode]? = nil
     @State private var animeSeasonTitles: [Int: String]? = nil
-    @State private var currentSeasonTitle: String?
     @State private var hasLoadedContent = false
     
     @StateObject private var serviceManager = ServiceManager.shared
@@ -400,7 +399,6 @@ struct MediaDetailView: View {
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
                 animeEpisodes: anilistEpisodes,
                 animeSeasonTitles: animeSeasonTitles,
-                currentSeasonTitle: $currentSeasonTitle,
                 tmdbService: tmdbService
             )
         }

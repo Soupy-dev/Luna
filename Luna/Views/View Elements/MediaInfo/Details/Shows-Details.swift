@@ -16,13 +16,13 @@ struct TVShowSeasonsSection: View {
     @Binding var selectedEpisodeForSearch: TMDBEpisode?
     var animeEpisodes: [AniListEpisode]? = nil
     var animeSeasonTitles: [Int: String]? = nil
-    @Binding var currentSeasonTitle: String?
     let tmdbService: TMDBService
     
     @State private var isLoadingSeason = false
     @State private var showingSearchResults = false
     @State private var showingNoServicesAlert = false
     @State private var romajiTitle: String?
+    @State private var currentSeasonTitle: String?
     
     @StateObject private var serviceManager = ServiceManager.shared
     @AppStorage("horizontalEpisodeList") private var horizontalEpisodeList: Bool = false
