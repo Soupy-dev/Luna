@@ -10,20 +10,12 @@ import Kingfisher
 
 struct HomeView: View {
     @State private var showingSettings = false
-    @State private var catalogResults: [String: [TMDBSearchResult]] = [:]
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @State private var heroContent: TMDBSearchResult?
-    @State private var ambientColor: Color = Color.black
     @State private var isHoveringWatchNow = false
     @State private var isHoveringWatchlist = false
     
-    @State private var hasLoadedContent = false
-    @State private var continueWatchingItems: [ContinueWatchingItem] = []
-    @State private var heroLogoURL: String?
-    
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
     
+    @StateObject private var homeViewModel = HomeViewModel.shared
     @ObservedObject private var catalogManager = CatalogManager.shared
     @StateObject private var tmdbService = TMDBService.shared
     @StateObject private var contentFilter = TMDBContentFilter.shared
@@ -56,13 +48,13 @@ struct HomeView: View {
     private var homeContent: some View {
         ZStack {
             Group {
-                ambientColor
+                homeViewModel.ambientColor
             }
             .ignoresSafeArea(.all)
             
-            if isLoading {
+            if homeViewModel.isLoading {
                 loadingView
-            } else if let errorMessage = errorMessage {
+            } else if let errorMessage = homeViewModel.errorMessage {
                 errorView(errorMessage)
             } else {
                 mainScrollView
@@ -70,10 +62,10 @@ struct HomeView: View {
         }
         .navigationBarHidden(true)
         .onAppear {
-            if !hasLoadedContent {
-                loadContent()
+            if !homeViewModel.hasLoadedContent {
+                homeViewModel.loadContent(tmdbService: tmdbService, catalogManager: catalogManager, contentFilter: contentFilter)
             } else {
-                continueWatchingItems = ProgressManager.shared.getContinueWatchingItems()
+                homeViewModel.updateContinueWatchingItems()
             }
         }
         .onChangeComp(of: contentFilter.filterHorror) { _, _ in
@@ -140,9 +132,9 @@ struct HomeView: View {
     
     @ViewBuilder
     private var continueWatchingSection: some View {
-        if !continueWatchingItems.isEmpty {
+        if !homeViewModel.continueWatchingItems.isEmpty {
             ContinueWatchingSection(
-                items: continueWatchingItems,
+                items: homeViewModel.continueWatchingItems,
                 tmdbService: tmdbService
             )
         }
@@ -152,12 +144,12 @@ struct HomeView: View {
     private var heroSection: some View {
         ZStack(alignment: .bottom) {
             StretchyHeaderView(
-                backdropURL: heroContent?.fullBackdropURL ?? heroContent?.fullPosterURL,
-                isMovie: heroContent?.isMovie ?? true,
+                backdropURL: homeViewModel.heroContent?.fullBackdropURL ?? homeViewModel.heroContent?.fullPosterURL,
+                isMovie: homeViewModel.heroContent?.mediaType == "movie",
                 headerHeight: heroHeight,
                 minHeaderHeight: 300,
                 onAmbientColorExtracted: { color in
-                    ambientColor = color
+                    homeViewModel.ambientColor = color
                 }
             )
             
@@ -170,7 +162,7 @@ struct HomeView: View {
     private var heroGradientOverlay: some View {
         LinearGradient(
             gradient: Gradient(stops: [
-                .init(color: ambientColor.opacity(0.0), location: 0.0),
+                .init(color: homeViewModel.ambientColor.opacity(0.0), location: 0.0),
                 .init(color: ambientColor.opacity(0.4), location: 0.2),
                 .init(color: ambientColor.opacity(0.7), location: 0.6),
                 .init(color: ambientColor.opacity(1), location: 1.0)
@@ -212,7 +204,7 @@ struct HomeView: View {
                     }
                 }
                 
-                if let heroLogoURL = heroLogoURL {
+                if let heroLogoURL = homeViewModel.heroLogoURL {
                     KFImage(URL(string: heroLogoURL))
                         .placeholder {
                             heroTitleText(hero)
@@ -324,10 +316,10 @@ struct HomeView: View {
         VStack(spacing: 0) {
             // Display all enabled catalogs
             ForEach(enabledCatalogs) { catalog in
-                if let items = catalogResults[catalog.id], !items.isEmpty {
+                if let items = homeViewModel.catalogResults[catalog.id], !items.isEmpty {
                     let limitedItems = Array(items.prefix(15))
                     let displayItems = catalog.id == "trending"
-                        ? limitedItems.filter { $0.id != heroContent?.id }
+                        ? limitedItems.filter { $0.id != homeViewModel.heroContent?.id }
                         : limitedItems
                     
                     MediaSection(
@@ -342,121 +334,8 @@ struct HomeView: View {
         .background(Color.clear)
     }
     
-    private func loadContent() {
-        isLoading = true
-        errorMessage = nil
-        continueWatchingItems = ProgressManager.shared.getContinueWatchingItems()
-        
-        Task {
-            do {
-                async let trending = tmdbService.getTrending()
-                async let popularM = tmdbService.getPopularMovies()
-                async let nowPlayingM = tmdbService.getNowPlayingMovies()
-                async let upcomingM = tmdbService.getUpcomingMovies()
-                async let popularTV = tmdbService.getPopularTVShows()
-                async let onTheAirTV = tmdbService.getOnTheAirTVShows()
-                async let airingTodayTV = tmdbService.getAiringTodayTVShows()
-                async let topRatedTV = tmdbService.getTopRatedTVShows()
-                async let topRatedM = tmdbService.getTopRatedMovies()
-                
-                async let trendingAnime = AniListService.shared.fetchAnimeCatalog(.trending, limit: 20, tmdbService: tmdbService)
-                async let popularAnime = AniListService.shared.fetchAnimeCatalog(.popular, limit: 20, tmdbService: tmdbService)
-                async let topRatedAnime = AniListService.shared.fetchAnimeCatalog(.topRated, limit: 20, tmdbService: tmdbService)
-                async let airingAnime = AniListService.shared.fetchAnimeCatalog(.airing, limit: 50, tmdbService: tmdbService)
-                async let upcomingAnime = AniListService.shared.fetchAnimeCatalog(.upcoming, limit: 50, tmdbService: tmdbService)
-                
-                let (
-                    trendingResult,
-                    popularMoviesResult,
-                    nowPlayingMoviesResult,
-                    upcomingMoviesResult,
-                    popularTVResult,
-                    onTheAirTVResult,
-                    airingTodayTVResult,
-                    topRatedTVResult,
-                    topRatedMoviesResult,
-                    trendingAnimeResult,
-                    popularAnimeResult,
-                    topRatedAnimeResult,
-                    airingAnimeResult,
-                    upcomingAnimeResult
-                ) = try await (
-                    trending,
-                    popularM,
-                    nowPlayingM,
-                    upcomingM,
-                    popularTV,
-                    onTheAirTV,
-                    airingTodayTV,
-                    topRatedTV,
-                    topRatedM,
-                    trendingAnime,
-                    popularAnime,
-                    topRatedAnime,
-                    airingAnime,
-                    upcomingAnime
-                )
-                
-                await MainActor.run {
-                    withAnimation(.easeInOut(duration: 0.5)) {
-                        var updated: [String: [TMDBSearchResult]] = [:]
-                        updated["trending"] = contentFilter.filterSearchResults(trendingResult)
-                        updated["popularMovies"] = contentFilter.filterMovies(popularMoviesResult).map { $0.asSearchResult }
-                        updated["nowPlayingMovies"] = contentFilter.filterMovies(nowPlayingMoviesResult).map { $0.asSearchResult }
-                        updated["upcomingMovies"] = contentFilter.filterMovies(upcomingMoviesResult).map { $0.asSearchResult }
-                        updated["popularTVShows"] = contentFilter.filterTVShows(popularTVResult).map { $0.asSearchResult }
-                        updated["onTheAirTV"] = contentFilter.filterTVShows(onTheAirTVResult).map { $0.asSearchResult }
-                        updated["airingTodayTV"] = contentFilter.filterTVShows(airingTodayTVResult).map { $0.asSearchResult }
-                        updated["topRatedTVShows"] = contentFilter.filterTVShows(topRatedTVResult).map { $0.asSearchResult }
-                        updated["topRatedMovies"] = contentFilter.filterMovies(topRatedMoviesResult).map { $0.asSearchResult }
-                        updated["trendingAnime"] = contentFilter.filterSearchResults(trendingAnimeResult)
-                        updated["popularAnime"] = contentFilter.filterSearchResults(popularAnimeResult)
-                        updated["topRatedAnime"] = contentFilter.filterSearchResults(topRatedAnimeResult)
-                        updated["airingAnime"] = contentFilter.filterSearchResults(airingAnimeResult)
-                        updated["upcomingAnime"] = contentFilter.filterSearchResults(upcomingAnimeResult)
-                        
-                        self.catalogResults = updated
-                        
-                        let heroPool = !(updated["trending"] ?? []).isEmpty ? (updated["trending"] ?? []) : updated.values.flatMap { $0 }
-                        self.heroContent = heroPool.first { $0.backdropPath != nil } ?? heroPool.first
-                        self.isLoading = false
-                        self.hasLoadedContent = true
-                    }
-                }
-                
-                if let hero = await MainActor.run(body: { self.heroContent }) {
-                    await loadHeroLogo(for: hero)
-                }
-            } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.isLoading = false
-                    Logger.shared.log("Error loading content: \(error)", type: "Error")
-                }
-            }
-        }
-    }
-    
-    private func loadHeroLogo(for hero: TMDBSearchResult) async {
-        do {
-            let images: TMDBImagesResponse
-            if hero.isMovie {
-                images = try await tmdbService.getMovieImages(id: hero.id, preferredLanguage: selectedLanguage)
-            } else {
-                images = try await tmdbService.getTVShowImages(id: hero.id, preferredLanguage: selectedLanguage)
-            }
-            
-            if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
-                await MainActor.run {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        self.heroLogoURL = logo.fullURL
-                    }
-                }
-            }
-        } catch {
-            Logger.shared.log("Error loading hero logo: \(error)", type: "Warning")
-        }
-    }
+
+
 }
 
 struct MediaSection: View {
