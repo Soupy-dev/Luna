@@ -681,13 +681,7 @@ struct ContinueWatchingCard: View {
                     genreIds: nil
                 )
                 
-                let resumeHint = item.isMovie ? nil : EpisodeResumeHint(
-                    showId: item.tmdbId,
-                    season: item.seasonNumber ?? 1,
-                    episode: item.episodeNumber ?? 1
-                )
-                
-                MediaDetailView(searchResult: searchResult, resumeHint: resumeHint, autoPlay: false)
+                MediaDetailView(searchResult: searchResult)
             }
         }
         .task {
@@ -768,7 +762,7 @@ struct ContinueWatchingCard: View {
         }
     }
     
-    private func detectAnime(from detail: TMDBTVShowWithSeasons) -> Bool {
+    private func detectAnime(from detail: TMDBTVShowDetail) -> Bool {
         let genreAnime = detail.genres.contains { $0.id == 16 }
         let asianCountries: Set<String> = ["JP", "CN", "KR", "TW"]
         let hasAsianOrigin = (detail.originCountry ?? []).contains { asianCountries.contains($0) }
