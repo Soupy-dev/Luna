@@ -648,7 +648,7 @@ struct ModulesSearchResultsSheet: View {
             return
         }
         
-        let searchQuery = mediaTitle
+        let searchQuery = displayTitle
         let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != mediaTitle.lowercased() } ?? false
         
         Task {
