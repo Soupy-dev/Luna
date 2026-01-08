@@ -558,7 +558,6 @@
 				13B6F3472EA4C82600DECD2B /* Info.plist */,
 				1324E7B22E940BD70036B5F5 /* Player */,
 				13F5B5902E73090000565E75 /* Models */,
-				AA9999902F10000000AA9990 /* ViewModels */,
 				1375466E2E5F078B00B29944 /* Tracking */,
 				13F072972E4B2D9200EF90EB /* TMDB */,
 				13F072952E4B2D9100EF90EB /* Algorithm */,
@@ -715,6 +714,9 @@
 			path = Models;
 			sourceTree = "<group>";
 		};
+		/* Ensure files resolve under the Luna folder */
+		path = Luna;
+		sourceTree = "<group>";
 		13F072BD2E4B2ED600EF90EB /* Services */ = {
 			isa = PBXGroup;
 			children = (
