@@ -660,6 +660,7 @@ struct ContinueWatchingCard: View {
     @State private var title: String = ""
     @State private var isHovering: Bool = false
     @State private var isLoaded: Bool = false
+    @State private var showingServices = false
     
     private var cardWidth: CGFloat { isTvOS ? 380 : 260 }
     private var cardHeight: CGFloat { isTvOS ? 220 : 146 }
@@ -667,7 +668,9 @@ struct ContinueWatchingCard: View {
     private var logoMaxHeight: CGFloat { isTvOS ? 60 : 40 }
     
     var body: some View {
-        NavigationLink(destination: destinationView) {
+        Button(action: {
+            showingServices = true
+        }) {
             ZStack(alignment: .bottomLeading) {
                 ZStack {
                     if let backdropURL = backdropURL {
@@ -759,6 +762,29 @@ struct ContinueWatchingCard: View {
         }, else: { view in
             view.buttonStyle(PlainButtonStyle())
         })
+        .sheet(isPresented: $showingServices) {
+            if isLoaded {
+                ModulesSearchResultsSheet(
+                    mediaTitle: title,
+                    originalTitle: nil,
+                    isMovie: item.isMovie,
+                    selectedEpisode: item.isMovie ? nil : TMDBEpisode(
+                        id: 0,
+                        name: "",
+                        overview: nil,
+                        stillPath: nil,
+                        episodeNumber: item.episodeNumber ?? 1,
+                        seasonNumber: item.seasonNumber ?? 1,
+                        airDate: nil,
+                        runtime: nil,
+                        voteAverage: 0,
+                        voteCount: 0
+                    ),
+                    tmdbId: item.tmdbId,
+                    animeSeasonTitle: nil
+                )
+            }
+        }
         .task {
             await loadMediaDetails()
         }
@@ -790,29 +816,6 @@ struct ContinueWatchingCard: View {
                     .font(isTvOS ? .largeTitle : .title)
                     .foregroundColor(.gray.opacity(0.5))
             )
-    }
-    
-    @ViewBuilder
-    private var destinationView: some View {
-        if isLoaded {
-            MediaDetailView(searchResult: TMDBSearchResult(
-                id: item.tmdbId,
-                mediaType: item.isMovie ? "movie" : "tv",
-                title: item.isMovie ? title : nil,
-                name: item.isMovie ? nil : title,
-                overview: nil,
-                posterPath: nil,
-                backdropPath: nil,
-                releaseDate: nil,
-                firstAirDate: nil,
-                voteAverage: nil,
-                popularity: 0,
-                adult: false,
-                genreIds: nil
-            ))
-        } else {
-            ProgressView()
-        }
     }
     
     private func loadMediaDetails() async {
