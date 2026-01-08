@@ -380,7 +380,7 @@ struct TVShowSeasonsSection: View {
                     await MainActor.run {
                         // Update current season title for anime
                         if let seasonTitle = animeSeasonTitles?[season.seasonNumber] {
-                            currentSeasonTitle.wrappedValue = seasonTitle
+                            self.currentSeasonTitle = seasonTitle
                         }
                         self.seasonDetail = detail
                         self.isLoadingSeason = false
@@ -392,7 +392,7 @@ struct TVShowSeasonsSection: View {
                     // For regular TV shows, fetch from TMDB
                     let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShowId, seasonNumber: season.seasonNumber)
                     await MainActor.run {
-                        currentSeasonTitle.wrappedValue = nil
+                        self.currentSeasonTitle = nil
                         self.seasonDetail = detail
                         self.isLoadingSeason = false
                         if let firstEpisode = detail.episodes.first {
