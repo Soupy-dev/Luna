@@ -580,37 +580,37 @@ struct ContinueWatchingCard: View {
                     .lineLimit(1)
                     .multilineTextAlignment(.center)
                     .frame(width: cardWidth)
-                        
-                        Spacer()
-                        if !item.isMovie, let season = item.seasonNumber, let episode = item.episodeNumber {
-                            Text("S\\(season)E\\(episode)")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        Spacer()
-                        
-                        Text(item.remainingTime)
+                
+                // Episode info and remaining time
+                HStack(spacing: isTvOS ? 8 : 6) {
+                    if !item.isMovie, let season = item.seasonNumber, let episode = item.episodeNumber {
+                        Text("S\(season)E\(episode)")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
-                    .frame(width: cardWidth)
                     
-                    // Progress bar
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 1)
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 2)
-                            
-                            RoundedRectangle(cornerRadius: 1)
-                                .fill(Color.accentColor)
-                                .frame(width: geometry.size.width * item.progress, height: 2)
-                        }
-                    }
-                    .frame(height: 2)
-                    .frame(width: cardWidth)
+                    Spacer()
+                    
+                    Text(item.remainingTime)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                 }
+                .frame(width: cardWidth)
+                
+                // Progress bar
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(height: 2)
+                        
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(Color.accentColor)
+                            .frame(width: geometry.size.width * item.progress, height: 2)
+                    }
+                }
+                .frame(height: 2)
+                .frame(width: cardWidth)
             }
             .frame(width: cardWidth)
             .clipShape(RoundedRectangle(cornerRadius: isTvOS ? 12 : 8))
