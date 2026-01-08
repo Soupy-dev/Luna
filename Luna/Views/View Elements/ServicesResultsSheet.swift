@@ -1160,17 +1160,19 @@ struct ModulesSearchResultsSheet: View {
             let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
             let inAppPlayer = (inAppRaw == "mpv") ? "mpv" : "Normal"
             
-            // Record service usage
-            if isMovie {
-                ProgressManager.shared.recordMovieServiceInfo(movieId: tmdbId, serviceId: service.id, href: serviceHref)
-            } else if let episode = selectedEpisode {
-                ProgressManager.shared.recordEpisodeServiceInfo(
-                    showId: tmdbId,
-                    seasonNumber: episode.seasonNumber,
-                    episodeNumber: episode.episodeNumber,
-                    serviceId: service.id,
-                    href: serviceHref
-                )
+            // Record service usage (async to avoid blocking player launch)
+            Task {
+                if self.isMovie {
+                    ProgressManager.shared.recordMovieServiceInfo(movieId: self.tmdbId, serviceId: service.id, href: serviceHref)
+                } else if let episode = self.selectedEpisode {
+                    ProgressManager.shared.recordEpisodeServiceInfo(
+                        showId: self.tmdbId,
+                        seasonNumber: episode.seasonNumber,
+                        episodeNumber: episode.episodeNumber,
+                        serviceId: service.id,
+                        href: serviceHref
+                    )
+                }
             }
             
             if inAppPlayer == "mpv" {
