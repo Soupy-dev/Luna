@@ -8,8 +8,8 @@
 import Foundation
 import Combine
 
-final class ScheduleViewModel: ObservableObject {
-    static let shared = ScheduleViewModel()
+public final class ScheduleViewModel: ObservableObject {
+    public static let shared = ScheduleViewModel()
     
     @Published var isLoading = true
     @Published var errorMessage: String?

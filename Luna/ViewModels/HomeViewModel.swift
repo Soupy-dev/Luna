@@ -9,8 +9,8 @@ import Foundation
 import SwiftUI
 import Combine
 
-final class HomeViewModel: ObservableObject {
-    static let shared = HomeViewModel()
+public final class HomeViewModel: ObservableObject {
+    public static let shared = HomeViewModel()
     
     @Published var catalogResults: [String: [TMDBSearchResult]] = [:]
     @Published var isLoading = true
