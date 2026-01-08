@@ -33,6 +33,7 @@ struct MediaDetailView: View {
     @State private var anilistEpisodes: [AniListEpisode]? = nil
     @State private var animeSeasonTitles: [Int: String]? = nil
     @State private var currentSeasonTitle: String?
+    @State private var hasLoadedContent = false
     
     @StateObject private var serviceManager = ServiceManager.shared
     @ObservedObject private var libraryManager = LibraryManager.shared
@@ -107,7 +108,9 @@ struct MediaDetailView: View {
         }
 #endif
         .onAppear {
-            loadMediaDetails()
+            if !hasLoadedContent {
+                loadMediaDetails()
+            }
             updateBookmarkStatus()
         }
         .onChangeComp(of: libraryManager.collections) { _, _ in
@@ -581,12 +584,14 @@ struct MediaDetailView: View {
                         }
                         self.selectedEpisodeForSearch = nil
                         self.isLoading = false
+                        self.hasLoadedContent = true
                     }
                 }
             } catch {
                 await MainActor.run {
                     self.errorMessage = error.localizedDescription
                     self.isLoading = false
+                    self.hasLoadedContent = true
                 }
             }
         }
