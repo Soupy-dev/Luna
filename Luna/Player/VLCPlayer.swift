@@ -22,7 +22,9 @@ struct VLCPlayer: UIViewControllerRepresentable {
         let controller = VLCPlayerViewController()
         controller.playerState = playerState
         controller.mediaInfo = mediaInfo
-        controller.load(url: url, headers: headers, preset: preset)
+        controller.pendingURL = url
+        controller.pendingHeaders = headers
+        controller.pendingPreset = preset
         return controller
     }
     
@@ -60,6 +62,10 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     private let vlcRenderer: VLCRenderer
     var playerState: VLCPlayerState?
     var mediaInfo: MediaInfo?
+    
+    var pendingURL: URL?
+    var pendingHeaders: [String: String]?
+    var pendingPreset: PlayerPreset?
     
     private let controlsContainer = UIView()
     private let topControlsView = UIView()
@@ -109,6 +115,28 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         }
     }
     
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        // Load media after view is fully visible and VLC is initialized
+        if let url = pendingURL {
+            load(url: url, headers: pendingHeaders, preset: pendingPreset)
+            pendingURL = nil
+            pendingHeaders = nil
+            pendingPreset = nil
+        }
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        
+        // Ensure VLC rendering view has proper frame
+        let renderingView = vlcRenderer.getRenderingView()
+        if renderingView.bounds.size != view.bounds.size {
+            Logger.shared.log("[VLCPlayer] Updating VLC view frame: \(view.bounds)", type: "Stream")
+        }
+    }
+    
     private func setupUI() {
         // Main rendering view
         let renderingView = vlcRenderer.getRenderingView()
@@ -149,6 +177,7 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         let backButton = UIButton(type: .system)
         backButton.setTitle("← Back", for: .normal)
         backButton.tintColor = .white
+        backButton.addTarget(self, action: #selector(backButtonTapped), for: .touchUpInside)
         topControlsView.addSubview(backButton)
         backButton.translatesAutoresizingMaskIntoConstraints = false
         backButton.leadingAnchor.constraint(equalTo: topControlsView.leadingAnchor, constant: 12).isActive = true
@@ -284,6 +313,15 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         let rightSwipe = UISwipeGestureRecognizer(target: self, action: #selector(handleRightSwipe))
         rightSwipe.direction = .right
         view.addGestureRecognizer(rightSwipe)
+    }
+    
+    @objc private func backButtonTapped() {
+        vlcRenderer.stop()
+        if presentingViewController != nil {
+            dismiss(animated: true, completion: nil)
+        } else {
+            view.window?.rootViewController?.dismiss(animated: true, completion: nil)
+        }
     }
     
     @objc private func handleTap() {

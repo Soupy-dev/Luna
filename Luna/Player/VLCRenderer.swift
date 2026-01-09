@@ -127,14 +127,25 @@ final class VLCRenderer: NSObject {
     // MARK: - Media Loading
     
     func loadMedia(url: URL, headers: [String: String]? = nil, preset: PlayerPreset? = nil) throws {
-        guard isRunning else { throw RendererError.vlcInitializationFailed }
-        guard let mediaPlayer = mediaPlayer else { throw RendererError.vlcInitializationFailed }
+        Logger.shared.log("[VLCRenderer.loadMedia] Starting - isRunning: \(isRunning)", type: "Stream")
+        guard isRunning else {
+            Logger.shared.log("[VLCRenderer.loadMedia] ERROR: Renderer not running", type: "Error")
+            throw RendererError.vlcInitializationFailed
+        }
+        guard let mediaPlayer = mediaPlayer else {
+            Logger.shared.log("[VLCRenderer.loadMedia] ERROR: mediaPlayer is nil", type: "Error")
+            throw RendererError.vlcInitializationFailed
+        }
+        
+        Logger.shared.log("[VLCRenderer.loadMedia] URL: \(url.absoluteString)", type: "Stream")
         
         currentURL = url
         currentHeaders = headers
         currentPreset = preset
         
         let media = VLCMedia(url: url)
+        
+        Logger.shared.log("[VLCRenderer.loadMedia] VLCMedia created", type: "Stream")
         
         // Configure network options
         media.addOption(":http-reconnect=true")

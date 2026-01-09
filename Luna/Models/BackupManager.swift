@@ -277,13 +277,123 @@ class BackupManager {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             
-            let backupData = try decoder.decode(BackupData.self, from: jsonData)
+            // Try to decode the backup data
+            // If it fails completely, try manual parsing to extract what we can
+            let backupData: BackupData
+            
+            do {
+                backupData = try decoder.decode(BackupData.self, from: jsonData)
+                Logger.shared.log("Backup decoded successfully", type: "Info")
+            } catch {
+                Logger.shared.log("Standard decode failed, attempting lenient restore: \(error.localizedDescription)", type: "Info")
+                
+                // Try to parse as much as we can manually
+                guard let backupData = tryLenientDecode(from: jsonData) else {
+                    Logger.shared.log("Lenient decode also failed", type: "Error")
+                    return false
+                }
+                
+                Logger.shared.log("Lenient decode succeeded with partial data", type: "Info")
+                return applyBackupData(backupData)
+            }
             
             return applyBackupData(backupData)
         } catch {
             Logger.shared.log("Failed to restore backup: \(error.localizedDescription)", type: "Error")
             return false
         }
+    }
+    
+    /// Attempts to decode backup data leniently, accepting whatever fields are valid
+    private func tryLenientDecode(from jsonData: Data) -> BackupData? {
+        guard let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
+            return nil
+        }
+        
+        // Parse createdDate - required field
+        let createdDate: Date
+        if let dateString = json["createdDate"] as? String {
+            let formatter = ISO8601DateFormatter()
+            createdDate = formatter.date(from: dateString) ?? Date()
+        } else {
+            createdDate = Date()
+        }
+        
+        // Extract optional fields with defaults
+        let version = json["version"] as? String ?? "1.0"
+        let accentColor = json["accentColor"] as? Data
+        let tmdbLanguage = json["tmdbLanguage"] as? String ?? "en-US"
+        let selectedAppearance = json["selectedAppearance"] as? String ?? "system"
+        let enableSubtitlesByDefault = json["enableSubtitlesByDefault"] as? Bool ?? false
+        let defaultSubtitleLanguage = json["defaultSubtitleLanguage"] as? String ?? "eng"
+        let preferredAnimeAudioLanguage = json["preferredAnimeAudioLanguage"] as? String ?? "jpn"
+        let playerChoice = json["playerChoice"] as? String ?? "mpv"
+        let showScheduleTab = json["showScheduleTab"] as? Bool ?? true
+        let showLocalScheduleTime = json["showLocalScheduleTime"] as? Bool ?? true
+        
+        // Try to decode complex objects individually
+        var collections: [BackupCollection] = []
+        if let collectionsData = json["collections"] as? [[String: Any]] {
+            for collectionDict in collectionsData {
+                if let collectionJSON = try? JSONSerialization.data(withJSONObject: collectionDict),
+                   let collection = try? JSONDecoder().decode(BackupCollection.self, from: collectionJSON) {
+                    collections.append(collection)
+                }
+            }
+        }
+        
+        var progressData = ProgressData()
+        if let progressDict = json["progressData"] as? [String: Any],
+           let progressJSON = try? JSONSerialization.data(withJSONObject: progressDict),
+           let decoded = try? JSONDecoder().decode(ProgressData.self, from: progressJSON) {
+            progressData = decoded
+        }
+        
+        var trackerState = TrackerState()
+        if let trackerDict = json["trackerState"] as? [String: Any],
+           let trackerJSON = try? JSONSerialization.data(withJSONObject: trackerDict),
+           let decoded = try? JSONDecoder().decode(TrackerState.self, from: trackerJSON) {
+            trackerState = decoded
+        }
+        
+        var catalogs: [Catalog] = []
+        if let catalogsData = json["catalogs"] as? [[String: Any]] {
+            for catalogDict in catalogsData {
+                if let catalogJSON = try? JSONSerialization.data(withJSONObject: catalogDict),
+                   let catalog = try? JSONDecoder().decode(Catalog.self, from: catalogJSON) {
+                    catalogs.append(catalog)
+                }
+            }
+        }
+        
+        var services: [BackupService] = []
+        if let servicesData = json["services"] as? [[String: Any]] {
+            for serviceDict in servicesData {
+                if let serviceJSON = try? JSONSerialization.data(withJSONObject: serviceDict),
+                   let service = try? JSONDecoder().decode(BackupService.self, from: serviceJSON) {
+                    services.append(service)
+                }
+            }
+        }
+        
+        return BackupData(
+            version: version,
+            createdDate: createdDate,
+            accentColor: accentColor,
+            tmdbLanguage: tmdbLanguage,
+            selectedAppearance: selectedAppearance,
+            enableSubtitlesByDefault: enableSubtitlesByDefault,
+            defaultSubtitleLanguage: defaultSubtitleLanguage,
+            preferredAnimeAudioLanguage: preferredAnimeAudioLanguage,
+            playerChoice: playerChoice,
+            showScheduleTab: showScheduleTab,
+            showLocalScheduleTime: showLocalScheduleTime,
+            collections: collections,
+            progressData: progressData,
+            trackerState: trackerState,
+            catalogs: catalogs,
+            services: services
+        )
     }
     
     /// Applies backup data to all managers and UserDefaults
