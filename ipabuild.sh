@@ -43,7 +43,18 @@ if [ -d "DerivedData$PLATFORM" ]; then
     rm -rf "DerivedData$PLATFORM"
 fi
 
-xcodebuild -workspace "$WORKING_LOCATION/$APPLICATION_NAME.xcworkspace" \
+# Use workspace if it exists (CocoaPods), otherwise use project
+if [ -f "$WORKING_LOCATION/$APPLICATION_NAME.xcworkspace/contents.xcworkspacedata" ]; then
+    echo "Building with workspace (CocoaPods detected)"
+    BUILD_TARGET="-workspace"
+    BUILD_FILE="$WORKING_LOCATION/$APPLICATION_NAME.xcworkspace"
+else
+    echo "Building with project (no CocoaPods)"
+    BUILD_TARGET="-project"
+    BUILD_FILE="$WORKING_LOCATION/$APPLICATION_NAME.xcodeproj"
+fi
+
+xcodebuild $BUILD_TARGET "$BUILD_FILE" \
     -scheme "$APPLICATION_NAME" \
     -configuration Release \
     -derivedDataPath "$WORKING_LOCATION/build/DerivedData$PLATFORM" \
