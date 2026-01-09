@@ -147,16 +147,13 @@ struct TVShowSeasonsSection: View {
         }
         .sheet(isPresented: $showingDownloadSheet) {
             if let episode = currentDownloadEpisode, let show = tvShow {
-                ModulesSearchResultsSheet(
-                    mediaTitle: getSearchTitle(),
-                    originalTitle: romajiTitle,
-                    isMovie: false,
-                    selectedEpisode: episode,
-                    tmdbId: show.id,
-                    animeSeasonTitle: isAnime ? "anime" : nil,
-                    posterPath: show.posterPath,
-                    isDownload: true,
-                    onDownloadSelected: { title, url, headers in
+                DownloadEpisodeSheet(
+                    episode: episode,
+                    show: show,
+                    searchTitle: getSearchTitle(),
+                    romajiTitle: romajiTitle,
+                    isAnime: isAnime,
+                    onDownloadSelected: { url in
                         DownloadManager.shared.addEpisodeDownload(
                             url: url,
                             showId: show.id,

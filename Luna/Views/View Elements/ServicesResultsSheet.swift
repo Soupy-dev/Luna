@@ -87,10 +87,9 @@ struct ModulesSearchResultsSheet: View {
     let tmdbId: Int
     let animeSeasonTitle: String?
     let posterPath: String?
-    let isDownload: Bool = false
-    let onDownloadSelected: ((String, URL, [String: String]?) -> Void)? = nil
     
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.downloadMode) private var downloadMode
     @StateObject private var viewModel = ModulesSearchResultsViewModel()
     @StateObject private var serviceManager = ServiceManager.shared
     @StateObject private var algorithmManager = AlgorithmManager.shared
@@ -1139,7 +1138,7 @@ struct ModulesSearchResultsSheet: View {
             }
             
             // If in download mode, call the download callback instead of playing
-            if isDownload, let onDownloadSelected = onDownloadSelected {
+            if downloadMode.isEnabled {
                 let serviceURL = service.metadata.baseUrl
                 var finalHeaders: [String: String] = [
                     "Origin": serviceURL,
@@ -1157,7 +1156,7 @@ struct ModulesSearchResultsSheet: View {
                     }
                 }
                 
-                onDownloadSelected(mediaTitle, streamURL, finalHeaders)
+                downloadMode.onDownloadSelected(streamURL, finalHeaders)
                 Logger.shared.log("Download selected for: \(mediaTitle)", type: "Download")
                 return
             }

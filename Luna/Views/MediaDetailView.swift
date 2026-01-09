@@ -139,20 +139,14 @@ struct MediaDetailView: View {
         }
         .sheet(isPresented: $showingDownloadSheet) {
             if let movieDetail = movieDetail {
-                ModulesSearchResultsSheet(
-                    mediaTitle: movieDetail.title,
-                    originalTitle: romajiTitle,
-                    isMovie: true,
-                    selectedEpisode: nil,
-                    tmdbId: movieDetail.id,
-                    animeSeasonTitle: nil,
-                    posterPath: movieDetail.posterPath,
-                    isDownload: true,
-                    onDownloadSelected: { title, url, headers in
+                DownloadMovieSheet(
+                    movie: movieDetail,
+                    romajiTitle: romajiTitle,
+                    onDownloadSelected: { url in
                         DownloadManager.shared.addMovieDownload(
                             url: url,
                             movieId: movieDetail.id,
-                            movieTitle: title,
+                            movieTitle: movieDetail.title,
                             posterURL: movieDetail.fullPosterURL
                         )
                         showingDownloadSheet = false
