@@ -26,7 +26,7 @@ class Logger: @unchecked Sendable {
     private init() {
         // Use Documents folder for persistent logs (easier to access)
         let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        logFileURL = documentsURL.appendingPathComponent("vlc-logs.txt")
+        logFileURL = documentsURL.appendingPathComponent("player-logs.txt")
     }
     
     func log(_ message: String, type: String = "General") {
