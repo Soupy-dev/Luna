@@ -2,7 +2,7 @@
 //  BackupManagementView.swift
 //  Luna
 //
-//  Created by Copilot on 05/01/2026.
+//  Created by Soupy-dev on 05/01/2026.
 //
 
 import SwiftUI
