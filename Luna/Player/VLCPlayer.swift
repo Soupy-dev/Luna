@@ -431,7 +431,7 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     }
     
     func renderer(_ renderer: VLCRenderer, getSubtitleStyle: Void) -> SubtitleStyle {
-        return SubtitleStyle(fontSize: 16, color: .white, strokeColor: .black, strokeWidth: 1.5)
+        return SubtitleStyle(foregroundColor: .white, strokeColor: .black, strokeWidth: 1.5, fontSize: 16.0, isVisible: true)
     }
     
     func renderer(_ renderer: VLCRenderer, subtitleTrackDidChange trackId: Int) {}
