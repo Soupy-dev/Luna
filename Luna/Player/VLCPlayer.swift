@@ -458,9 +458,9 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         var lastTime: Double?
         
         switch mediaInfo {
-        case .movie(let id, let title):
+        case .movie(let id, let title, _):
             lastTime = ProgressManager.shared.getMovieCurrentTime(movieId: id, title: title)
-        case .episode(let showId, let seasonNumber, let episodeNumber):
+        case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
             lastTime = ProgressManager.shared.getEpisodeCurrentTime(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
         }
         
