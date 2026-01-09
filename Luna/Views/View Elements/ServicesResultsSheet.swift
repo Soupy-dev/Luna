@@ -142,16 +142,24 @@ struct ModulesSearchResultsSheet: View {
                     .fontWeight(.semibold)
                 
                 if let episode = selectedEpisode, !episode.name.isEmpty {
-                    HStack {
-                        Text(episode.name)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(episodeSeasonInfo)
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .cornerRadius(8)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(episode.name)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Spacer()
+                            Text(episodeSeasonInfo)
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .cornerRadius(8)
+                        }
+                        
+                        if let overview = episode.overview, !overview.isEmpty {
+                            Text(overview)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 
