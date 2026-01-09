@@ -55,9 +55,6 @@ fi
 # Create archive (required for proper IPA structure)
 ARCHIVE_PATH="$WORKING_LOCATION/build/$APPLICATION_NAME$OUTPUT_SUFFIX.xcarchive"
 
-# Use xcconfig to ensure bundle identifier and build settings are loaded
-XCCONFIG="$WORKING_LOCATION/Build.xcconfig"
-
 xcodebuild archive \
     $XCODE_PROJECT \
     -scheme "$APPLICATION_NAME" \
@@ -65,7 +62,6 @@ xcodebuild archive \
     -archivePath "$ARCHIVE_PATH" \
     -destination "$XCODE_DESTINATION" \
     -sdk "$SDK" \
-    -xcconfig "$XCCONFIG" \
     CODE_SIGN_IDENTITY="" \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGNING_ALLOWED=NO \
