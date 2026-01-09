@@ -16,14 +16,10 @@ struct EpisodeCell: View {
     let onTap: () -> Void
     let onMarkWatched: () -> Void
     let onResetProgress: () -> Void
-    let onDownload: (() -> Void)?
     
     @State private var isWatched: Bool = false
+    @State private var progressValue: Double = 0
     @AppStorage("horizontalEpisodeList") private var horizontalEpisodeList: Bool = false
-    
-    private var episodeKey: String {
-        "episode_\(episode.seasonNumber)_\(episode.episodeNumber)"
-    }
     
     var body: some View {
         if horizontalEpisodeList {
@@ -52,10 +48,10 @@ struct EpisodeCell: View {
                         .frame(width: 240, height: 135)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     
-                    if progress > 0 && progress < 0.95 {
+                    if progressValue > 0 && progressValue < 0.85 {
                         VStack {
                             Spacer()
-                            ProgressView(value: progress)
+                            ProgressView(value: progressValue)
                                 .progressViewStyle(LinearProgressViewStyle(tint: .accentColor))
                                 .frame(height: 3)
                                 .padding(.horizontal, 4)
@@ -63,6 +59,19 @@ struct EpisodeCell: View {
                         }
                         .frame(width: 240, height: 135)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+
+                    if isWatched {
+                        HStack {
+                            Spacer()
+                            VStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.blue)
+                                    .shadow(radius: 2)
+                                Spacer()
+                            }
+                        }
+                        .padding(6)
                     }
                 }
                 
@@ -120,6 +129,7 @@ struct EpisodeCell: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                             .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
                             .multilineTextAlignment(.leading)
                     }
                 }
@@ -131,7 +141,16 @@ struct EpisodeCell: View {
             episodeContextMenu
         }
         .onAppear {
+            progressValue = progress
             loadEpisodeProgress()
+        }
+        .onReceive(ProgressManager.shared.$episodeProgressList) { _ in
+            refreshProgressState()
+            progressValue = ProgressManager.shared.getEpisodeProgress(
+                showId: showId,
+                seasonNumber: episode.seasonNumber,
+                episodeNumber: episode.episodeNumber
+            )
         }
         .preferredColorScheme(.dark)
     }
@@ -155,10 +174,10 @@ struct EpisodeCell: View {
                         .frame(width: 120, height: 68)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     
-                    if progress > 0 && progress < 0.95 {
+                    if progressValue > 0 && progressValue < 0.85 {
                         VStack {
                             Spacer()
-                            ProgressView(value: progress)
+                            ProgressView(value: progressValue)
                                 .progressViewStyle(LinearProgressViewStyle(tint: .accentColor))
                                 .frame(height: 3)
                                 .padding(.horizontal, 4)
@@ -166,6 +185,19 @@ struct EpisodeCell: View {
                         }
                         .frame(width: 120, height: 68)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+
+                    if isWatched {
+                        HStack {
+                            Spacer()
+                            VStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.blue)
+                                    .shadow(radius: 2)
+                                Spacer()
+                            }
+                        }
+                        .padding(6)
                     }
                 }
                 
@@ -240,7 +272,16 @@ struct EpisodeCell: View {
             episodeContextMenu
         }
         .onAppear {
+            progressValue = progress
             loadEpisodeProgress()
+        }
+        .onReceive(ProgressManager.shared.$episodeProgressList) { _ in
+            refreshProgressState()
+            progressValue = ProgressManager.shared.getEpisodeProgress(
+                showId: showId,
+                seasonNumber: episode.seasonNumber,
+                episodeNumber: episode.episodeNumber
+            )
         }
         .preferredColorScheme(.dark)
     }
@@ -251,12 +292,6 @@ struct EpisodeCell: View {
                 Label("Play", systemImage: "play.fill")
             }
             
-            if let onDownload = onDownload {
-                Button(action: onDownload) {
-                    Label("Download", systemImage: "arrow.down.circle")
-                }
-            }
-            
             if episode.episodeNumber > 1 {
                 Button(action: {
                     ProgressManager.shared.markPreviousEpisodesAsWatched(
@@ -264,18 +299,18 @@ struct EpisodeCell: View {
                         seasonNumber: episode.seasonNumber,
                         episodeNumber: episode.episodeNumber
                     )
-                    onMarkWatched()
+                    refreshProgressState()
                 }) {
                     Label("Mark Previous as Watched", systemImage: "chevron.left.slash.chevron.right")
                 }
-                
+
                 Button(action: {
                     ProgressManager.shared.markPreviousEpisodesAsUnwatched(
                         showId: showId,
                         seasonNumber: episode.seasonNumber,
                         episodeNumber: episode.episodeNumber
                     )
-                    onResetProgress()
+                    refreshProgressState()
                 }) {
                     Label("Mark Previous as Not Watched", systemImage: "arrow.uturn.backward")
                 }
@@ -290,6 +325,7 @@ struct EpisodeCell: View {
                     )
                     onResetProgress()
                     isWatched = false
+                    refreshProgressState()
                 }) {
                     Label("Mark as Not Watched", systemImage: "eye.slash")
                 }
@@ -302,12 +338,13 @@ struct EpisodeCell: View {
                     )
                     onMarkWatched()
                     isWatched = true
+                    progressValue = 1
                 }) {
                     Label("Mark as Watched", systemImage: "checkmark.circle")
                 }
             }
             
-            if progress > 0 {
+            if progressValue > 0 {
                 Button(action: {
                     ProgressManager.shared.resetEpisodeProgress(
                         showId: showId,
@@ -316,6 +353,7 @@ struct EpisodeCell: View {
                     )
                     onResetProgress()
                     isWatched = false
+                    progressValue = 0
                 }) {
                     Label("Reset Progress", systemImage: "arrow.counterclockwise")
                 }
@@ -324,6 +362,15 @@ struct EpisodeCell: View {
     }
     
     private func loadEpisodeProgress() {
+        refreshProgressState()
+        progressValue = ProgressManager.shared.getEpisodeProgress(
+            showId: showId,
+            seasonNumber: episode.seasonNumber,
+            episodeNumber: episode.episodeNumber
+        )
+    }
+
+    private func refreshProgressState() {
         isWatched = ProgressManager.shared.isEpisodeWatched(
             showId: showId,
             seasonNumber: episode.seasonNumber,

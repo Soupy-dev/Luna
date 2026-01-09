@@ -116,6 +116,8 @@
 		13F5B5922E73090000565E75 /* HomeSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5912E73090000565E75 /* HomeSection.swift */; };
 		13F5B5952E730CB200565E75 /* TMDBContentFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */; };
 		13F5B5972E730CDB00565E75 /* TMDBFiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5962E730CDB00565E75 /* TMDBFiltersView.swift */; };
+		14BBB0033FFF111100AAAAAA /* BackupManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14BBB0043FFF111100AAAAAA /* BackupManagementView.swift */; };
+		14BBB0053FFF111100AAAAAA /* BackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14BBB0063FFF111100AAAAAA /* BackupManager.swift */; };
 		AA1111112F10000000AA1111 /* TrackerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1111102F10000000AA1110 /* TrackerManager.swift */; };
 		AA2222222F10000000AA2222 /* TrackerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2222202F10000000AA2220 /* TrackerModels.swift */; };
 		AA3333332F10000000AA3333 /* TrackersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3333302F10000000AA3330 /* TrackersSettingsView.swift */; };
@@ -124,11 +126,6 @@
 		AA6666662F10000000AA6666 /* CatalogsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6666602F10000000AA6660 /* CatalogsSettingsView.swift */; };
 		AA7777712F10000000AA7771 /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7777702F10000000AA7770 /* HomeViewModel.swift */; };
 		AA8888812F10000000AA8881 /* ScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA8888802F10000000AA8880 /* ScheduleViewModel.swift */; };
-	14CCCC012F1A000100CCCCCC /* DownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CCCC002F1A000100CCCCCC /* DownloadManager.swift */; };
-	14CCCC032F1A000300CCCCCC /* DownloadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CCCC022F1A000300CCCCCC /* DownloadModels.swift */; };
-	14CCCC052F1A000500CCCCCC /* DownloadPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CCCC042F1A000500CCCCCC /* DownloadPersistence.swift */; };
-	14CCCC072F1A000700CCCCCC /* DownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CCCC062F1A000700CCCCCC /* DownloadsView.swift */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		12F745372EB539F000889684 /* Embed Frameworks */ = {
@@ -254,6 +251,8 @@
 		13F5B5912E73090000565E75 /* HomeSection.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HomeSection.swift; sourceTree = "<group>"; };
 		13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBContentFilter.swift; sourceTree = "<group>"; };
 		13F5B5962E730CDB00565E75 /* TMDBFiltersView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBFiltersView.swift; sourceTree = "<group>"; };
+		14BBB0043FFF111100AAAAAA /* BackupManagementView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BackupManagementView.swift; sourceTree = "<group>"; };
+		14BBB0063FFF111100AAAAAA /* BackupManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BackupManager.swift; sourceTree = "<group>"; };
 		AA1111102F10000000AA1110 /* TrackerManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackerManager.swift; sourceTree = "<group>"; };
 		AA2222202F10000000AA2220 /* TrackerModels.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackerModels.swift; sourceTree = "<group>"; };
 		AA3333302F10000000AA3330 /* TrackersSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackersSettingsView.swift; sourceTree = "<group>"; };
@@ -262,11 +261,6 @@
 		AA7777702F10000000AA7770 /* HomeViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
 		AA8888802F10000000AA8880 /* ScheduleViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ScheduleViewModel.swift; sourceTree = "<group>"; };
 		AA6666602F10000000AA6660 /* CatalogsSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogsSettingsView.swift; sourceTree = "<group>"; };
-	14CCCC002F1A000100CCCCCC /* DownloadManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Luna/Tracking/Downloads/DownloadManager.swift; sourceTree = SOURCE_ROOT; };
-	14CCCC022F1A000300CCCCCC /* DownloadModels.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Luna/Tracking/Downloads/DownloadModels.swift; sourceTree = SOURCE_ROOT; };
-	14CCCC042F1A000500CCCCCC /* DownloadPersistence.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Luna/Tracking/Downloads/DownloadPersistence.swift; sourceTree = SOURCE_ROOT; };
-	14CCCC062F1A000700CCCCCC /* DownloadsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Luna/Views/Downloads/DownloadsView.swift; sourceTree = SOURCE_ROOT; };
-	14CCCC082F1A000900CCCCCC /* DownloadServicesResultsSheet.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Luna/Views/Downloads/DownloadServicesResultsSheet.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -749,6 +743,7 @@
 				13F072792E4B2D9000EF90EB /* ServicesView.swift */,
 				13F518422EBCE42B00DEF778 /* StorageView.swift */,
 				13F0727E2E4B2D9000EF90EB /* LoggerView.swift */,
+				14BBB0043FFF111100AAAAAA /* BackupManagementView.swift */,
 				AA3333302F10000000AA3330 /* TrackersSettingsView.swift */,
 				AA6666602F10000000AA6660 /* CatalogsSettingsView.swift */,
 			);
@@ -779,6 +774,7 @@
 			children = (
 				13F5B5932E730B0200565E75 /* Library */,
 				13F5B5912E73090000565E75 /* HomeSection.swift */,
+				14BBB0063FFF111100AAAAAA /* BackupManager.swift */,
 				AA5555502F10000000AA5550 /* CatalogManager.swift */,
 				AA7777702F10000000AA7770 /* HomeViewModel.swift */,
 				AA8888802F10000000AA8880 /* ScheduleViewModel.swift */,
@@ -1012,12 +1008,9 @@
 				13E1EDD52ED9E65F00087629 /* readingMode.swift in Sources */,
 				13E1EDED2ED9E66000087629 /* contentView.swift in Sources */,
 				13F187AC2E6F38CE00747F7E /* LibraryManager.swift in Sources */,
-				14CCCC012F1A000100CCCCCC /* DownloadManager.swift in Sources */,
-				14CCCC032F1A000300CCCCCC /* DownloadModels.swift in Sources */,
-				14CCCC052F1A000500CCCCCC /* DownloadPersistence.swift in Sources */,
-				14CCCC072F1A000700CCCCCC /* DownloadsView.swift in Sources */,
-				14CCCC092F1A000900CCCCCC /* DownloadServicesResultsSheet.swift in Sources */,
-			);
+				14BBB0033FFF111100AAAAAA /* BackupManagementView.swift in Sources */,
+				14BBB0053FFF111100AAAAAA /* BackupManager.swift in Sources */,
+
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
