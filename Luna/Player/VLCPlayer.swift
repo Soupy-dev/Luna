@@ -522,7 +522,23 @@ struct VLCPlayerControlsView: View {
 }
 
 #else
+#else
 
+// tvOS/macOS: Stub implementations
+class VLCPlayerState: NSObject, ObservableObject {
+    @Published var isPlaying = false
+    @Published var position: Double = 0
+    @Published var duration: Double = 0
+    @Published var isLoading = false
+    @Published var showControls = true
+    @Published var currentPlaybackSpeed: Double = 1.0
+    @Published var audioTracks: [VLCRenderer.AudioTrack] = []
+    @Published var subtitleTracks: [VLCRenderer.SubtitleTrack] = []
+    @Published var selectedAudioLanguage = "en"
+    @Published var enableAutoSubtitles = true
+    
+    func scheduleHideControls() {}
+}
 struct VLCPlayer: UIViewControllerRepresentable {
     let url: URL
     var headers: [String: String]? = nil
