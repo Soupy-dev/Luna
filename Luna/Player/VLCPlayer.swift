@@ -40,8 +40,8 @@ class VLCPlayerState: NSObject, ObservableObject {
     @Published var isLoading = false
     @Published var showControls = true
     @Published var currentPlaybackSpeed: Double = 1.0
-    @Published var audioTracks: [VLCRenderer.AudioTrack] = []
-    @Published var subtitleTracks: [VLCRenderer.SubtitleTrack] = []
+    @Published var audioTracks: [(Int, String, String)] = []
+    @Published var subtitleTracks: [(Int, String)] = []
     @Published var selectedAudioLanguage = "en"
     @Published var enableAutoSubtitles = true
     

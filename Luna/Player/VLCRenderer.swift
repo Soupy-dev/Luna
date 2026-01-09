@@ -615,6 +615,7 @@ final class VLCRenderer {
     func play() { }
     func pausePlayback() { }
     func togglePause() { }
+    func togglePlayPause() { }
     func seek(to seconds: Double) { }
     func seek(by seconds: Double) { }
     func setSpeed(_ speed: Double) { }
@@ -625,13 +626,17 @@ final class VLCRenderer {
     func setPreferredAudioLanguage(_ language: String) { }
     func setAnimeAudioLanguage(_ language: String) { }
     func getSubtitleTracks() -> [(Int, String)] { [] }
+    func getSubtitleTracksDetailed() -> [(Int, String)] { [] }
     func setSubtitleTrack(id: Int) { }
     func disableSubtitles() { }
     func enableAutoSubtitles(_ enabled: Bool) { }
+    func getAvailableSubtitles() -> [String] { [] }
     func refreshSubtitleOverlay() { }
     func loadExternalSubtitles(urls: [String]) { }
     func clearSubtitleCache() { }
     var isPausedState: Bool { true }
+    var position: Double { 0 }
+    var duration: Double { 0 }
     weak var delegate: VLCRendererDelegate?
 }
 
