@@ -150,11 +150,10 @@ struct MediaDetailView: View {
                     isDownload: true,
                     onDownloadSelected: { title, url, headers in
                         DownloadManager.shared.addMovieDownload(
+                            url: url,
                             movieId: movieDetail.id,
-                            title: title,
-                            posterURL: movieDetail.fullPosterURL,
-                            streamURL: url,
-                            headers: headers
+                            movieTitle: title,
+                            posterURL: movieDetail.fullPosterURL
                         )
                         showingDownloadSheet = false
                     }

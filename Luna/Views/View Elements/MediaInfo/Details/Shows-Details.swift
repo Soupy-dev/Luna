@@ -22,7 +22,7 @@ struct TVShowSeasonsSection: View {
     @State private var showingSearchResults = false
     @State private var showingNoServicesAlert = false
     @State private var showingDownloadSheet = false
-    @State private var downloadMediaInfo: DownloadMediaInfo?
+    @State private var currentDownloadEpisode: TMDBEpisode?
     @State private var episodesToDownload: [TMDBEpisode] = []
     @State private var currentDownloadIndex = 0
     @State private var romajiTitle: String?
@@ -146,31 +146,26 @@ struct TVShowSeasonsSection: View {
             Text("You don't have any active services. Please go to the Services tab to download and activate services.")
         }
         .sheet(isPresented: $showingDownloadSheet) {
-            if let mediaInfo = downloadMediaInfo, let episode = currentDownloadEpisode {
+            if let episode = currentDownloadEpisode, let show = tvShow {
                 ModulesSearchResultsSheet(
                     mediaTitle: getSearchTitle(),
                     originalTitle: romajiTitle,
                     isMovie: false,
                     selectedEpisode: episode,
-                    tmdbId: tvShow?.id ?? 0,
+                    tmdbId: show.id,
                     animeSeasonTitle: isAnime ? "anime" : nil,
-                    posterPath: tvShow?.posterPath,
+                    posterPath: show.posterPath,
                     isDownload: true,
                     onDownloadSelected: { title, url, headers in
-                        switch mediaInfo {
-                        case .episode(let id, let showTitle, let posterURL, let season, let episodeNum):
-                            DownloadManager.shared.addEpisodeDownload(
-                                showId: id,
-                                showTitle: showTitle,
-                                posterURL: posterURL,
-                                seasonNumber: season,
-                                episodeNumber: episodeNum,
-                                streamURL: url,
-                                headers: headers
-                            )
-                        default:
-                            break
-                        }
+                        DownloadManager.shared.addEpisodeDownload(
+                            url: url,
+                            showId: show.id,
+                            showTitle: show.name,
+                            seasonNumber: episode.seasonNumber,
+                            episodeNumber: episode.episodeNumber,
+                            episodeTitle: episode.name,
+                            posterURL: show.fullPosterURL
+                        )
                         showNextDownloadPrompt()
                     }
                 )
@@ -502,22 +497,14 @@ struct TVShowSeasonsSection: View {
     // MARK: - Download Functions
     
     private func downloadEpisode(episode: TMDBEpisode) {
-        guard let tvShow = tvShow else { return }
+        guard tvShow != nil else { return }
         
         if serviceManager.activeServices.isEmpty {
             showingNoServicesAlert = true
             return
         }
         
-        downloadMediaInfo = .episode(
-            showId: tvShow.id,
-            showTitle: tvShow.name,
-            seasonNumber: episode.seasonNumber,
-            episodeNumber: episode.episodeNumber,
-            episodeTitle: episode.name,
-            posterURL: tvShow.fullPosterURL,
-            onDownloadStarted: nil
-        )
+        currentDownloadEpisode = episode
         showingDownloadSheet = true
     }
     
@@ -543,23 +530,10 @@ struct TVShowSeasonsSection: View {
         }
         
         let episode = episodesToDownload[currentDownloadIndex]
-        guard let tvShow = tvShow else { return }
+        guard tvShow != nil else { return }
         
-        downloadMediaInfo = .episode(
-            showId: tvShow.id,
-            showTitle: tvShow.name,
-            seasonNumber: episode.seasonNumber,
-            episodeNumber: episode.episodeNumber,
-            episodeTitle: episode.name,
-            posterURL: tvShow.fullPosterURL,
-            onDownloadStarted: {
-                // Move to next episode after download starts
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    currentDownloadIndex += 1
-                    showNextDownloadPrompt()
-                }
-            }
-        )
+        currentDownloadEpisode = episode
+        currentDownloadIndex += 1
         showingDownloadSheet = true
     }
 }
