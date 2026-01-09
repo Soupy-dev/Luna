@@ -264,4 +264,4 @@ struct PlayerSettingsView: View {
             "rus": "Russian"
         ]
         return languages[code] ?? code.uppercased()
-    }
+    }}
