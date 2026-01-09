@@ -338,11 +338,17 @@ class BackupManager {
             for (index, collectionDict) in collectionsData.enumerated() {
                 do {
                     let collectionJSON = try JSONSerialization.data(withJSONObject: collectionDict)
-                    let collection = try JSONDecoder().decode(BackupCollection.self, from: collectionJSON)
+                    let collectionDecoder = JSONDecoder()
+                    collectionDecoder.dateDecodingStrategy = .iso8601
+                    let collection = try collectionDecoder.decode(BackupCollection.self, from: collectionJSON)
                     collections.append(collection)
-                    Logger.shared.log("Successfully decoded collection \(index + 1): \(collection.name)", type: "Info")
+                    Logger.shared.log("Successfully decoded collection \(index + 1): \(collection.name) with \(collection.items.count) items", type: "Info")
                 } catch {
                     Logger.shared.log("Failed to decode collection \(index + 1): \(error.localizedDescription)", type: "Error")
+                    // Try to extract at least the name for debugging
+                    if let name = collectionDict["name"] as? String {
+                        Logger.shared.log("  Collection name was: \(name)", type: "Error")
+                    }
                 }
             }
             Logger.shared.log("Successfully decoded \(collections.count) out of \(collectionsData.count) collections", type: "Info")

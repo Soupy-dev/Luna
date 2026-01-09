@@ -74,6 +74,7 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     private let progressBar = UIProgressView(progressViewStyle: .bar)
     private let timeLabel = UILabel()
     private let durationLabel = UILabel()
+    private let bufferingSpinner = UIActivityIndicatorView(style: .large)
     
     private var positionUpdateTimer: Timer?
     private var lastPlayedTime: Double?
@@ -245,6 +246,17 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             timeLabel.topAnchor.constraint(equalTo: progressBar.bottomAnchor, constant: 8),
             durationLabel.trailingAnchor.constraint(equalTo: bottomControlsView.trailingAnchor, constant: -12),
             durationLabel.topAnchor.constraint(equalTo: progressBar.bottomAnchor, constant: 8)
+        ])
+        
+        // Buffering spinner
+        bufferingSpinner.color = .white
+        bufferingSpinner.hidesWhenStopped = true
+        controlsContainer.addSubview(bufferingSpinner)
+        bufferingSpinner.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            bufferingSpinner.centerXAnchor.constraint(equalTo: controlsContainer.centerXAnchor),
+            bufferingSpinner.centerYAnchor.constraint(equalTo: controlsContainer.centerYAnchor)
         ])
         
         // Control buttons (audio, subtitles, speed)
@@ -469,6 +481,11 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     func renderer(_ renderer: VLCRenderer, didChangeLoading isLoading: Bool) {
         DispatchQueue.main.async {
             self.playerState?.isLoading = isLoading
+            if isLoading {
+                self.bufferingSpinner.startAnimating()
+            } else {
+                self.bufferingSpinner.stopAnimating()
+            }
         }
     }
     

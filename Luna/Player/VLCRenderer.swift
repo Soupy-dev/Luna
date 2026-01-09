@@ -104,7 +104,7 @@ final class VLCRenderer: NSObject {
         // Attach to view for rendering
         mediaPlayer.drawable = vlcView
         
-        // Setup event handlers with @objc selectors (Luna-soupy pattern)
+        // Setup event handlers with @objc selectors
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(mediaPlayerTimeChanged),
@@ -172,35 +172,41 @@ final class VLCRenderer: NSObject {
         
         Logger.shared.log("[VLCRenderer.loadMedia] VLCMedia created", type: "Stream")
         
-        // Configure network options
+        // Configure network options (match Luna-soupy settings)
+        media.addOption(":network-caching=1200")
         media.addOption(":http-reconnect=true")
-        media.addOption(":http-timeout=10000")
-        media.addOption(":network-caching=5000")
-        media.addOption(":file-caching=1000")
         
-        // Add custom headers if provided
+        // Add custom headers if provided (Luna-soupy pattern: individual headers)
         if let headers = headers {
-            var userAgent = ""
-            var otherHeaders: [String] = []
+            Logger.shared.log("[VLCRenderer.loadMedia] Applying \(headers.count) headers to VLCMedia", type: "Stream")
             
-            for (key, value) in headers {
-                if key.lowercased() == "user-agent" {
-                    userAgent = value
-                } else {
-                    otherHeaders.append("\(key): \(value)")
-                }
+            // Prefer dedicated options when available (unquoted to match server expectations)
+            if let ua = headers["User-Agent"], !ua.isEmpty {
+                Logger.shared.log("[VLCRenderer.loadMedia] Setting User-Agent", type: "Stream")
+                media.addOption(":http-user-agent=\(ua)")
+            }
+            if let referer = headers["Referer"], !referer.isEmpty {
+                Logger.shared.log("[VLCRenderer.loadMedia] Setting Referer", type: "Stream")
+                media.addOption(":http-referrer=\(referer)")
+                // Some HLS mirrors expect the header form as well; set both to be safe.
+                media.addOption(":http-header=Referer: \(referer)")
+            }
+            if let cookie = headers["Cookie"], !cookie.isEmpty {
+                Logger.shared.log("[VLCRenderer.loadMedia] Setting Cookie", type: "Stream")
+                media.addOption(":http-cookie=\(cookie)")
             }
             
-            // Set user agent separately
-            if !userAgent.isEmpty {
-                media.addOption(":http-user-agent=\(userAgent)")
+            // Add remaining headers individually, skipping ones already set via dedicated options
+            let skippedKeys: Set<String> = ["User-Agent", "Referer", "Cookie"]
+            var headerCount = 0
+            for (key, value) in headers where !skippedKeys.contains(key) {
+                guard !value.isEmpty else { continue }
+                let headerLine = "\(key): \(value)"
+                Logger.shared.log("[VLCRenderer.loadMedia] Adding header: \(key)", type: "Stream")
+                media.addOption(":http-header=\(headerLine)")
+                headerCount += 1
             }
-            
-            // Add all other headers as a single concatenated string
-            if !otherHeaders.isEmpty {
-                let headerString = otherHeaders.joined(separator: "\r\n")
-                media.addOption(":http-header-fields=\(headerString)")
-            }
+            Logger.shared.log("[VLCRenderer.loadMedia] Applied \(headerCount) additional headers plus User-Agent/Referer/Cookie", type: "Info")
         }
         
         // Enable hardware decoding if available

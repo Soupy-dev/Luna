@@ -209,7 +209,7 @@ struct BackupManagementView: View {
             DispatchQueue.main.async {
                 isProcessing = false
                 if success {
-                    backupMessage = "Backup restored successfully! If imported from Luna-soupy, some settings may have been skipped. Please restart the app to see all changes."
+                    backupMessage = "Backup restored successfully! Please restart the app to see all changes."
                     selectedBackupURL = nil
                 } else {
                     backupMessage = "Failed to restore backup. The file may be corrupted or completely incompatible."
