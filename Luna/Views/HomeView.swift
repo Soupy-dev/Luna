@@ -737,7 +737,9 @@ struct ContinueWatchingCard: View {
                     self.isLoaded = true
                     
                     // Update progress manager with poster URL
-                    ProgressManager.shared.updateMoviePoster(movieId: item.tmdbId, posterURL: details.fullPosterURL)
+                    if let posterURL = details.fullPosterURL {
+                        ProgressManager.shared.updateMoviePoster(movieId: item.tmdbId, posterURL: posterURL)
+                    }
                 }
             } else {
                 async let detailsTask = tmdbService.getTVShowDetails(id: item.tmdbId)

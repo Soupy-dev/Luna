@@ -639,11 +639,11 @@ final class ProgressManager: ObservableObject {
             guard currentTime >= 0 && currentTime <= duration else { return }
 
             switch mediaInfo {
-            case .movie(let id, let title):
-                self.updateMovieProgress(movieId: id, title: title, currentTime: currentTime, totalDuration: duration)
+            case .movie(let id, let title, let posterURL):
+                self.updateMovieProgress(movieId: id, title: title, currentTime: currentTime, totalDuration: duration, posterURL: posterURL)
 
-            case .episode(let showId, let seasonNumber, let episodeNumber):
-                self.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: currentTime, totalDuration: duration)
+            case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL):
+                self.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: currentTime, totalDuration: duration, showTitle: showTitle, showPosterURL: showPosterURL)
             }
         }
     }
