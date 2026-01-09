@@ -458,6 +458,7 @@ final class VLCRenderer: NSObject {
     func setSubtitleTrack(id trackIndex: Int) {
         guard let mediaPlayer = mediaPlayer else { return }
         mediaPlayer.currentVideoSubTitleIndex = Int32(trackIndex)
+        Logger.shared.log("[VLCRenderer] Set subtitle track to index: \(trackIndex)", type: "Stream")
         delegate?.rendererDidChangeTracks(self)
     }
     
@@ -468,36 +469,50 @@ final class VLCRenderer: NSObject {
     func loadExternalSubtitles(url: URL) throws {
         guard let mediaPlayer = mediaPlayer else { return }
         
-        // VLC auto-detects external subtitles in the same folder
-        // For direct file loading, add the subtitle file as media option
-        let subtitlePath = url.path
-        mediaPlayer.media?.addOption("sub-file=\(subtitlePath)")
+        // Use VLC's addPlaybackSlave API which works for both local files and remote URLs
+        // VLCMediaPlaybackSlaveTypeSubtitle = 0
+        let result = mediaPlayer.addPlaybackSlave(url, type: .subtitle, enforce: true)
         
-        Logger.shared.log("[VLCRenderer] Loaded external subtitles: \(subtitlePath)", type: "Stream")
+        if result == 0 {
+            Logger.shared.log("[VLCRenderer] Successfully loaded external subtitles: \(url.absoluteString)", type: "Stream")
+            delegate?.rendererDidChangeTracks(self)
+        } else {
+            Logger.shared.log("[VLCRenderer] Failed to load external subtitles: \(url.absoluteString) (error code: \(result))", type: "Error")
+        }
     }
     
     func disableSubtitles() {
         guard let mediaPlayer = mediaPlayer else { return }
         mediaPlayer.currentVideoSubTitleIndex = -1
+        Logger.shared.log("[VLCRenderer] Disabled subtitles", type: "Stream")
         delegate?.rendererDidChangeTracks(self)
     }
     
     func enableAutoSubtitles(_ enabled: Bool) {
         autoLoadSubtitles = enabled
-        guard let currentURL = currentURL else { return }
+        Logger.shared.log("[VLCRenderer] Auto-load subtitles: \(enabled)", type: "Stream")
+    }
+    
+    private func applySubtitlePreference() {
+        guard let mediaPlayer = mediaPlayer else { return }
         
-        if enabled {
-            // Try to auto-load subtitle files with same name
-            let subtitleFormats = ["srt", "vtt", "ass", "ssa"]
-            let basePath = currentURL.deletingPathExtension().path
-            
-            for format in subtitleFormats {
-                let subtitlePath = basePath + ".\(format)"
-                if FileManager.default.fileExists(atPath: subtitlePath) {
-                    try? loadExternalSubtitles(url: URL(fileURLWithPath: subtitlePath))
-                    break
-                }
-            }
+        let subtitleTracks = getSubtitleTracksDetailed()
+        Logger.shared.log("[VLCRenderer] Found \(subtitleTracks.count) subtitle tracks", type: "Stream")
+        
+        // Try to find English subtitle first
+        if let englishTrack = subtitleTracks.first(where: { 
+            $0.1.lowercased().contains("eng") || 
+            $0.1.lowercased().contains("english")
+        }) {
+            setSubtitleTrack(id: englishTrack.0)
+            Logger.shared.log("[VLCRenderer] Auto-selected English subtitle: \(englishTrack.1)", type: "Stream")
+            return
+        }
+        
+        // Otherwise enable first available subtitle
+        if let firstTrack = subtitleTracks.first {
+            setSubtitleTrack(id: firstTrack.0)
+            Logger.shared.log("[VLCRenderer] Auto-selected first subtitle: \(firstTrack.1)", type: "Stream")
         }
     }
     
@@ -546,8 +561,17 @@ final class VLCRenderer: NSObject {
             isReadyToSeek = true
             
             Logger.shared.log("[VLCRenderer] Now playing", type: "Stream")
+            
+            // Apply audio and subtitle preferences when tracks become available
+            applyAudioLanguagePreference()
+            if autoLoadSubtitles {
+                applySubtitlePreference()
+            }
+            
+            // Notify delegate about track changes
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                self.delegate?.rendererDidChangeTracks(self)
                 self.delegate?.renderer(self, didChangePause: false)
                 self.delegate?.renderer(self, didChangeLoading: false)
                 self.delegate?.renderer(self, didBecomeReadyToSeek: true)
