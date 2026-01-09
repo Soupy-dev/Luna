@@ -1202,9 +1202,7 @@ struct ModulesSearchResultsSheet: View {
                 return
             } else if inAppPlayer == "VLC" {
                 #if os(iOS)
-                let playerState = VLCPlayerState()
-                let vlcPlayer = VLCPlayer(url: streamURL, headers: finalHeaders, preset: nil, playerState: playerState)
-                
+                let vlcPlayer = VLCPlayer(url: streamURL, headers: finalHeaders, preset: nil, playerState: VLCPlayerState())
                 let hostingController = UIHostingController(rootView: vlcPlayer)
                 hostingController.modalPresentationStyle = .fullScreen
                 
