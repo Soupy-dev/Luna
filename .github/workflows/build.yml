@@ -24,6 +24,14 @@ jobs:
           rm -rf Pods
           pod repo update
           pod install
+      - name: Verify CocoaPods installation
+        run: |
+          echo "Checking Luna.xcworkspace..."
+          ls -la Luna.xcworkspace/ || echo "ERROR: Luna.xcworkspace not found"
+          echo "\nChecking Pods directory..."
+          ls -la Pods/ | head -20 || echo "ERROR: Pods directory not found"
+          echo "\nChecking for xcfilelist files..."
+          find . -name "*xcfilelist" -type f 2>/dev/null | head -20
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
       - name: Build iOS IPA
@@ -51,6 +59,14 @@ jobs:
           rm -rf Pods
           pod repo update
           pod install
+      - name: Verify CocoaPods installation
+        run: |
+          echo "Checking Luna.xcworkspace..."
+          ls -la Luna.xcworkspace/ || echo "ERROR: Luna.xcworkspace not found"
+          echo "\nChecking Pods directory..."
+          ls -la Pods/ | head -20 || echo "ERROR: Pods directory not found"
+          echo "\nChecking for xcfilelist files..."
+          find . -name "*xcfilelist" -type f 2>/dev/null | head -20
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
       - name: Build tvOS IPA
