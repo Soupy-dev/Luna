@@ -383,7 +383,6 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
                 self?.vlcRenderer.setAudioTrack(id: track.0)
             }
         }
-        }
         return UIMenu(title: "Audio Track", children: actions)
     }
     
