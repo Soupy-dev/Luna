@@ -28,7 +28,6 @@ struct MediaDetailView: View {
     @State private var showingAddToCollection = false
     @State private var showingDownloadSheet = false
     @State private var showingNoServicesAlert = false
-    @State private var showingDownloadSheet = false
     @State private var selectedEpisodeForSearch: TMDBEpisode?
     @State private var romajiTitle: String?
     @State private var logoURL: String?

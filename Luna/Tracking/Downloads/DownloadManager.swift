@@ -118,7 +118,8 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     
     func pauseCurrentDownload() {
         guard let task = currentTask else { return }
-        task.pause()
+        // URLSessionDownloadTask doesn't support pause, so we cancel it
+        task.cancel()
         
         if var active = activeDownload {
             active.status = .paused
@@ -131,13 +132,20 @@ class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     }
     
     func resumeCurrentDownload() {
-        guard let task = currentTask else { return }
-        task.resume()
-        
-        if var active = activeDownload {
-            active.status = .downloading
-            activeDownload = active
-        }
+        guard let active = activeDownload else { return }
+        // Restart the download from the beginning (no resume capability)
+        currentTask?.cancel()
+        startDownload(item: DownloadQueueItem(
+            id: active.id,
+            url: active.url,
+            headers: active.headers,
+            title: active.title,
+            posterURL: nil,
+            type: .episode,
+            metadata: nil,
+            subtitleURL: nil,
+            showPosterURL: nil
+        ))
         
         DispatchQueue.main.async {
             self.objectWillChange.send()

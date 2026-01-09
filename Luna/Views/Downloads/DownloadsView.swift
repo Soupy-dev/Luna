@@ -357,7 +357,7 @@ struct DownloadsView: View {
             // Open with mpv PlayerViewController
             if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                let rootViewController = windowScene.windows.first?.rootViewController {
-                let playerVC = PlayerViewController(url: asset.localURL)
+                let playerVC = PlayerViewController(url: asset.localURL, preset: .hls)
                 playerVC.modalPresentationStyle = .fullScreen
                 rootViewController.present(playerVC, animated: true)
             }
@@ -365,10 +365,9 @@ struct DownloadsView: View {
             // Open with standard AVPlayer (NormalPlayer)
             if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                let rootViewController = windowScene.windows.first?.rootViewController {
-                let normalPlayer = NormalPlayer(videoURL: asset.localURL)
-                let hostingController = UIHostingController(rootView: normalPlayer)
-                hostingController.modalPresentationStyle = .fullScreen
-                rootViewController.present(hostingController, animated: true)
+                let normalPlayer = NormalPlayer()
+                normalPlayer.player = AVPlayer(url: asset.localURL)
+                rootViewController.present(normalPlayer, animated: true)
             }
         }
         
