@@ -43,41 +43,64 @@ if [ -d "DerivedData$PLATFORM" ]; then
     rm -rf "DerivedData$PLATFORM"
 fi
 
-# Use workspace if it exists (CocoaPods), otherwise use project
+# Use workspace if it exists (after pod install), otherwise use project
 if [ -f "$WORKING_LOCATION/$APPLICATION_NAME.xcworkspace/contents.xcworkspacedata" ]; then
     echo "Building with workspace (CocoaPods detected)"
-    BUILD_TARGET="-workspace"
-    BUILD_FILE="$WORKING_LOCATION/$APPLICATION_NAME.xcworkspace"
+    XCODE_PROJECT="-workspace $WORKING_LOCATION/$APPLICATION_NAME.xcworkspace"
 else
-    echo "Building with project (no CocoaPods)"
-    BUILD_TARGET="-project"
-    BUILD_FILE="$WORKING_LOCATION/$APPLICATION_NAME.xcodeproj"
+    echo "Building with project"
+    XCODE_PROJECT="-project $WORKING_LOCATION/$APPLICATION_NAME.xcodeproj"
 fi
 
-xcodebuild $BUILD_TARGET "$BUILD_FILE" \
+# Create archive (required for proper IPA structure)
+ARCHIVE_PATH="$WORKING_LOCATION/build/$APPLICATION_NAME$OUTPUT_SUFFIX.xcarchive"
+
+# Use xcconfig to ensure bundle identifier and build settings are loaded
+XCCONFIG="$WORKING_LOCATION/Build.xcconfig"
+
+xcodebuild archive \
+    $XCODE_PROJECT \
     -scheme "$APPLICATION_NAME" \
     -configuration Release \
-    -derivedDataPath "$WORKING_LOCATION/build/DerivedData$PLATFORM" \
+    -archivePath "$ARCHIVE_PATH" \
     -destination "$XCODE_DESTINATION" \
     -sdk "$SDK" \
-    clean build \
-    CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED="NO"
+    -xcconfig "$XCCONFIG" \
+    CODE_SIGN_IDENTITY="" \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGNING_ALLOWED=NO \
+    ENABLE_USER_SCRIPT_SANDBOXING=NO
 
-DD_APP_PATH="$WORKING_LOCATION/build/DerivedData$PLATFORM/Build/Products/$PLATFORM_DIR/$APPLICATION_NAME.app"
-TARGET_APP="$WORKING_LOCATION/build/$APPLICATION_NAME$OUTPUT_SUFFIX.app"
-
-cp -r "$DD_APP_PATH" "$TARGET_APP"
-
-codesign --remove "$TARGET_APP" 2>/dev/null || true
-if [ -e "$TARGET_APP/_CodeSignature" ]; then
-    rm -rf "$TARGET_APP/_CodeSignature"
-fi
-if [ -e "$TARGET_APP/embedded.mobileprovision" ]; then
-    rm -rf "$TARGET_APP/embedded.mobileprovision"
+# Verify archive was created
+if [ ! -d "$ARCHIVE_PATH" ]; then
+    echo "Error: Archive failed to create at $ARCHIVE_PATH"
+    exit 1
 fi
 
+# Extract app from archive (correct path: Products/Applications)
+APP_PATH="$ARCHIVE_PATH/Products/Applications/$APPLICATION_NAME.app"
+
+if [ ! -d "$APP_PATH" ]; then
+    echo "Error: App not found at $APP_PATH"
+    echo "Contents of archive:"
+    find "$ARCHIVE_PATH" -type d -name "*.app" 2>/dev/null || echo "No app bundles found"
+    exit 1
+fi
+
+# Create Payload directory and copy app
 mkdir Payload
-cp -r "$TARGET_APP" "Payload/$APPLICATION_NAME.app"
+cp -r "$APP_PATH" "Payload/$APPLICATION_NAME.app"
+
+# Remove code signature
+rm -rf "Payload/$APPLICATION_NAME.app/_CodeSignature" 2>/dev/null || true
+rm -f "Payload/$APPLICATION_NAME.app/embedded.mobileprovision" 2>/dev/null || true
+
+# Create IPA (preserve symlinks with -y, recursive with -r)
+zip -qry "$APPLICATION_NAME$OUTPUT_SUFFIX.ipa" Payload
+
+# Cleanup
+rm -rf Payload
+rm -rf "$ARCHIVE_PATH"
 
 if [ -f "Payload/$APPLICATION_NAME.app/$APPLICATION_NAME" ]; then
     strip "Payload/$APPLICATION_NAME.app/$APPLICATION_NAME" 2>/dev/null || true
