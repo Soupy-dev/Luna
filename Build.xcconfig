@@ -14,7 +14,7 @@ CODE_SIGN_ENTITLEMENTS = Luna/Luna.entitlements
 // Optional local overrides (ignored in Git)
 #include? "Build.local.xcconfig"
 
-// CocoaPods integration: ensure PODS_ROOT and related settings are available
-// This fixes missing xcfilelist errors when using a custom base xcconfig.
-#include? "Pods/Target Support Files/Pods-Luna/Pods-Luna.release.xcconfig"
-#include? "Pods/Target Support Files/Pods-Luna/Pods-Luna.debug.xcconfig"
+// Note: Do NOT include CocoaPods-generated xcconfigs here.
+// Passing this file via `-xcconfig` applies it to ALL targets (including Pods),
+// which can rewrite `PODS_ROOT` inside the Pods project and break xcfilelist paths.
+// CocoaPods settings are injected via the Podfile post_install for the app target only.
