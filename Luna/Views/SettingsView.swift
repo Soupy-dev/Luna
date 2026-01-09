@@ -155,6 +155,10 @@ struct SettingsView: View {
                     Text("Storage")
                 }
                 
+                NavigationLink(destination: BackupManagementView()) {
+                    Text("Backup & Restore")
+                }
+                
                 NavigationLink(destination: LoggerView()) {
                     Text("Logger")
                 }

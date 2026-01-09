@@ -171,7 +171,7 @@ struct PlayerSettingsView: View {
             }
             
             if store.inAppPlayer == .vlc {
-                Section(header: Text("VLC Player")) {
+                Section(header: Text("VLC Player"), footer: Text("Note: VLC may not work with every service due to streaming compatibility issues.")) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Enable Subtitles by Default")

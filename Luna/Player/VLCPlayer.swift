@@ -238,28 +238,27 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         let audioButton = UIButton(type: .system)
         audioButton.setImage(UIImage(systemName: "speaker.wave.2"), for: .normal)
         audioButton.tintColor = .white
-        audioButton.addTarget(self, action: #selector(showAudioMenu), for: .touchUpInside)
+        audioButton.showsMenuAsPrimaryAction = true
+        audioButton.menu = createAudioMenu()
         buttonsStackView.addArrangedSubview(audioButton)
         
         // Subtitle button
         let subtitleButton = UIButton(type: .system)
         subtitleButton.setImage(UIImage(systemName: "captions.bubble"), for: .normal)
         subtitleButton.tintColor = .white
-        subtitleButton.addTarget(self, action: #selector(showSubtitleMenu), for: .touchUpInside)
+        subtitleButton.showsMenuAsPrimaryAction = true
+        subtitleButton.menu = createSubtitleMenu()
         buttonsStackView.addArrangedSubview(subtitleButton)
         
         // Speed button
         let speedButton = UIButton(type: .system)
-        speedButton.setTitle("1.0x", for: .normal)
+        let cfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        let img = UIImage(systemName: "hare.fill", withConfiguration: cfg)
+        speedButton.setImage(img, for: .normal)
         speedButton.tintColor = .white
-        speedButton.addTarget(self, action: #selector(showSpeedMenu), for: .touchUpInside)
+        speedButton.showsMenuAsPrimaryAction = true
+        speedButton.menu = createSpeedMenu()
         buttonsStackView.addArrangedSubview(speedButton)
-        
-        // Settings button
-        let settingsButton = UIButton(type: .system)
-        settingsButton.setImage(UIImage(systemName: "gear"), for: .normal)
-        settingsButton.tintColor = .white
-        buttonsStackView.addArrangedSubview(settingsButton)
     }
     
     private func setupGestureRecognizers() {
@@ -317,55 +316,58 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         vlcRenderer.seek(to: currentPosition + 10)
     }
     
-    @objc private func showAudioMenu() {
+    private func createAudioMenu() -> UIMenu {
         let audioTracks = vlcRenderer.getAudioTracksDetailed()
-        let alert = UIAlertController(title: "Select Audio Track", message: nil, preferredStyle: .actionSheet)
-        
-        for track in audioTracks {
-            let title = "\(track.name) \(track.isDefault ? "✓" : "")"
-            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+        let actions = audioTracks.map { track in
+            let isSelected = track.isDefault
+            return UIAction(
+                title: track.name,
+                image: isSelected ? UIImage(systemName: "checkmark") : nil,
+                state: isSelected ? .on : .off
+            ) { [weak self] _ in
                 self?.vlcRenderer.setAudioTrack(track.id)
-            })
+            }
         }
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        present(alert, animated: true)
+        return UIMenu(title: "Audio Track", children: actions)
     }
     
-    @objc private func showSubtitleMenu() {
+    private func createSubtitleMenu() -> UIMenu {
         let subtitleTracks = vlcRenderer.getSubtitleTracksDetailed()
-        let alert = UIAlertController(title: "Select Subtitles", message: nil, preferredStyle: .actionSheet)
+        var actions: [UIAction] = [
+            UIAction(title: "None") { [weak self] _ in
+                self?.vlcRenderer.disableSubtitles()
+            }
+        ]
         
-        alert.addAction(UIAlertAction(title: "None", style: .default) { [weak self] _ in
-            self?.vlcRenderer.disableSubtitles()
-        })
-        
-        for track in subtitleTracks {
-            let title = "\(track.name) \(track.isDefault ? "✓" : "")"
-            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+        actions += subtitleTracks.map { track in
+            let isSelected = track.isDefault
+            return UIAction(
+                title: track.name,
+                image: isSelected ? UIImage(systemName: "checkmark") : nil,
+                state: isSelected ? .on : .off
+            ) { [weak self] _ in
                 self?.vlcRenderer.setSubtitleTrack(track.id)
-            })
+            }
         }
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        present(alert, animated: true)
+        return UIMenu(title: "Subtitles", children: actions)
     }
     
-    @objc private func showSpeedMenu() {
-        let alert = UIAlertController(title: "Playback Speed", message: nil, preferredStyle: .actionSheet)
+    private func createSpeedMenu() -> UIMenu {
         let speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+        let currentSpeed = playerState?.currentPlaybackSpeed ?? 1.0
         
-        for speed in speeds {
-            let isSelected = playerState?.currentPlaybackSpeed == speed
-            let title = "\(speed)x \(isSelected ? "✓" : "")"
-            alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+        let actions = speeds.map { speed in
+            let isSelected = abs(currentSpeed - speed) < 0.01
+            return UIAction(
+                title: "\(speed)x",
+                image: isSelected ? UIImage(systemName: "checkmark") : nil,
+                state: isSelected ? .on : .off
+            ) { [weak self] _ in
                 self?.vlcRenderer.setPlaybackSpeed(speed)
                 self?.playerState?.currentPlaybackSpeed = speed
-            })
+            }
         }
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        present(alert, animated: true)
+        return UIMenu(title: "Playback Speed", children: actions)
     }
     
     func load(url: URL, headers: [String: String]?, preset: PlayerPreset?) {

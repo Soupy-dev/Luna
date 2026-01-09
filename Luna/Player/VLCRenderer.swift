@@ -145,15 +145,25 @@ final class VLCRenderer: NSObject {
         // Add custom headers if provided
         if let headers = headers {
             var userAgent = ""
+            var otherHeaders: [String] = []
+            
             for (key, value) in headers {
                 if key.lowercased() == "user-agent" {
                     userAgent = value
                 } else {
-                    media.addOption("http-header=\(key): \(value)")
+                    otherHeaders.append("\(key): \(value)")
                 }
             }
+            
+            // Set user agent separately
             if !userAgent.isEmpty {
                 media.addOption(":http-user-agent=\(userAgent)")
+            }
+            
+            // Add all other headers as a single concatenated string
+            if !otherHeaders.isEmpty {
+                let headerString = otherHeaders.joined(separator: "\r\n")
+                media.addOption(":http-header-fields=\(headerString)")
             }
         }
         
@@ -163,15 +173,16 @@ final class VLCRenderer: NSObject {
         currentMedia = media
         mediaPlayer.media = media
         
-        // Apply audio preferences
+        // Start playback immediately
+        mediaPlayer.play()
+        
+        // Apply audio preferences after a short delay to ensure media is loaded
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.applyAudioLanguagePreference()
             self?.enableAutoSubtitles(self?.autoLoadSubtitles ?? true)
         }
         
-        mediaPlayer.play()
-        
-        Logger.shared.log("[VLCRenderer] Loaded media: \(url.absoluteString)", type: "Stream")
+        Logger.shared.log("[VLCRenderer] Loaded media and started playback: \(url.absoluteString)", type: "Stream")
     }
     
     // MARK: - Playback Control
@@ -440,6 +451,12 @@ final class VLCRenderer: NSObject {
             if newLoading != self.isLoading {
                 self.isLoading = newLoading
                 self.delegate?.renderer(self, didChangeLoading: self.isLoading)
+            }
+            
+            // Notify when ready to seek (media is playing)
+            if mediaPlayer.state == .playing && !self.isReadyToSeek {
+                self.isReadyToSeek = true
+                self.delegate?.renderer(self, didBecomeReadyToSeek: true)
             }
         }
     }
