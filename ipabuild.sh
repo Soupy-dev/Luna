@@ -87,6 +87,11 @@ fi
 mkdir Payload
 cp -r "$APP_PATH" "Payload/$APPLICATION_NAME.app"
 
+# Strip binary to reduce size
+if [ -f "Payload/$APPLICATION_NAME.app/$APPLICATION_NAME" ]; then
+    strip "Payload/$APPLICATION_NAME.app/$APPLICATION_NAME" 2>/dev/null || true
+fi
+
 # Remove code signature
 rm -rf "Payload/$APPLICATION_NAME.app/_CodeSignature" 2>/dev/null || true
 rm -f "Payload/$APPLICATION_NAME.app/embedded.mobileprovision" 2>/dev/null || true
@@ -97,12 +102,3 @@ zip -qry "$APPLICATION_NAME$OUTPUT_SUFFIX.ipa" Payload
 # Cleanup
 rm -rf Payload
 rm -rf "$ARCHIVE_PATH"
-
-if [ -f "Payload/$APPLICATION_NAME.app/$APPLICATION_NAME" ]; then
-    strip "Payload/$APPLICATION_NAME.app/$APPLICATION_NAME" 2>/dev/null || true
-fi
-
-zip -qr "$APPLICATION_NAME$OUTPUT_SUFFIX.ipa" Payload
-
-rm -rf "$TARGET_APP"
-rm -rf Payload
