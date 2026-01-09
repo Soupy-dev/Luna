@@ -374,14 +374,15 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     private func createAudioMenu() -> UIMenu {
         let audioTracks = vlcRenderer.getAudioTracksDetailed()
         let actions = audioTracks.map { track in
-            let isSelected = track.isDefault
+            let isSelected = false
             return UIAction(
-                title: track.name,
+                title: track.1,
                 image: isSelected ? UIImage(systemName: "checkmark") : nil,
                 state: isSelected ? .on : .off
             ) { [weak self] _ in
-                self?.vlcRenderer.setAudioTrack(track.id)
+                self?.vlcRenderer.setAudioTrack(id: track.0)
             }
+        }
         }
         return UIMenu(title: "Audio Track", children: actions)
     }

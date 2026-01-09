@@ -249,6 +249,10 @@ final class VLCRenderer: NSObject {
         if isPaused { play() } else { pausePlayback() }
     }
     
+    func togglePlayPause() {
+        togglePause()
+    }
+    
     func seek(to seconds: Double) {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
