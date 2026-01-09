@@ -133,6 +133,10 @@ struct SettingsView: View {
                     Text("Media Player")
                 }
                 
+                NavigationLink(destination: DownloadsView()) {
+                    Text("Downloads")
+                }
+                
                 NavigationLink(destination: AlternativeUIView()) {
                     Text("Appearance")
                 }
