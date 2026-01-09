@@ -46,7 +46,7 @@ struct VLCLanguageSelectionView: View {
                     if selectedLanguage == language.code {
                         Image(systemName: "checkmark")
                             .foregroundColor(.accentColor)
-                            .fontWeight(.semibold)
+                            .font(.system(size: 17, weight: .semibold))
                     }
                 }
                 .contentShape(Rectangle())
@@ -57,12 +57,14 @@ struct VLCLanguageSelectionView: View {
             }
         }
         .navigationTitle(title)
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
     }
 }
 
 #Preview {
-    NavigationStack {
+    NavigationView {
         VLCLanguageSelectionView(
             title: "Default Subtitle Language",
             selectedLanguage: .constant("eng")
