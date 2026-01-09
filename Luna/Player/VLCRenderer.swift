@@ -229,6 +229,11 @@ final class VLCRenderer: NSObject {
         }
     }
     
+    // Convenience entry point used by VLCPlayer
+    func load(url: URL, with preset: PlayerPreset, headers: [String: String]? = nil) {
+        loadMedia(url: url, headers: headers, preset: preset)
+    }
+    
     // MARK: - Playback Control
     
     func play() {
@@ -564,7 +569,7 @@ final class VLCRenderer: NSObject {
     }
     
     @objc private func handleAppDidEnterBackground() {
-        pause()
+        pausePlayback()
     }
     
     @objc private func handleAppWillEnterForeground() {
