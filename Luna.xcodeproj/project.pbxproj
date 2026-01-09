@@ -717,9 +717,6 @@
 			path = Models;
 			sourceTree = "<group>";
 		};
-		/* Ensure files resolve under the Luna folder */
-		path = Luna;
-		sourceTree = "<group>";
 		13F072BD2E4B2ED600EF90EB /* Services */ = {
 			isa = PBXGroup;
 			children = (
