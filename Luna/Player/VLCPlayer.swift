@@ -291,6 +291,7 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         audioButton.tintColor = .white
         audioButton.showsMenuAsPrimaryAction = true
         audioButton.menu = createAudioMenu()
+        audioButton.tag = 997  // Tag for finding button later
         buttonsStackView.addArrangedSubview(audioButton)
         
         // Subtitle button
@@ -299,6 +300,7 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         subtitleButton.tintColor = .white
         subtitleButton.showsMenuAsPrimaryAction = true
         subtitleButton.menu = createSubtitleMenu()
+        subtitleButton.tag = 998  // Tag for finding button later
         buttonsStackView.addArrangedSubview(subtitleButton)
         
         // Speed button
@@ -315,21 +317,25 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     private func setupGestureRecognizers() {
         // Single tap to toggle controls
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-        view.addGestureRecognizer(tapGesture)
+        tapGesture.cancelsTouchesInView = false
+        controlsContainer.addGestureRecognizer(tapGesture)
         
         // Two-finger tap to toggle play/pause
         let twoFingerTapGesture = UITapGestureRecognizer(target: self, action: #selector(togglePlayPause))
         twoFingerTapGesture.numberOfTouchesRequired = 2
+        twoFingerTapGesture.cancelsTouchesInView = false
         view.addGestureRecognizer(twoFingerTapGesture)
         
         // Double tap left side to go back 10s
         let doubleTapLeftGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapLeft(_:)))
         doubleTapLeftGesture.numberOfTapsRequired = 2
+        doubleTapLeftGesture.cancelsTouchesInView = false
         view.addGestureRecognizer(doubleTapLeftGesture)
         
         // Double tap right side to skip forward 10s
         let doubleTapRightGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapRight(_:)))
         doubleTapRightGesture.numberOfTapsRequired = 2
+        doubleTapRightGesture.cancelsTouchesInView = false
         view.addGestureRecognizer(doubleTapRightGesture)
         
         // Prevent single tap from firing when double tapping
@@ -420,14 +426,19 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     
     private func createAudioMenu() -> UIMenu {
         let audioTracks = vlcRenderer.getAudioTracksDetailed()
+        let currentTrack = vlcRenderer.getCurrentAudioTrackId()
+        
         let actions = audioTracks.map { track in
-            let isSelected = false
+            let isSelected = (track.0 == currentTrack)
             return UIAction(
                 title: track.1,
-                image: isSelected ? UIImage(systemName: "checkmark") : nil,
                 state: isSelected ? .on : .off
             ) { [weak self] _ in
                 self?.vlcRenderer.setAudioTrack(id: track.0)
+                // Recreate menu to update checkmarks
+                if let audioButton = self?.view.viewWithTag(997) as? UIButton {
+                    audioButton.menu = self?.createAudioMenu()
+                }
             }
         }
         return UIMenu(title: "Audio Track", children: actions)
@@ -435,17 +446,32 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     
     private func createSubtitleMenu() -> UIMenu {
         let subtitleTracks = vlcRenderer.getSubtitleTracksDetailed()
+        let currentTrack = vlcRenderer.getCurrentSubtitleTrackId()
+        
         var actions: [UIAction] = [
-            UIAction(title: "None") { [weak self] _ in
+            UIAction(
+                title: "None",
+                state: (currentTrack == -1) ? .on : .off
+            ) { [weak self] _ in
                 self?.vlcRenderer.disableSubtitles()
+                // Recreate menu to update checkmarks
+                if let subtitleButton = self?.view.viewWithTag(998) as? UIButton {
+                    subtitleButton.menu = self?.createSubtitleMenu()
+                }
             }
         ]
         
         actions += subtitleTracks.map { track in
+            let isSelected = (track.0 == currentTrack)
             return UIAction(
-                title: track.1
+                title: track.1,
+                state: isSelected ? .on : .off
             ) { [weak self] _ in
                 self?.vlcRenderer.setSubtitleTrack(id: track.0)
+                // Recreate menu to update checkmarks
+                if let subtitleButton = self?.view.viewWithTag(998) as? UIButton {
+                    subtitleButton.menu = self?.createSubtitleMenu()
+                }
             }
         }
         return UIMenu(title: "Subtitles", children: actions)
@@ -459,11 +485,14 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             let isSelected = abs(currentSpeed - speed) < 0.01
             return UIAction(
                 title: "\(speed)x",
-                image: isSelected ? UIImage(systemName: "checkmark") : nil,
                 state: isSelected ? .on : .off
             ) { [weak self] _ in
                 self?.vlcRenderer.setSpeed(speed)
                 self?.playerState?.currentPlaybackSpeed = speed
+                // Recreate menu to update checkmarks
+                if let speedButton = self?.view.viewWithTag(999) as? UIButton {
+                    speedButton.menu = self?.createSpeedMenu()
+                }
             }
         }
         return UIMenu(title: "Playback Speed", children: actions)

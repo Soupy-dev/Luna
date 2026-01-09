@@ -77,8 +77,8 @@ final class VLCRenderer: NSObject {
     
     private func setupVLCView() {
         vlcView.backgroundColor = .black
-        vlcView.contentMode = .scaleAspectFit
-        vlcView.layer.contentsGravity = .resizeAspect
+        vlcView.contentMode = .scaleAspectFill
+        vlcView.layer.contentsGravity = .resizeAspectFill
         vlcView.layer.isOpaque = true
         vlcView.clipsToBounds = true
         vlcView.isUserInteractionEnabled = false
@@ -110,6 +110,11 @@ final class VLCRenderer: NSObject {
         
         // Attach to view for rendering
         mediaPlayer.drawable = vlcView
+        
+        // Set video aspect ratio to fill screen
+        mediaPlayer.videoAspectRatio = nil  // Auto-detect
+        mediaPlayer.scaleFactor = 0  // Fill to fit
+        
         Logger.shared.log("[VLCRenderer.start] drawable set, vlcView class: \(type(of: vlcView))", type: "Stream")
         
         // Setup event handlers with @objc selectors
@@ -255,7 +260,18 @@ final class VLCRenderer: NSObject {
     func play() {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
+            
+            // Ensure audio session is active when resuming
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                try audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
+                try audioSession.setActive(true)
+            } catch {
+                Logger.shared.log("[VLCRenderer] Failed to activate audio session: \(error)", type: "Error")
+            }
+            
             player.play()
+            self.isPaused = false
         }
     }
     
@@ -348,6 +364,11 @@ final class VLCRenderer: NSObject {
     func setAudioTrack(id trackIndex: Int) {
         guard let mediaPlayer = mediaPlayer else { return }
         mediaPlayer.currentAudioTrackIndex = Int32(trackIndex)
+    }
+    
+    func getCurrentAudioTrackId() -> Int {
+        guard let mediaPlayer = mediaPlayer else { return -1 }
+        return Int(mediaPlayer.currentAudioTrackIndex)
     }
     
     func setPreferredAudioLanguage(_ language: String) {
@@ -460,6 +481,11 @@ final class VLCRenderer: NSObject {
         mediaPlayer.currentVideoSubTitleIndex = Int32(trackIndex)
         Logger.shared.log("[VLCRenderer] Set subtitle track to index: \(trackIndex)", type: "Stream")
         delegate?.rendererDidChangeTracks(self)
+    }
+    
+    func getCurrentSubtitleTrackId() -> Int {
+        guard let mediaPlayer = mediaPlayer else { return -1 }
+        return Int(mediaPlayer.currentVideoSubTitleIndex)
     }
     
     func getAvailableSubtitles() -> [String] {

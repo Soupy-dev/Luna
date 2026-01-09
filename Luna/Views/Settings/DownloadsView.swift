@@ -173,6 +173,17 @@ struct DownloadRow: View {
             
             // Action buttons
             HStack(spacing: 8) {
+                // Play button for completed downloads
+                if download.state == .completed, let fileURL = download.localFileURL {
+                    Button(action: {
+                        playDownload(download: download, fileURL: fileURL)
+                    }) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.green)
+                    }
+                }
+                
                 if download.state == .downloading {
                     Button(action: {
                         downloadManager.pauseDownload(download)
@@ -201,6 +212,82 @@ struct DownloadRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+    
+    private func playDownload(download: DownloadItem, fileURL: URL) {
+        Logger.shared.log("[Downloads] Playing file: \(fileURL.path)", type: "Download")
+        
+#if os(iOS)
+        let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
+        
+        if inAppRaw == "mpv" {
+            let preset = PlayerPreset.presets.first ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: [])
+            let pvc = PlayerViewController(url: fileURL, preset: preset, headers: nil, subtitles: nil)
+            
+            // Set media info based on download type
+            if download.mediaType == .movie, let id = download.movieId, let title = download.movieTitle {
+                pvc.mediaInfo = .movie(id: id, title: title, posterURL: download.posterURL)
+            } else if download.mediaType == .episode,
+                      let showId = download.showId,
+                      let showTitle = download.showTitle,
+                      let season = download.seasonNumber,
+                      let episode = download.episodeNumber {
+                pvc.mediaInfo = .episode(
+                    showId: showId,
+                    seasonNumber: season,
+                    episodeNumber: episode,
+                    showTitle: showTitle,
+                    episodeTitle: download.episodeTitle,
+                    showPosterURL: download.posterURL
+                )
+            }
+            
+            pvc.modalPresentationStyle = .fullScreen
+            
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let rootVC = windowScene.windows.first?.rootViewController {
+                var topVC = rootVC
+                while let presented = topVC.presentedViewController {
+                    topVC = presented
+                }
+                topVC.present(pvc, animated: true)
+            }
+        } else {
+            let vlcPlayer = VLCPlayer()
+            
+            // Set media info based on download type
+            if download.mediaType == .movie, let id = download.movieId, let title = download.movieTitle {
+                vlcPlayer.mediaInfo = .movie(id: id, title: title, posterURL: download.posterURL)
+            } else if download.mediaType == .episode,
+                      let showId = download.showId,
+                      let showTitle = download.showTitle,
+                      let season = download.seasonNumber,
+                      let episode = download.episodeNumber {
+                vlcPlayer.mediaInfo = .episode(
+                    showId: showId,
+                    seasonNumber: season,
+                    episodeNumber: episode,
+                    showTitle: showTitle,
+                    episodeTitle: download.episodeTitle,
+                    showPosterURL: download.posterURL
+                )
+            }
+            
+            vlcPlayer.load(url: fileURL, headers: nil, preset: nil)
+            
+            let hostingController = UIHostingController(rootView: vlcPlayer)
+            hostingController.modalPresentationStyle = .fullScreen
+            
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let rootVC = windowScene.windows.first?.rootViewController {
+                var topVC = rootVC
+                while let presented = topVC.presentedViewController {
+                    topVC = presented
+                }
+                topVC.present(hostingController, animated: true)
+            }
+        }
+#endif
     }
     
     @ViewBuilder

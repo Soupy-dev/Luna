@@ -180,6 +180,16 @@ class DownloadItem: Identifiable, Codable, ObservableObject {
         }
         return downloaded
     }
+    
+    var localFileURL: URL? {
+        guard state == .completed else { return nil }
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let fileURL = documentsPath.appendingPathComponent(destinationPath)
+        
+        // Verify file exists
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        return fileURL
+    }
 }
 
 extension String {

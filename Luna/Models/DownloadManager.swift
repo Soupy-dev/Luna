@@ -264,6 +264,21 @@ class DownloadManager: ObservableObject {
             Logger.shared.log("Failed to load downloads: \(error)", type: "Error")
         }
     }
+    
+    // MARK: - Download Lookup
+    
+    func getCompletedMovieDownload(movieId: Int) -> DownloadItem? {
+        return downloads.first { $0.movieId == movieId && $0.state == .completed }
+    }
+    
+    func getCompletedEpisodeDownload(showId: Int, seasonNumber: Int, episodeNumber: Int) -> DownloadItem? {
+        return downloads.first {
+            $0.showId == showId &&
+            $0.seasonNumber == seasonNumber &&
+            $0.episodeNumber == episodeNumber &&
+            $0.state == .completed
+        }
+    }
 }
 
 extension URLSessionDownloadTask {

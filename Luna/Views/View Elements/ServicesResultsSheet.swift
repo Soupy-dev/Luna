@@ -1138,6 +1138,30 @@ struct ModulesSearchResultsSheet: View {
                 return
             }
             
+            // If in download mode, call the download callback instead of playing
+            if isDownload, let onDownloadSelected = onDownloadSelected {
+                let serviceURL = service.metadata.baseUrl
+                var finalHeaders: [String: String] = [
+                    "Origin": serviceURL,
+                    "Referer": serviceURL,
+                    "User-Agent": URLSession.randomUserAgent
+                ]
+                
+                if let custom = headers {
+                    for (k, v) in custom {
+                        finalHeaders[k] = v
+                    }
+                    
+                    if finalHeaders["User-Agent"] == nil {
+                        finalHeaders["User-Agent"] = URLSession.randomUserAgent
+                    }
+                }
+                
+                onDownloadSelected(mediaTitle, streamURL, finalHeaders)
+                Logger.shared.log("Download selected for: \(mediaTitle)", type: "Download")
+                return
+            }
+            
             let externalRaw = UserDefaults.standard.string(forKey: "externalPlayer") ?? ExternalPlayer.none.rawValue
             let external = ExternalPlayer(rawValue: externalRaw) ?? .none
             let schemeUrl = external.schemeURL(for: url)

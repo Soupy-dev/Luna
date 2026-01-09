@@ -139,11 +139,26 @@ struct MediaDetailView: View {
         }
         .sheet(isPresented: $showingDownloadSheet) {
             if let movieDetail = movieDetail {
-                DownloadServiceSheet(mediaInfo: .movie(
-                    id: movieDetail.id,
-                    title: movieDetail.title,
-                    posterURL: movieDetail.fullPosterURL
-                ))
+                ModulesSearchResultsSheet(
+                    mediaTitle: movieDetail.title,
+                    originalTitle: romajiTitle,
+                    isMovie: true,
+                    selectedEpisode: nil,
+                    tmdbId: movieDetail.id,
+                    animeSeasonTitle: nil,
+                    posterPath: movieDetail.posterPath,
+                    isDownload: true,
+                    onDownloadSelected: { title, url, headers in
+                        DownloadManager.shared.addMovieDownload(
+                            movieId: movieDetail.id,
+                            title: title,
+                            posterURL: movieDetail.fullPosterURL,
+                            streamURL: url,
+                            headers: headers
+                        )
+                        showingDownloadSheet = false
+                    }
+                )
             }
         }
         .alert("No Active Services", isPresented: $showingNoServicesAlert) {

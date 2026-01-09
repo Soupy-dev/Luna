@@ -146,8 +146,34 @@ struct TVShowSeasonsSection: View {
             Text("You don't have any active services. Please go to the Services tab to download and activate services.")
         }
         .sheet(isPresented: $showingDownloadSheet) {
-            if let mediaInfo = downloadMediaInfo {
-                DownloadServiceSheet(mediaInfo: mediaInfo)
+            if let mediaInfo = downloadMediaInfo, let episode = currentDownloadEpisode {
+                ModulesSearchResultsSheet(
+                    mediaTitle: getSearchTitle(),
+                    originalTitle: romajiTitle,
+                    isMovie: false,
+                    selectedEpisode: episode,
+                    tmdbId: tvShow?.id ?? 0,
+                    animeSeasonTitle: isAnime ? "anime" : nil,
+                    posterPath: tvShow?.posterPath,
+                    isDownload: true,
+                    onDownloadSelected: { title, url, headers in
+                        switch mediaInfo {
+                        case .episode(let id, let showTitle, let posterURL, let season, let episodeNum):
+                            DownloadManager.shared.addEpisodeDownload(
+                                showId: id,
+                                showTitle: showTitle,
+                                posterURL: posterURL,
+                                seasonNumber: season,
+                                episodeNumber: episodeNum,
+                                streamURL: url,
+                                headers: headers
+                            )
+                        default:
+                            break
+                        }
+                        showNextDownloadPrompt()
+                    }
+                )
             }
         }
     }
