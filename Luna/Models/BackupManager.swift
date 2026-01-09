@@ -334,12 +334,20 @@ class BackupManager {
         // Try to decode complex objects individually
         var collections: [BackupCollection] = []
         if let collectionsData = json["collections"] as? [[String: Any]] {
-            for collectionDict in collectionsData {
-                if let collectionJSON = try? JSONSerialization.data(withJSONObject: collectionDict),
-                   let collection = try? JSONDecoder().decode(BackupCollection.self, from: collectionJSON) {
+            Logger.shared.log("Found \(collectionsData.count) collections in backup", type: "Info")
+            for (index, collectionDict) in collectionsData.enumerated() {
+                do {
+                    let collectionJSON = try JSONSerialization.data(withJSONObject: collectionDict)
+                    let collection = try JSONDecoder().decode(BackupCollection.self, from: collectionJSON)
                     collections.append(collection)
+                    Logger.shared.log("Successfully decoded collection \(index + 1): \(collection.name)", type: "Info")
+                } catch {
+                    Logger.shared.log("Failed to decode collection \(index + 1): \(error.localizedDescription)", type: "Error")
                 }
             }
+            Logger.shared.log("Successfully decoded \(collections.count) out of \(collectionsData.count) collections", type: "Info")
+        } else {
+            Logger.shared.log("No collections array found in backup", type: "Info")
         }
         
         var progressData = ProgressData()

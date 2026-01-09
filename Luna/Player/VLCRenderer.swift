@@ -104,8 +104,33 @@ final class VLCRenderer: NSObject {
         // Attach to view for rendering
         mediaPlayer.drawable = vlcView
         
-        // Setup event handlers
-        setupMediaPlayerObservers(mediaPlayer)
+        // Setup event handlers with @objc selectors (Luna-soupy pattern)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(mediaPlayerTimeChanged),
+            name: NSNotification.Name(rawValue: VLCMediaPlayerTimeChanged),
+            object: mediaPlayer
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(mediaPlayerStateChanged),
+            name: NSNotification.Name(rawValue: VLCMediaPlayerStateChanged),
+            object: mediaPlayer
+        )
+        
+        // Observe app lifecycle
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
         
         isRunning = true
         Logger.shared.log("[VLCRenderer.start] VLCRenderer initialized", type: "Stream")
@@ -426,66 +451,92 @@ final class VLCRenderer: NSObject {
     
     // MARK: - Event Observers
     
-    private func setupMediaPlayerObservers(_ mediaPlayer: VLCMediaPlayer) {
-        let notificationCenter = NotificationCenter.default
+    @objc private func mediaPlayerTimeChanged() {
+        guard let player = mediaPlayer else { return }
         
-        notificationCenter.addObserver(
-            forName: VLCMediaPlayerStateChanged,
-            object: mediaPlayer,
-            queue: eventQueue
-        ) { [weak self] _ in
-            self?.handleMediaPlayerStateChange()
-        }
+        let positionMs = player.time.value?.doubleValue ?? 0
+        let position = positionMs / 1000.0
+        let durationMs = player.media?.length.value?.doubleValue ?? 0
+        let duration = durationMs / 1000.0
         
-        notificationCenter.addObserver(
-            forName: VLCMediaPlayerTimeChanged,
-            object: mediaPlayer,
-            queue: eventQueue
-        ) { [weak self] _ in
-            self?.handleMediaPlayerTimeChanged()
+        cachedPosition = position
+        cachedDuration = duration
+        
+        if duration > 0 && !isLoading {
+            if isLoading {
+                isLoading = false
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.delegate?.renderer(self, didChangeLoading: false)
+                }
+            }
         }
-    }
-    
-    private func handleMediaPlayerStateChange() {
-        guard let mediaPlayer = mediaPlayer else { return }
         
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            
-            let newPaused = mediaPlayer.state == .paused || mediaPlayer.state == .stopped
-            if newPaused != self.isPaused {
-                self.isPaused = newPaused
-                self.delegate?.renderer(self, didChangePause: self.isPaused)
-            }
-            
-            let newLoading = mediaPlayer.state == .opening || mediaPlayer.state == .buffering
-            if newLoading != self.isLoading {
-                self.isLoading = newLoading
-                self.delegate?.renderer(self, didChangeLoading: self.isLoading)
-            }
-            
-            // Notify when ready to seek (media is playing)
-            if mediaPlayer.state == .playing && !self.isReadyToSeek {
-                self.isReadyToSeek = true
-                self.delegate?.renderer(self, didBecomeReadyToSeek: true)
-            }
-        }
-    }
-    
-    private func handleMediaPlayerTimeChanged() {
-        guard let mediaPlayer = mediaPlayer else { return }
-        
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            
-            let position = Double(mediaPlayer.time.value) / 1000.0
-            let duration = Double(mediaPlayer.media?.length.value ?? 0) / 1000.0
-            
-            self.cachedPosition = position
-            self.cachedDuration = duration
-            
+            guard let self else { return }
             self.delegate?.renderer(self, didUpdatePosition: position, duration: duration)
         }
+    }
+    
+    @objc private func mediaPlayerStateChanged() {
+        guard let player = mediaPlayer else { return }
+        
+        let state = player.state
+        Logger.shared.log("[VLCRenderer] State changed to: \(state.rawValue)", type: "Stream")
+        
+        switch state {
+        case .playing:
+            isPaused = false
+            isLoading = false
+            isReadyToSeek = true
+            
+            Logger.shared.log("[VLCRenderer] Now playing", type: "Stream")
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.renderer(self, didChangePause: false)
+                self.delegate?.renderer(self, didChangeLoading: false)
+                self.delegate?.renderer(self, didBecomeReadyToSeek: true)
+            }
+            
+        case .paused:
+            isPaused = true
+            Logger.shared.log("[VLCRenderer] Paused", type: "Stream")
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.renderer(self, didChangePause: true)
+            }
+            
+        case .opening, .buffering:
+            isLoading = true
+            Logger.shared.log("[VLCRenderer] Loading/Buffering", type: "Stream")
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.renderer(self, didChangeLoading: true)
+            }
+
+        case .stopped, .ended, .error:
+            isPaused = true
+            isLoading = false
+            if state == .error {
+                Logger.shared.log("[VLCRenderer] ERROR state reached", type: "Error")
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.delegate?.renderer(self, didChangePause: true)
+                self.delegate?.renderer(self, didChangeLoading: false)
+            }
+            
+        default:
+            break
+        }
+    }
+    
+    @objc private func handleAppDidEnterBackground() {
+        pause()
+    }
+    
+    @objc private func handleAppWillEnterForeground() {
+        play()
     }
     
     // MARK: - Properties

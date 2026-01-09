@@ -118,12 +118,17 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
+        Logger.shared.log("[VLCPlayer] viewDidAppear called", type: "Stream")
+        
         // Load media after view is fully visible and VLC is initialized
         if let url = pendingURL {
+            Logger.shared.log("[VLCPlayer] Loading pending URL: \(url.absoluteString)", type: "Stream")
             load(url: url, headers: pendingHeaders, preset: pendingPreset)
             pendingURL = nil
             pendingHeaders = nil
             pendingPreset = nil
+        } else {
+            Logger.shared.log("[VLCPlayer] No pending URL to load", type: "Stream")
         }
     }
     
@@ -409,6 +414,11 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     }
     
     func load(url: URL, headers: [String: String]?, preset: PlayerPreset?) {
+        Logger.shared.log("[VLCPlayer] load() called with URL: \(url.absoluteString)", type: "Stream")
+        
+        // Set loading state
+        playerState?.isLoading = true
+        
         do {
             try vlcRenderer.loadMedia(url: url, headers: headers, preset: preset)
             
@@ -416,8 +426,11 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             if let info = mediaInfo {
                 prepareSeekToLastPosition(for: info)
             }
+            
+            Logger.shared.log("[VLCPlayer] loadMedia completed successfully", type: "Stream")
         } catch {
             Logger.shared.log("Failed to load VLC media: \(error)", type: "Error")
+            playerState?.isLoading = false
         }
     }
     
