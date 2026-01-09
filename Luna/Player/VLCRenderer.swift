@@ -372,38 +372,37 @@ final class VLCRenderer: NSObject {
         let detailedTracks = getAudioTracksDetailed()
         
         // First try exact language match
-        if let matchingTrack = detailedTracks.first(where: { $0.language?.lowercased() == preferredAudioLanguage.lowercased() }) {
-            setAudioTrack(matchingTrack.id)
+        if let matchingTrack = detailedTracks.first(where: { $0.2.lowercased() == preferredAudioLanguage.lowercased() }) {
+            setAudioTrack(id: matchingTrack.0)
             return
         }
         
         // Then try language code (e.g., "en" for English)
         let languageCode = String(preferredAudioLanguage.prefix(2))
         if let matchingTrack = detailedTracks.first(where: { 
-            $0.language?.lowercased().starts(with: languageCode.lowercased()) ?? false
+            $0.2.lowercased().starts(with: languageCode.lowercased())
         }) {
-            setAudioTrack(matchingTrack.id)
+            setAudioTrack(id: matchingTrack.0)
             return
         }
         
         // Default to first track
         if let firstTrack = detailedTracks.first {
-            setAudioTrack(firstTrack.id)
+            setAudioTrack(id: firstTrack.0)
         }
     }
     
     private func applyAnimeAudioPreference() {
         guard let mediaPlayer = mediaPlayer else { return }
-        guard Settings.shared.isAnimeContent else { return }
         
         let detailedTracks = getAudioTracksDetailed()
         
         // Look for Japanese audio
         if let japaneseTrack = detailedTracks.first(where: { 
-            $0.language?.lowercased().contains("ja") ?? false || 
-            $0.name.lowercased().contains("japanese")
+            $0.2.lowercased().contains("ja") || 
+            $0.1.lowercased().contains("japanese")
         }) {
-            setAudioTrack(japaneseTrack.id)
+            setAudioTrack(id: japaneseTrack.0)
             return
         }
         
