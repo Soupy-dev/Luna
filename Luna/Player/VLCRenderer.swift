@@ -14,6 +14,12 @@ import AVFoundation
 #if os(iOS) && canImport(MobileVLCKit)
 import MobileVLCKit
 
+// Log that we're using real VLC implementation
+private let _ = {
+    print("[VLCRenderer] ✓ Using REAL iOS VLC implementation with MobileVLCKit")
+    return true
+}()
+
 protocol VLCRendererDelegate: AnyObject {
     func renderer(_ renderer: VLCRenderer, didUpdatePosition position: Double, duration: Double)
     func renderer(_ renderer: VLCRenderer, didChangePause isPaused: Bool)
@@ -612,6 +618,13 @@ final class VLCRenderer: NSObject {
 
 #else
 // Stub when MobileVLCKit is not available (tvOS, etc.)
+
+// Log that we're using stub implementation
+private let _ = {
+    print("[VLCRenderer] ⚠️ Using STUB implementation - MobileVLCKit NOT available!")
+    print("[VLCRenderer] ⚠️ Install CocoaPods: cd to project folder, run 'pod install'")
+    return true
+}()
 
 protocol VLCRendererDelegate: AnyObject {
     func renderer(_ renderer: VLCRenderer, didUpdatePosition position: Double, duration: Double)
