@@ -1160,7 +1160,7 @@ struct ModulesSearchResultsSheet: View {
             Logger.shared.log("Final headers: \(finalHeaders)", type: "Stream")
             
             let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
-            let inAppPlayer = (inAppRaw == "mpv") ? "mpv" : "Normal"
+            let inAppPlayer = inAppRaw
             
             // Record service usage (async to avoid blocking player launch)
             Task {
@@ -1200,6 +1200,46 @@ struct ModulesSearchResultsSheet: View {
                     Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
                 }
                 return
+            } else if inAppPlayer == "VLC" {
+                #if os(iOS)
+                let playerState = VLCPlayerState()
+                let vlcPlayer = VLCPlayer(url: streamURL, headers: finalHeaders, preset: nil, playerState: playerState)
+                
+                let hostingController = UIHostingController(rootView: vlcPlayer)
+                hostingController.modalPresentationStyle = .fullScreen
+                
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let rootVC = windowScene.windows.first?.rootViewController {
+                    rootVC.topmostViewController().present(hostingController, animated: true)
+                } else {
+                    Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
+                }
+                return
+                #else
+                // tvOS falls back to MPV
+                let preset = PlayerPreset.presets.first
+                let subtitleArray: [String]? = subtitle.map { [$0] }
+                let pvc = PlayerViewController(
+                    url: streamURL,
+                    preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
+                    headers: finalHeaders,
+                    subtitles: subtitleArray
+                )
+                if isMovie {
+                    pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle)
+                } else if let episode = selectedEpisode {
+                    pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber)
+                }
+                pvc.modalPresentationStyle = .fullScreen
+                
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let rootVC = windowScene.windows.first?.rootViewController {
+                    rootVC.topmostViewController().present(pvc, animated: true, completion: nil)
+                } else {
+                    Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
+                }
+                return
+                #endif
             } else {
                 let playerVC = NormalPlayer()
                 let asset = AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": finalHeaders])
