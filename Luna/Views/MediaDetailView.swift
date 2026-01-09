@@ -27,6 +27,7 @@ struct MediaDetailView: View {
     @State private var showingSearchResults = false
     @State private var showingAddToCollection = false
     @State private var showingNoServicesAlert = false
+    @State private var showingDownloadSheet = false
     @State private var selectedEpisodeForSearch: TMDBEpisode?
     @State private var romajiTitle: String?
     @State private var logoURL: String?
@@ -135,6 +136,15 @@ struct MediaDetailView: View {
         }
         .sheet(isPresented: $showingAddToCollection) {
             AddToCollectionView(searchResult: searchResult)
+        }
+        .sheet(isPresented: $showingDownloadSheet) {
+            if let movieDetail = movieDetail {
+                DownloadServiceSheet(mediaInfo: .movie(
+                    id: movieDetail.id,
+                    title: movieDetail.title,
+                    posterURL: movieDetail.fullPosterURL
+                ))
+            }
         }
         .alert("No Active Services", isPresented: $showingNoServicesAlert) {
             Button("OK") { }
@@ -379,6 +389,8 @@ struct MediaDetailView: View {
                 Button(action: {
                     if serviceManager.activeServices.isEmpty {
                         showingNoServicesAlert = true
+                    } else {
+                        showingDownloadSheet = true
                     }
                 }) {
                     Image(systemName: "arrow.down.circle")
