@@ -72,9 +72,10 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     private let topControlsView = UIView()
     private let bottomControlsView = UIView()
     private let centerPlayButton = UIButton(type: .system)
-    private let progressBar = UIProgressView(progressViewStyle: .bar)
+    private let progressBar = UISlider()
     private let timeLabel = UILabel()
     private let durationLabel = UILabel()
+    private var isSeeking = false
     private let bufferingSpinner = UIActivityIndicatorView(style: .large)
     
     private var positionUpdateTimer: Timer?
@@ -221,16 +222,23 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             bottomControlsView.heightAnchor.constraint(greaterThanOrEqualToConstant: 80)
         ])
         
-        // Progress bar
-        progressBar.tintColor = .systemBlue
+        // Progress bar (slider)
+        progressBar.minimumValue = 0
+        progressBar.maximumValue = 1
+        progressBar.value = 0
+        progressBar.minimumTrackTintColor = .systemBlue
+        progressBar.maximumTrackTintColor = .white.withAlphaComponent(0.3)
+        progressBar.addTarget(self, action: #selector(progressBarChanged(_:)), for: .valueChanged)
+        progressBar.addTarget(self, action: #selector(progressBarTouchDown(_:)), for: .touchDown)
+        progressBar.addTarget(self, action: #selector(progressBarTouchUp(_:)), for: [.touchUpInside, .touchUpOutside])
         bottomControlsView.addSubview(progressBar)
         progressBar.translatesAutoresizingMaskIntoConstraints = false
         
         NSLayoutConstraint.activate([
-            progressBar.topAnchor.constraint(equalTo: bottomControlsView.topAnchor),
-            progressBar.leadingAnchor.constraint(equalTo: bottomControlsView.leadingAnchor),
-            progressBar.trailingAnchor.constraint(equalTo: bottomControlsView.trailingAnchor),
-            progressBar.heightAnchor.constraint(equalToConstant: 4)
+            progressBar.topAnchor.constraint(equalTo: bottomControlsView.topAnchor, constant: 8),
+            progressBar.leadingAnchor.constraint(equalTo: bottomControlsView.leadingAnchor, constant: 12),
+            progressBar.trailingAnchor.constraint(equalTo: bottomControlsView.trailingAnchor, constant: -12),
+            progressBar.heightAnchor.constraint(equalToConstant: 30)
         ])
         
         // Time display
@@ -311,14 +319,14 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         speedButton.tintColor = .white
         speedButton.showsMenuAsPrimaryAction = true
         speedButton.menu = createSpeedMenu()
+        speedButton.tag = 999  // Tag for finding button later
         buttonsStackView.addArrangedSubview(speedButton)
     }
     
     private func setupGestureRecognizers() {
         // Single tap to toggle controls
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-        tapGesture.cancelsTouchesInView = false
-        controlsContainer.addGestureRecognizer(tapGesture)
+        view.addGestureRecognizer(tapGesture)
         
         // Two-finger tap to toggle play/pause
         let twoFingerTapGesture = UITapGestureRecognizer(target: self, action: #selector(togglePlayPause))
@@ -363,11 +371,25 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
                 UIView.animate(withDuration: 0.3) {
                     self?.controlsContainer.alpha = show ? 1.0 : 0.0
                 }
+                self?.updateCenterPlayButtonVisibility()
             }
             .store(in: &cancellables)
         
         // Start with controls visible
         playerState?.scheduleHideControls()
+    }
+    
+    private func updateCenterPlayButtonVisibility() {
+        let isLoading = playerState?.isLoading ?? false
+        let isPaused = !(playerState?.isPlaying ?? false)
+        let showControls = playerState?.showControls ?? false
+        
+        // Show play button if: not loading AND (paused OR controls are visible)
+        let shouldShow = !isLoading && (isPaused || showControls)
+        
+        UIView.animate(withDuration: 0.3) {
+            self.centerPlayButton.alpha = shouldShow ? 1.0 : 0.0
+        }
     }
     
     private var cancellables = Set<AnyCancellable>()
@@ -399,14 +421,33 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         playerState?.scheduleHideControls()
     }
     
+    @objc private func progressBarTouchDown(_ slider: UISlider) {
+        isSeeking = true
+        playerState?.showControls = true
+    }
+    
+    @objc private func progressBarChanged(_ slider: UISlider) {
+        if isSeeking {
+            let duration = playerState?.duration ?? 0
+            let newPosition = Double(slider.value) * duration
+            timeLabel.text = formatTime(newPosition)
+        }
+    }
+    
+    @objc private func progressBarTouchUp(_ slider: UISlider) {
+        let duration = playerState?.duration ?? 0
+        let newPosition = Double(slider.value) * duration
+        vlcRenderer.seek(to: newPosition)
+        isSeeking = false
+        playerState?.scheduleHideControls()
+    }
+    
     @objc private func handleDoubleTapLeft(_ gesture: UITapGestureRecognizer) {
         let location = gesture.location(in: view)
         // Only trigger if tap is on left half of screen
         if location.x < view.bounds.width / 2 {
-            let currentPosition = playerState?.position ?? 0
-            let newPosition = max(0, currentPosition - 10)
-            vlcRenderer.seek(to: newPosition)
-            Logger.shared.log("[VLCPlayer] Seek back 10s: \(currentPosition) -> \(newPosition)", type: "Stream")
+            vlcRenderer.seek(by: -10)
+            Logger.shared.log("[VLCPlayer] Seek back 10s", type: "Stream")
             playerState?.scheduleHideControls()
         }
     }
@@ -415,11 +456,8 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         let location = gesture.location(in: view)
         // Only trigger if tap is on right half of screen
         if location.x >= view.bounds.width / 2 {
-            let currentPosition = playerState?.position ?? 0
-            let duration = playerState?.duration ?? 0
-            let newPosition = min(duration, currentPosition + 10)
-            vlcRenderer.seek(to: newPosition)
-            Logger.shared.log("[VLCPlayer] Seek forward 10s: \(currentPosition) -> \(newPosition)", type: "Stream")
+            vlcRenderer.seek(by: 10)
+            Logger.shared.log("[VLCPlayer] Seek forward 10s", type: "Stream")
             playerState?.scheduleHideControls()
         }
     }
@@ -427,6 +465,11 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     private func createAudioMenu() -> UIMenu {
         let audioTracks = vlcRenderer.getAudioTracksDetailed()
         let currentTrack = vlcRenderer.getCurrentAudioTrackId()
+        
+        if audioTracks.isEmpty {
+            let noTracksAction = UIAction(title: "No audio tracks available", attributes: .disabled) { _ in }
+            return UIMenu(title: "Audio Track", children: [noTracksAction])
+        }
         
         let actions = audioTracks.map { track in
             let isSelected = (track.0 == currentTrack)
@@ -525,8 +568,9 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             self.playerState?.position = position
             self.playerState?.duration = duration
             
-            if duration > 0 {
-                self.progressBar.progress = Float(position / duration)
+            // Only update slider if user is not currently seeking
+            if !self.isSeeking && duration > 0 {
+                self.progressBar.value = Float(position / duration)
             }
             
             self.timeLabel.text = self.formatTime(position)
@@ -542,11 +586,7 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             self.playerState?.isPlaying = !isPaused
             let imageName = isPaused ? "play.fill" : "pause.fill"
             self.centerPlayButton.setImage(UIImage(systemName: imageName), for: .normal)
-            
-            // Hide center play button when playing, show when paused
-            UIView.animate(withDuration: 0.3) {
-                self.centerPlayButton.alpha = isPaused ? 1.0 : 0.0
-            }
+            self.updateCenterPlayButtonVisibility()
         }
     }
     
@@ -555,18 +595,10 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             self.playerState?.isLoading = isLoading
             if isLoading {
                 self.bufferingSpinner.startAnimating()
-                // Hide play button during buffering
-                UIView.animate(withDuration: 0.3) {
-                    self.centerPlayButton.alpha = 0.0
-                }
             } else {
                 self.bufferingSpinner.stopAnimating()
-                // Show play button only if paused
-                let isPaused = !(self.playerState?.isPlaying ?? false)
-                UIView.animate(withDuration: 0.3) {
-                    self.centerPlayButton.alpha = isPaused ? 1.0 : 0.0
-                }
             }
+            self.updateCenterPlayButtonVisibility()
         }
     }
     

@@ -79,8 +79,8 @@ final class VLCRenderer: NSObject {
         vlcView.backgroundColor = .black
         vlcView.contentMode = .scaleAspectFill
         vlcView.layer.contentsGravity = .resizeAspectFill
+        vlcView.layer.masksToBounds = true  // Ensure video fills and clips
         vlcView.layer.isOpaque = true
-        vlcView.clipsToBounds = true
         vlcView.isUserInteractionEnabled = false
     }
     
@@ -111,9 +111,10 @@ final class VLCRenderer: NSObject {
         // Attach to view for rendering
         mediaPlayer.drawable = vlcView
         
-        // Set video aspect ratio to fill screen
-        mediaPlayer.videoAspectRatio = nil  // Auto-detect
-        mediaPlayer.scaleFactor = 0  // Fill to fit
+        // Set video to fill screen like YouTube (aspect fill)
+        mediaPlayer.videoAspectRatio = nil  // Auto-detect from video
+        mediaPlayer.videoCropGeometry = nil  // No cropping
+        mediaPlayer.scaleFactor = 0  // Native scaling
         
         Logger.shared.log("[VLCRenderer.start] drawable set, vlcView class: \(type(of: vlcView))", type: "Stream")
         
@@ -279,6 +280,16 @@ final class VLCRenderer: NSObject {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             player.pause()
+            self.isPaused = true
+            
+            // Keep audio session active even when paused to prevent audio cutout on resume
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                try audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
+                try audioSession.setActive(true)
+            } catch {
+                Logger.shared.log("[VLCRenderer] Failed to maintain audio session during pause: \(error)", type: "Error")
+            }
         }
     }
     
