@@ -410,19 +410,19 @@ final class PlayerViewController: UIViewController {
         let lastPlayedTime: Double
         
         switch mediaInfo {
-        case .movie(let id, let title):
+        case .movie(let id, let title, _):
             lastPlayedTime = ProgressManager.shared.getMovieCurrentTime(movieId: id, title: title)
             
-        case .episode(let showId, let seasonNumber, let episodeNumber):
+        case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
             lastPlayedTime = ProgressManager.shared.getEpisodeCurrentTime(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
         }
         
         if lastPlayedTime != 0 {
             let progress: Double
             switch mediaInfo {
-            case .movie(let id, let title):
+            case .movie(let id, let title, _):
                 progress = ProgressManager.shared.getMovieProgress(movieId: id, title: title)
-            case .episode(let showId, let seasonNumber, let episodeNumber):
+            case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
                 progress = ProgressManager.shared.getEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
             }
             
