@@ -378,8 +378,6 @@ struct MediaDetailView: View {
                 Button(action: {
                     if serviceManager.activeServices.isEmpty {
                         showingNoServicesAlert = true
-                    } else {
-                        showingDownloadSheet = true
                     }
                 }) {
                     Image(systemName: "arrow.down.circle")

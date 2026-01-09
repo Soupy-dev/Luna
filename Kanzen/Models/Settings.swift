@@ -12,6 +12,8 @@ enum Appearance: String, CaseIterable, Identifiable {
     var id: String { self.rawValue }
 }
 class Settings: ObservableObject {
+    static let shared = Settings()
+    
     @Published var accentColor: Color {
         didSet {
             saveAccentColor(accentColor)
