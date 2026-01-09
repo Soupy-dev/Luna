@@ -21,6 +21,7 @@ jobs:
         run: |
           sudo gem install cocoapods
           pod repo update
+          pod deintegrate || true
           pod install --repo-update --clean-install
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
@@ -46,6 +47,7 @@ jobs:
         run: |
           sudo gem install cocoapods
           pod repo update
+          pod deintegrate || true
           pod install --repo-update --clean-install
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
