@@ -20,7 +20,8 @@ jobs:
       - name: Install CocoaPods dependencies
         run: |
           sudo gem install cocoapods
-          pod install
+          pod repo update
+          pod install --repo-update --clean-install
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
       - name: Build iOS IPA
@@ -44,7 +45,8 @@ jobs:
       - name: Install CocoaPods dependencies
         run: |
           sudo gem install cocoapods
-          pod install
+          pod repo update
+          pod install --repo-update --clean-install
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
       - name: Build tvOS IPA
