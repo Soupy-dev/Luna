@@ -33,20 +33,3 @@ struct DownloadServiceSelectionView: View {
         ))
     }
 }
-
-// Environment key for download mode
-struct DownloadModeKey: EnvironmentKey {
-    struct Value {
-        let isEnabled: Bool
-        let onDownloadSelected: (URL, [String: String]?) -> Void
-    }
-    
-    static let defaultValue = Value(isEnabled: false, onDownloadSelected: { _, _ in })
-}
-
-extension EnvironmentValues {
-    var downloadMode: DownloadModeKey.Value {
-        get { self[DownloadModeKey.self] }
-        set { self[DownloadModeKey.self] = newValue }
-    }
-}

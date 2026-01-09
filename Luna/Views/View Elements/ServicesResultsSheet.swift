@@ -17,6 +17,23 @@ struct StreamOption: Identifiable {
     let subtitle: String?
 }
 
+// Environment key for download mode
+struct DownloadModeKey: EnvironmentKey {
+    struct Value {
+        let isEnabled: Bool
+        let onDownloadSelected: (URL, [String: String]?) -> Void
+    }
+    
+    static let defaultValue = Value(isEnabled: false, onDownloadSelected: { _, _ in })
+}
+
+extension EnvironmentValues {
+    var downloadMode: DownloadModeKey.Value {
+        get { self[DownloadModeKey.self] }
+        set { self[DownloadModeKey.self] = newValue }
+    }
+}
+
 @MainActor
 final class ModulesSearchResultsViewModel: ObservableObject {
     @Published var moduleResults: [UUID: [SearchItem]] = [:]
