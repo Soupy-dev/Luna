@@ -1007,7 +1007,7 @@
 				13F187AC2E6F38CE00747F7E /* LibraryManager.swift in Sources */,
 				14BBB0033FFF111100AAAAAA /* BackupManagementView.swift in Sources */,
 				14BBB0053FFF111100AAAAAA /* BackupManager.swift in Sources */,
-
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
