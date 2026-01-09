@@ -21,10 +21,6 @@ struct TVShowSeasonsSection: View {
     @State private var isLoadingSeason = false
     @State private var showingSearchResults = false
     @State private var showingNoServicesAlert = false
-    @State private var showingDownloadSheet = false
-    @State private var currentDownloadEpisode: TMDBEpisode?
-    @State private var episodesToDownload: [TMDBEpisode] = []
-    @State private var currentDownloadIndex = 0
     @State private var romajiTitle: String?
     @State private var currentSeasonTitle: String?
     
@@ -145,29 +141,6 @@ struct TVShowSeasonsSection: View {
         } message: {
             Text("You don't have any active services. Please go to the Services tab to download and activate services.")
         }
-        .sheet(isPresented: $showingDownloadSheet) {
-            if let episode = currentDownloadEpisode, let show = tvShow {
-                DownloadEpisodeSheet(
-                    episode: episode,
-                    show: show,
-                    searchTitle: getSearchTitle(),
-                    romajiTitle: romajiTitle,
-                    isAnime: isAnime,
-                    onDownloadSelected: { url in
-                        DownloadManager.shared.addEpisodeDownload(
-                            url: url,
-                            showId: show.id,
-                            showTitle: show.name,
-                            seasonNumber: episode.seasonNumber,
-                            episodeNumber: episode.episodeNumber,
-                            episodeTitle: episode.name,
-                            posterURL: show.fullPosterURL
-                        )
-                        showNextDownloadPrompt()
-                    }
-                )
-            }
-        }
     }
     
     private func getSearchTitle() -> String {
@@ -280,24 +253,6 @@ struct TVShowSeasonsSection: View {
                     }
                     .padding(.horizontal)
                 }
-                
-                // Download All Season button
-                if let selectedSeason = selectedSeason, selectedSeason.seasonNumber > 0 {
-                    Button(action: {
-                        downloadAllEpisodes()
-                    }) {
-                        HStack {
-                            Image(systemName: "arrow.down.circle.fill")
-                            Text("Download All Episodes in Season \(selectedSeason.seasonNumber)")
-                                .fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .applyLiquidGlassBackground(cornerRadius: 12)
-                        .foregroundColor(.white)
-                    }
-                    .padding(.horizontal)
-                }
             }
         }
     }
@@ -356,8 +311,7 @@ struct TVShowSeasonsSection: View {
                 isSelected: isSelected,
                 onTap: { episodeTapAction(episode: episode) },
                 onMarkWatched: { markAsWatched(episode: episode) },
-                onResetProgress: { resetProgress(episode: episode) },
-                onDownload: { downloadEpisode(episode: episode) }
+                onResetProgress: { resetProgress(episode: episode) }
             )
         } else {
             EmptyView()
@@ -489,48 +443,5 @@ struct TVShowSeasonsSection: View {
         }
         
         return nil
-    }
-    
-    // MARK: - Download Functions
-    
-    private func downloadEpisode(episode: TMDBEpisode) {
-        guard tvShow != nil else { return }
-        
-        if serviceManager.activeServices.isEmpty {
-            showingNoServicesAlert = true
-            return
-        }
-        
-        currentDownloadEpisode = episode
-        showingDownloadSheet = true
-    }
-    
-    private func downloadAllEpisodes() {
-        guard let tvShow = tvShow, let seasonDetail = seasonDetail else { return }
-        
-        if serviceManager.activeServices.isEmpty {
-            showingNoServicesAlert = true
-            return
-        }
-        
-        episodesToDownload = seasonDetail.episodes
-        currentDownloadIndex = 0
-        showNextDownloadPrompt()
-    }
-    
-    private func showNextDownloadPrompt() {
-        guard currentDownloadIndex < episodesToDownload.count else {
-            // All episodes prompted
-            episodesToDownload = []
-            currentDownloadIndex = 0
-            return
-        }
-        
-        let episode = episodesToDownload[currentDownloadIndex]
-        guard tvShow != nil else { return }
-        
-        currentDownloadEpisode = episode
-        currentDownloadIndex += 1
-        showingDownloadSheet = true
     }
 }

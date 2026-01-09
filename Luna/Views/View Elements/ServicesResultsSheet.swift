@@ -17,23 +17,6 @@ struct StreamOption: Identifiable {
     let subtitle: String?
 }
 
-// Environment key for download mode
-struct DownloadModeKey: EnvironmentKey {
-    struct Value {
-        let isEnabled: Bool
-        let onDownloadSelected: (URL, [String: String]?) -> Void
-    }
-    
-    static let defaultValue = Value(isEnabled: false, onDownloadSelected: { _, _ in })
-}
-
-extension EnvironmentValues {
-    var downloadMode: DownloadModeKey.Value {
-        get { self[DownloadModeKey.self] }
-        set { self[DownloadModeKey.self] = newValue }
-    }
-}
-
 @MainActor
 final class ModulesSearchResultsViewModel: ObservableObject {
     @Published var moduleResults: [UUID: [SearchItem]] = [:]
@@ -106,7 +89,6 @@ struct ModulesSearchResultsSheet: View {
     let posterPath: String?
     
     @Environment(\.presentationMode) var presentationMode
-    @Environment(\.downloadMode) private var downloadMode
     @StateObject private var viewModel = ModulesSearchResultsViewModel()
     @StateObject private var serviceManager = ServiceManager.shared
     @StateObject private var algorithmManager = AlgorithmManager.shared
@@ -1151,30 +1133,6 @@ struct ModulesSearchResultsSheet: View {
                 Logger.shared.log("Invalid stream URL: \(url)", type: "Error")
                 viewModel.streamError = "Invalid stream URL. The source returned a malformed URL."
                 viewModel.showingStreamError = true
-                return
-            }
-            
-            // If in download mode, call the download callback instead of playing
-            if downloadMode.isEnabled {
-                let serviceURL = service.metadata.baseUrl
-                var finalHeaders: [String: String] = [
-                    "Origin": serviceURL,
-                    "Referer": serviceURL,
-                    "User-Agent": URLSession.randomUserAgent
-                ]
-                
-                if let custom = headers {
-                    for (k, v) in custom {
-                        finalHeaders[k] = v
-                    }
-                    
-                    if finalHeaders["User-Agent"] == nil {
-                        finalHeaders["User-Agent"] = URLSession.randomUserAgent
-                    }
-                }
-                
-                downloadMode.onDownloadSelected(streamURL, finalHeaders)
-                Logger.shared.log("Download selected for: \(mediaTitle)", type: "Download")
                 return
             }
             

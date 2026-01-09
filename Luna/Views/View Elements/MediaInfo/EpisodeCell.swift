@@ -18,7 +18,6 @@ struct EpisodeCell: View {
     let onTap: () -> Void
     let onMarkWatched: () -> Void
     let onResetProgress: () -> Void
-    let onDownload: () -> Void
     
     @State private var isWatched: Bool = false
     @State private var progressValue: Double = 0
@@ -293,10 +292,6 @@ struct EpisodeCell: View {
         Group {
             Button(action: onTap) {
                 Label("Play", systemImage: "play.fill")
-            }
-            
-            Button(action: onDownload) {
-                Label("Download", systemImage: "arrow.down.circle")
             }
             
             if episode.episodeNumber > 1 {
