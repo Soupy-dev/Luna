@@ -61,6 +61,14 @@ post_install do |installer|
           config.build_settings['OTHER_LDFLAGS[sdk=appletvos*]'] = '$(inherited)'
           config.build_settings['FRAMEWORK_SEARCH_PATHS[sdk=appletvos*]'] = '$(inherited)'
           config.build_settings['LIBRARY_SEARCH_PATHS[sdk=appletvos*]'] = '$(inherited)'
+
+          # Ensure CocoaPods file lists resolve even if base xcconfigs are not attached
+          # This defines PODS_ROOT for the app target so input/output xcfilelist paths expand correctly
+          config.build_settings['PODS_ROOT'] = '$(SRCROOT)/Pods'
+          # Help Xcode locate frameworks and libraries produced by Pods
+          config.build_settings['FRAMEWORK_SEARCH_PATHS'] = ['$(inherited)', '$(PODS_ROOT)/**']
+          config.build_settings['LIBRARY_SEARCH_PATHS'] = ['$(inherited)', '$(PODS_ROOT)/**']
+          config.build_settings['HEADER_SEARCH_PATHS'] = ['$(inherited)', '$(PODS_ROOT)/**']
         end
       end
     end
