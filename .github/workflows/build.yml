@@ -19,10 +19,21 @@ jobs:
           xcode-version: latest-stable
       - name: Install CocoaPods dependencies
         run: |
-          sudo gem install cocoapods
+          set -e
+          sudo gem uninstall cocoapods -aIx || true
+          sudo gem install cocoapods -v 1.14.3
+          pod --version
+          rm -f Podfile.lock
+          rm -rf Pods
           pod deintegrate || true
           pod repo update
-          pod install --repo-update
+          pod install --repo-update --verbose
+      - name: Verify Pods support files (iOS)
+        run: |
+          echo "Listing xcfilelists for app and MobileVLCKit targets"
+          find "Pods/Target Support Files" -maxdepth 2 -name "*.xcfilelist" -print | sed -n '1,200p'
+          echo "\nCheck MobileVLCKit support folder"
+          ls -la "Pods/Target Support Files/MobileVLCKit" || echo "Missing MobileVLCKit support files"
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
       - name: Build iOS IPA
@@ -45,10 +56,21 @@ jobs:
           xcode-version: latest-stable
       - name: Install CocoaPods dependencies
         run: |
-          sudo gem install cocoapods
+          set -e
+          sudo gem uninstall cocoapods -aIx || true
+          sudo gem install cocoapods -v 1.14.3
+          pod --version
+          rm -f Podfile.lock
+          rm -rf Pods
           pod deintegrate || true
           pod repo update
-          pod install --repo-update
+          pod install --repo-update --verbose
+      - name: Verify Pods support files (tvOS)
+        run: |
+          echo "Listing xcfilelists for app and MobileVLCKit targets"
+          find "Pods/Target Support Files" -maxdepth 2 -name "*.xcfilelist" -print | sed -n '1,200p'
+          echo "\nCheck MobileVLCKit support folder"
+          ls -la "Pods/Target Support Files/MobileVLCKit" || echo "Missing MobileVLCKit support files"
       - name: Make build script executable
         run: chmod +x ./ipabuild.sh
       - name: Build tvOS IPA
