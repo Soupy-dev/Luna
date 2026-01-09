@@ -20,9 +20,14 @@ struct TVShowSeasonsSection: View {
     
     @State private var isLoadingSeason = false
     @State private var showingSearchResults = false
+    @State private var showingDownloadSheet = false
     @State private var showingNoServicesAlert = false
+    @State private var downloadEpisodeForSheet: TMDBEpisode?
     @State private var romajiTitle: String?
     @State private var currentSeasonTitle: String?
+    @State private var batchDownloadEpisodes: [TMDBEpisode] = []
+    @State private var currentBatchIndex: Int = 0
+    @State private var isBatchDownloading: Bool = false
     
     @StateObject private var serviceManager = ServiceManager.shared
     @AppStorage("horizontalEpisodeList") private var horizontalEpisodeList: Bool = false
@@ -102,6 +107,13 @@ struct TVShowSeasonsSection: View {
                                 .font(.title2)
                                 .fontWeight(.bold)
                             Spacer()
+                            if seasonDetail != nil {
+                                Button(action: downloadAllEpisodes) {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .font(.title3)
+                                        .foregroundColor(.accentColor)
+                                }
+                            }
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal)
@@ -133,6 +145,44 @@ struct TVShowSeasonsSection: View {
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: tvShow?.id ?? 0,
                 animeSeasonTitle: isAnime ? "anime" : nil
+            )
+        }
+        .sheet(isPresented: $showingDownloadSheet) {
+            ModulesSearchResultsSheet(
+                mediaTitle: getSearchTitle(),
+                originalTitle: romajiTitle,
+                isMovie: false,
+                selectedEpisode: downloadEpisodeForSheet,
+                tmdbId: tvShow?.id ?? 0,
+                animeSeasonTitle: isAnime ? "anime" : nil,
+                isDownload: true,
+                onDownloadSelected: { displayTitle, url, headers in
+                    let metadata = DownloadMetadata(
+                        title: tvShow?.name ?? "Unknown Show",
+                        overview: tvShow?.overview,
+                        posterURL: tvShow?.posterURL,
+                        showTitle: tvShow?.name,
+                        season: downloadEpisodeForSheet?.seasonNumber,
+                        episode: downloadEpisodeForSheet?.episodeNumber,
+                        showPosterURL: tvShow?.posterPath.flatMap { URL(string: $0) }
+                    )
+                    DownloadManager.shared.addToQueue(
+                        url: url,
+                        headers: headers ?? [:],
+                        title: displayTitle,
+                        posterURL: tvShow?.posterURL,
+                        type: .episode,
+                        metadata: metadata,
+                        subtitleURL: nil,
+                        showPosterURL: tvShow?.posterPath.flatMap { URL(string: $0) }
+                    )
+                    
+                    if isBatchDownloading {
+                        continueNextBatchDownload()
+                    } else {
+                        showingDownloadSheet = false
+                    }
+                }
             )
         }
         .alert("No Active Services", isPresented: $showingNoServicesAlert) {
@@ -308,7 +358,8 @@ struct TVShowSeasonsSection: View {
                 isSelected: isSelected,
                 onTap: { episodeTapAction(episode: episode) },
                 onMarkWatched: { markAsWatched(episode: episode) },
-                onResetProgress: { resetProgress(episode: episode) }
+                onResetProgress: { resetProgress(episode: episode) },
+                onDownload: { downloadEpisode(episode: episode, showId: tvShow.id) }
             )
         } else {
             EmptyView()
@@ -421,6 +472,52 @@ struct TVShowSeasonsSection: View {
                     self.isLoadingSeason = false
                 }
             }
+        }
+    }
+    
+    private func downloadEpisode(episode: TMDBEpisode, showId: Int) {
+        guard !serviceManager.activeServices.isEmpty else {
+            showingNoServicesAlert = true
+            return
+        }
+
+        downloadEpisodeForSheet = episode
+        selectedEpisodeForSearch = episode
+        showingDownloadSheet = true
+    }
+    
+    private func downloadAllEpisodes() {
+        guard !serviceManager.activeServices.isEmpty else {
+            showingNoServicesAlert = true
+            return
+        }
+        
+        guard let episodes = seasonDetail?.episodes, !episodes.isEmpty else {
+            return
+        }
+        
+        batchDownloadEpisodes = episodes
+        currentBatchIndex = 0
+        isBatchDownloading = true
+        downloadEpisodeForSheet = episodes[0]
+        selectedEpisodeForSearch = episodes[0]
+        showingDownloadSheet = true
+    }
+    
+    private func continueNextBatchDownload() {
+        let nextIndex = currentBatchIndex + 1
+        
+        if nextIndex < batchDownloadEpisodes.count {
+            currentBatchIndex = nextIndex
+            downloadEpisodeForSheet = batchDownloadEpisodes[nextIndex]
+            selectedEpisodeForSearch = batchDownloadEpisodes[nextIndex]
+            // Sheet stays open; search automatically triggers for new episode
+        } else {
+            // Batch complete
+            isBatchDownloading = false
+            showingDownloadSheet = false
+            batchDownloadEpisodes = []
+            currentBatchIndex = 0
         }
     }
     

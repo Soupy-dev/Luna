@@ -148,6 +148,10 @@ struct SettingsView: View {
                 NavigationLink(destination: TrackersSettingsView()) {
                     Text("Trackers")
                 }
+                
+                NavigationLink(destination: DownloadsView()) {
+                    Text("Downloads")
+                }
             }
 
             Section {

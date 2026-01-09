@@ -26,6 +26,9 @@ struct MediaDetailView: View {
     @State private var isBookmarked: Bool = false
     @State private var showingSearchResults = false
     @State private var showingAddToCollection = false
+    @State private var showingDownloadSheet = false
+    @State private var showingNoServicesAlert = false
+    @State private var showingDownloadSheet = false
     @State private var selectedEpisodeForSearch: TMDBEpisode?
     @State private var romajiTitle: String?
     @State private var logoURL: String?
@@ -131,8 +134,46 @@ struct MediaDetailView: View {
                 }()
             )
         }
+        .sheet(isPresented: $showingDownloadSheet) {
+            ModulesSearchResultsSheet(
+                mediaTitle: searchResult.displayTitle,
+                originalTitle: romajiTitle,
+                isMovie: true,
+                selectedEpisode: nil,
+                tmdbId: searchResult.id,
+                animeSeasonTitle: nil,
+                isDownload: true,
+                onDownloadSelected: { displayTitle, url, headers in
+                    let metadata = DownloadMetadata(
+                        title: searchResult.displayTitle,
+                        overview: movieDetail?.overview,
+                        posterURL: movieDetail?.posterURL,
+                        showTitle: nil,
+                        season: nil,
+                        episode: nil,
+                        showPosterURL: movieDetail?.fullPosterURL.flatMap { URL(string: $0) }
+                    )
+                    DownloadManager.shared.addToQueue(
+                        url: url,
+                        headers: headers ?? [:],
+                        title: displayTitle,
+                        posterURL: movieDetail?.posterURL,
+                        type: .movie,
+                        metadata: metadata,
+                        subtitleURL: nil,
+                        showPosterURL: movieDetail?.fullPosterURL.flatMap { URL(string: $0) }
+                    )
+                    showingDownloadSheet = false
+                }
+            )
+        }
         .sheet(isPresented: $showingAddToCollection) {
             AddToCollectionView(searchResult: searchResult)
+        }
+        .alert("No Active Services", isPresented: $showingNoServicesAlert) {
+            Button("OK") { }
+        } message: {
+            Text("You don't have any active services. Please go to the Services tab to download and activate services.")
         }
     }
     
@@ -366,6 +407,23 @@ struct MediaDetailView: View {
                     .applyLiquidGlassBackground(cornerRadius: 12)
                     .foregroundColor(isBookmarked ? .yellow : .white)
                     .cornerRadius(8)
+            }
+
+            if searchResult.isMovie {
+                Button(action: {
+                    if serviceManager.activeServices.isEmpty {
+                        showingNoServicesAlert = true
+                    } else {
+                        showingDownloadSheet = true
+                    }
+                }) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.title2)
+                        .frame(width: 42, height: 42)
+                        .applyLiquidGlassBackground(cornerRadius: 12)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                }
             }
             
             Button(action: {

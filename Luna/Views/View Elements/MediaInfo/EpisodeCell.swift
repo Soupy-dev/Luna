@@ -16,6 +16,7 @@ struct EpisodeCell: View {
     let onTap: () -> Void
     let onMarkWatched: () -> Void
     let onResetProgress: () -> Void
+    let onDownload: (() -> Void)?
     
     @State private var isWatched: Bool = false
     @AppStorage("horizontalEpisodeList") private var horizontalEpisodeList: Bool = false
@@ -248,6 +249,12 @@ struct EpisodeCell: View {
         Group {
             Button(action: onTap) {
                 Label("Play", systemImage: "play.fill")
+            }
+            
+            if let onDownload = onDownload {
+                Button(action: onDownload) {
+                    Label("Download", systemImage: "arrow.down.circle")
+                }
             }
             
             if episode.episodeNumber > 1 {

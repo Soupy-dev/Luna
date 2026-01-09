@@ -86,6 +86,8 @@ struct ModulesSearchResultsSheet: View {
     let selectedEpisode: TMDBEpisode?
     let tmdbId: Int
     let animeSeasonTitle: String?
+    let isDownload: Bool = false
+    let onDownloadSelected: ((String, URL, [String: String]?) -> Void)? = nil
     
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var viewModel = ModulesSearchResultsViewModel()
