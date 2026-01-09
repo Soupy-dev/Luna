@@ -477,6 +477,18 @@ final class VLCRenderer: NSObject {
 #else
 // tvOS: Placeholder implementation that does nothing
 final class VLCRenderer: NSObject {
+    struct AudioTrack {
+        let id: Int
+        let name: String
+        let language: String
+    }
+    
+    struct SubtitleTrack {
+        let id: Int
+        let name: String
+        let language: String
+    }
+    
     init(displayLayer: AVSampleBufferDisplayLayer) {}
     func getRenderingView() -> UIView { return UIView() }
     func start() throws {}

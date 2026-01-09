@@ -567,7 +567,6 @@ struct VLCPlayerControlsView: View {
 }
 
 #else
-#else
 
 // tvOS/macOS: Stub implementations
 class VLCPlayerState: NSObject, ObservableObject {
