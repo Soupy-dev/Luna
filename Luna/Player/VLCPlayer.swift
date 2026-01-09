@@ -8,6 +8,7 @@
 
 import SwiftUI
 import AVFoundation
+import Combine
 
 #if os(iOS)
 
@@ -108,6 +109,7 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         
         setupUI()
         setupGestureRecognizers()
+        observePlayerState()
         
         do {
             try vlcRenderer.start()
@@ -315,24 +317,29 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         view.addGestureRecognizer(tapGesture)
         
-        // Double tap to toggle play/pause
-        let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(togglePlayPause))
-        doubleTapGesture.numberOfTapsRequired = 2
-        view.addGestureRecognizer(doubleTapGesture)
+        // Two-finger tap to toggle play/pause
+        let twoFingerTapGesture = UITapGestureRecognizer(target: self, action: #selector(togglePlayPause))
+        twoFingerTapGesture.numberOfTouchesRequired = 2
+        view.addGestureRecognizer(twoFingerTapGesture)
+        
+        // Double tap left side to go back 10s
+        let doubleTapLeftGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapLeft(_:)))
+        doubleTapLeftGesture.numberOfTapsRequired = 2
+        view.addGestureRecognizer(doubleTapLeftGesture)
+        
+        // Double tap right side to skip forward 10s
+        let doubleTapRightGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapRight(_:)))
+        doubleTapRightGesture.numberOfTapsRequired = 2
+        view.addGestureRecognizer(doubleTapRightGesture)
+        
+        // Prevent single tap from firing when double tapping
+        tapGesture.require(toFail: doubleTapLeftGesture)
+        tapGesture.require(toFail: doubleTapRightGesture)
         
         // Long press for 2x speed
         let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
         longPressGesture.minimumPressDuration = 0.5
         view.addGestureRecognizer(longPressGesture)
-        
-        // Swipe gestures for seek
-        let leftSwipe = UISwipeGestureRecognizer(target: self, action: #selector(handleLeftSwipe))
-        leftSwipe.direction = .left
-        view.addGestureRecognizer(leftSwipe)
-        
-        let rightSwipe = UISwipeGestureRecognizer(target: self, action: #selector(handleRightSwipe))
-        rightSwipe.direction = .right
-        view.addGestureRecognizer(rightSwipe)
     }
     
     @objc private func backButtonTapped() {
@@ -344,8 +351,29 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         }
     }
     
-    @objc private func handleTap() {
+    private func observePlayerState() {
+        playerState?.$showControls
+            .sink { [weak self] show in
+                UIView.animate(withDuration: 0.3) {
+                    self?.controlsContainer.alpha = show ? 1.0 : 0.0
+                }
+            }
+            .store(in: &cancellables)
+        
+        // Start with controls visible
         playerState?.scheduleHideControls()
+    }
+    
+    private var cancellables = Set<AnyCancellable>()
+    
+    @objc private func handleTap() {
+        if playerState?.showControls == true {
+            // Hide controls
+            playerState?.showControls = false
+        } else {
+            // Show and schedule hide
+            playerState?.scheduleHideControls()
+        }
     }
     
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
@@ -362,16 +390,32 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     
     @objc private func togglePlayPause() {
         vlcRenderer.togglePlayPause()
+        playerState?.scheduleHideControls()
     }
     
-    @objc private func handleLeftSwipe() {
-        let currentPosition = vlcRenderer.position
-        vlcRenderer.seek(to: currentPosition - 10)
+    @objc private func handleDoubleTapLeft(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: view)
+        // Only trigger if tap is on left half of screen
+        if location.x < view.bounds.width / 2 {
+            let currentPosition = playerState?.position ?? 0
+            let newPosition = max(0, currentPosition - 10)
+            vlcRenderer.seek(to: newPosition)
+            Logger.shared.log("[VLCPlayer] Seek back 10s: \(currentPosition) -> \(newPosition)", type: "Stream")
+            playerState?.scheduleHideControls()
+        }
     }
     
-    @objc private func handleRightSwipe() {
-        let currentPosition = vlcRenderer.position
-        vlcRenderer.seek(to: currentPosition + 10)
+    @objc private func handleDoubleTapRight(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: view)
+        // Only trigger if tap is on right half of screen
+        if location.x >= view.bounds.width / 2 {
+            let currentPosition = playerState?.position ?? 0
+            let duration = playerState?.duration ?? 0
+            let newPosition = min(duration, currentPosition + 10)
+            vlcRenderer.seek(to: newPosition)
+            Logger.shared.log("[VLCPlayer] Seek forward 10s: \(currentPosition) -> \(newPosition)", type: "Stream")
+            playerState?.scheduleHideControls()
+        }
     }
     
     private func createAudioMenu() -> UIMenu {
@@ -469,6 +513,11 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             self.playerState?.isPlaying = !isPaused
             let imageName = isPaused ? "play.fill" : "pause.fill"
             self.centerPlayButton.setImage(UIImage(systemName: imageName), for: .normal)
+            
+            // Hide center play button when playing, show when paused
+            UIView.animate(withDuration: 0.3) {
+                self.centerPlayButton.alpha = isPaused ? 1.0 : 0.0
+            }
         }
     }
     
@@ -477,8 +526,17 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             self.playerState?.isLoading = isLoading
             if isLoading {
                 self.bufferingSpinner.startAnimating()
+                // Hide play button during buffering
+                UIView.animate(withDuration: 0.3) {
+                    self.centerPlayButton.alpha = 0.0
+                }
             } else {
                 self.bufferingSpinner.stopAnimating()
+                // Show play button only if paused
+                let isPaused = !(self.playerState?.isPlaying ?? false)
+                UIView.animate(withDuration: 0.3) {
+                    self.centerPlayButton.alpha = isPaused ? 1.0 : 0.0
+                }
             }
         }
     }
