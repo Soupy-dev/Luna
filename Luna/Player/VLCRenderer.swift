@@ -92,31 +92,43 @@ final class VLCRenderer: NSObject {
     // MARK: - Lifecycle
     
     func start() throws {
-        guard !isRunning else { return }
+        guard !isRunning else { 
+            Logger.shared.log("[VLCRenderer.start] Already running, returning", type: "Stream")
+            return 
+        }
         
-        Logger.shared.log("[VLCRenderer.start] Initializing VLCMediaPlayer", type: "Stream")
+        Logger.shared.log("[VLCRenderer.start] INITIALIZING VLCMediaPlayer", type: "Stream")
         
         mediaPlayer = VLCMediaPlayer()
         guard let mediaPlayer = mediaPlayer else {
+            Logger.shared.log("[VLCRenderer.start] FAILED: VLCMediaPlayer() returned nil", type: "Error")
             throw RendererError.vlcInitializationFailed
         }
         
+        Logger.shared.log("[VLCRenderer.start] VLCMediaPlayer created successfully", type: "Stream")
+        Logger.shared.log("[VLCRenderer.start] Setting drawable to vlcView (\(vlcView))", type: "Stream")
+        
         // Attach to view for rendering
         mediaPlayer.drawable = vlcView
+        Logger.shared.log("[VLCRenderer.start] drawable set, vlcView class: \(type(of: vlcView))", type: "Stream")
         
         // Setup event handlers with @objc selectors
+        Logger.shared.log("[VLCRenderer.start] Registering notification observers", type: "Stream")
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(mediaPlayerTimeChanged),
             name: NSNotification.Name(rawValue: VLCMediaPlayerTimeChanged),
             object: mediaPlayer
         )
+        Logger.shared.log("[VLCRenderer.start] Registered timeChanged observer", type: "Stream")
+        
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(mediaPlayerStateChanged),
             name: NSNotification.Name(rawValue: VLCMediaPlayerStateChanged),
             object: mediaPlayer
         )
+        Logger.shared.log("[VLCRenderer.start] Registered stateChanged observer", type: "Stream")
         
         // Observe app lifecycle
         NotificationCenter.default.addObserver(
@@ -133,7 +145,7 @@ final class VLCRenderer: NSObject {
         )
         
         isRunning = true
-        Logger.shared.log("[VLCRenderer.start] VLCRenderer initialized", type: "Stream")
+        Logger.shared.log("[VLCRenderer.start] VLCRenderer FULLY INITIALIZED", type: "Stream")
     }
     
     func stop() {
@@ -173,7 +185,7 @@ final class VLCRenderer: NSObject {
         
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else {
-                Logger.shared.log("[VLCRenderer.loadMedia] ERROR: mediaPlayer is nil", type: "Error")
+                Logger.shared.log("[VLCRenderer.loadMedia] ERROR: mediaPlayer is nil in eventQueue", type: "Error")
                 return
             }
             
@@ -223,14 +235,18 @@ final class VLCRenderer: NSObject {
             self.currentMedia = media
             
             Logger.shared.log("[VLCRenderer.loadMedia] Setting media on player and calling play()", type: "Stream")
+            Logger.shared.log("[VLCRenderer.loadMedia] Before set media - player state: \(player.state.rawValue)", type: "Stream")
             player.media = media
+            Logger.shared.log("[VLCRenderer.loadMedia] After set media - player state: \(player.state.rawValue)", type: "Stream")
             player.play()
-            Logger.shared.log("[VLCRenderer.loadMedia] play() called", type: "Stream")
+            Logger.shared.log("[VLCRenderer.loadMedia] After play() called - player state: \(player.state.rawValue)", type: "Stream")
         }
     }
     
     // Convenience entry point used by VLCPlayer
     func load(url: URL, with preset: PlayerPreset, headers: [String: String]? = nil) {
+        Logger.shared.log("[VLCRenderer.load] ENTRY - calling loadMedia with URL: \(url.absoluteString)", type: "Stream")
+        Logger.shared.log("[VLCRenderer.load] mediaPlayer is \(mediaPlayer != nil ? "INITIALIZED" : "NIL")", type: "Stream")
         loadMedia(url: url, headers: headers, preset: preset)
     }
     
@@ -516,10 +532,13 @@ final class VLCRenderer: NSObject {
     }
     
     @objc private func mediaPlayerStateChanged() {
-        guard let player = mediaPlayer else { return }
+        guard let player = mediaPlayer else { 
+            Logger.shared.log("[VLCRenderer.mediaPlayerStateChanged] ERROR: mediaPlayer is nil!", type: "Error")
+            return 
+        }
         
         let state = player.state
-        Logger.shared.log("[VLCRenderer] State changed to: \(state.rawValue)", type: "Stream")
+        Logger.shared.log("[VLCRenderer.mediaPlayerStateChanged] State changed to: \(state.rawValue) (media=\(player.media != nil ? "set" : "nil"))", type: "Stream")
         
         switch state {
         case .playing:

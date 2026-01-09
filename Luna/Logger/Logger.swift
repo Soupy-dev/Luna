@@ -24,8 +24,11 @@ class Logger: @unchecked Sendable {
     private let maxLogEntries = 1000
     
     private init() {
-        let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        logFileURL = tmpDir.appendingPathComponent("logs.txt")
+        // Use Documents folder for persistent logs (easier to access)
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        logFileURL = documentsURL.appendingPathComponent("vlc-logs.txt")
+        
+        Logger.shared.log("Logger initialized - logs at: \(logFileURL.path)", type: "System")
     }
     
     func log(_ message: String, type: String = "General") {
@@ -91,6 +94,14 @@ class Logger: @unchecked Sendable {
                 continuation.resume()
             }
         }
+    }
+    
+    func getLogFilePath() -> String {
+        return logFileURL.path
+    }
+    
+    func getLogFileURL() -> URL {
+        return logFileURL
     }
     
     private func saveLogToFile(_ log: LogEntry) {

@@ -120,10 +120,13 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         super.viewDidAppear(animated)
         
         Logger.shared.log("[VLCPlayer] viewDidAppear called", type: "Stream")
+        Logger.shared.log("[VLCPlayer] rendering view bounds: \(vlcRenderer.getRenderingView().bounds)", type: "Stream")
+        Logger.shared.log("[VLCPlayer] rendering view superview: \(vlcRenderer.getRenderingView().superview != nil ? "set" : "nil")", type: "Stream")
         
         // Load media after view is fully visible and VLC is initialized
         if let url = pendingURL {
             Logger.shared.log("[VLCPlayer] Loading pending URL: \(url.absoluteString)", type: "Stream")
+            Logger.shared.log("[VLCPlayer] Headers: \(pendingHeaders?.count ?? 0) preset: \(pendingPreset?.id ?? "nil")", type: "Stream")
             load(url: url, headers: pendingHeaders, preset: pendingPreset)
             pendingURL = nil
             pendingHeaders = nil
@@ -423,7 +426,8 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     }
     
     func load(url: URL, headers: [String: String]?, preset: PlayerPreset?) {
-        Logger.shared.log("[VLCPlayer] load() called with URL: \(url.absoluteString)", type: "Stream")
+        Logger.shared.log("[VLCPlayer.load] ENTRY with URL: \(url.absoluteString)", type: "Stream")
+        Logger.shared.log("[VLCPlayer.load] Headers count: \(headers?.count ?? 0), preset: \(preset?.id ?? "nil")", type: "Stream")
         
         let defaultPreset = PlayerPreset(id: .hd1080, title: "HD 1080p", summary: "Default", stream: nil, commands: [])
         vlcRenderer.load(url: url, with: preset ?? defaultPreset, headers: headers)
@@ -433,7 +437,7 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             prepareSeekToLastPosition(for: info)
         }
         
-        Logger.shared.log("[VLCPlayer] loadMedia called", type: "Stream")
+        Logger.shared.log("[VLCPlayer.load] EXIT - load() delegated to vlcRenderer", type: "Stream")
     }
     
     deinit {
