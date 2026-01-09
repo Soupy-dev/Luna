@@ -169,7 +169,99 @@ struct PlayerSettingsView: View {
                     .pickerStyle(.menu)
                 }
             }
+            
+            if store.inAppPlayer == .vlc {
+                Section(header: Text("VLC Player")) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Enable Subtitles by Default")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            
+                            Text("Automatically load and display subtitles when available.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        
+                        Spacer()
+                        
+                        Toggle("", isOn: Binding(
+                            get: { UserDefaults.standard.bool(forKey: "enableSubtitlesByDefault") },
+                            set: { UserDefaults.standard.set($0, forKey: "enableSubtitlesByDefault") }
+                        ))
+                        .tint(accentColorManager.currentAccentColor)
+                    }
+                    
+                    NavigationLink(destination: VLCLanguageSelectionView(
+                        title: "Default Subtitle Language",
+                        selectedLanguage: Binding(
+                            get: { UserDefaults.standard.string(forKey: "defaultSubtitleLanguage") ?? "eng" },
+                            set: { UserDefaults.standard.set($0, forKey: "defaultSubtitleLanguage") }
+                        )
+                    )) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Default Subtitle Language")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                
+                                Text("Language preference for subtitles.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Text(getLanguageName(UserDefaults.standard.string(forKey: "defaultSubtitleLanguage") ?? "eng"))
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                        }
+                    }
+                    
+                    NavigationLink(destination: VLCLanguageSelectionView(
+                        title: "Preferred Anime Audio",
+                        selectedLanguage: Binding(
+                            get: { UserDefaults.standard.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn" },
+                            set: { UserDefaults.standard.set($0, forKey: "preferredAnimeAudioLanguage") }
+                        )
+                    )) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Preferred Anime Audio")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                
+                                Text("Audio language for anime content.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Text(getLanguageName(UserDefaults.standard.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn"))
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                        }
+                    }
+                }
+            }
         }
         .navigationTitle("Media Player")
     }
-}
+    
+    private func getLanguageName(_ code: String) -> String {
+        let languages: [String: String] = [
+            "eng": "English",
+            "jpn": "Japanese",
+            "zho": "Chinese",
+            "kor": "Korean",
+            "spa": "Spanish",
+            "fra": "French",
+            "deu": "German",
+            "ita": "Italian",
+            "por": "Portuguese",
+            "rus": "Russian"
+        ]
+        return languages[code] ?? code.uppercased()
+    }

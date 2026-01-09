@@ -83,6 +83,18 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         view.backgroundColor = .black
         vlcRenderer.delegate = self
         
+        // Load VLC preferences from settings
+        let enableSubtitles = UserDefaults.standard.bool(forKey: "enableSubtitlesByDefault")
+        let defaultSubtitleLanguage = UserDefaults.standard.string(forKey: "defaultSubtitleLanguage") ?? "eng"
+        let preferredAnimeAudio = UserDefaults.standard.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn"
+        
+        vlcRenderer.enableAutoSubtitles(enableSubtitles)
+        vlcRenderer.setPreferredAudioLanguage(defaultSubtitleLanguage)
+        vlcRenderer.setAnimeAudioLanguage(preferredAnimeAudio)
+        
+        playerState?.enableAutoSubtitles = enableSubtitles
+        playerState?.selectedAudioLanguage = defaultSubtitleLanguage
+        
         setupUI()
         setupGestureRecognizers()
         
