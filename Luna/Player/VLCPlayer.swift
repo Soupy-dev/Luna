@@ -100,11 +100,11 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         let preferredAnimeAudio = UserDefaults.standard.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn"
         
         vlcRenderer.enableAutoSubtitles(enableSubtitles)
-        vlcRenderer.setPreferredAudioLanguage(defaultSubtitleLanguage)
+        vlcRenderer.setPreferredAudioLanguage(preferredAnimeAudio)
         vlcRenderer.setAnimeAudioLanguage(preferredAnimeAudio)
         
         playerState?.enableAutoSubtitles = enableSubtitles
-        playerState?.selectedAudioLanguage = defaultSubtitleLanguage
+        playerState?.selectedAudioLanguage = preferredAnimeAudio
         
         setupUI()
         setupGestureRecognizers()
@@ -347,11 +347,11 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         if gesture.state == .began {
-            vlcRenderer.setPlaybackSpeed(2.0)
+            vlcRenderer.setSpeed(2.0)
             playerState?.currentPlaybackSpeed = 2.0
             Logger.shared.log("[VLCPlayer] Long press: 2x speed", type: "Stream")
         } else if gesture.state == .ended {
-            vlcRenderer.setPlaybackSpeed(1.0)
+            vlcRenderer.setSpeed(1.0)
             playerState?.currentPlaybackSpeed = 1.0
             Logger.shared.log("[VLCPlayer] Long press released: 1x speed", type: "Stream")
         }
@@ -418,7 +418,7 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
                 image: isSelected ? UIImage(systemName: "checkmark") : nil,
                 state: isSelected ? .on : .off
             ) { [weak self] _ in
-                self?.vlcRenderer.setPlaybackSpeed(speed)
+                self?.vlcRenderer.setSpeed(speed)
                 self?.playerState?.currentPlaybackSpeed = speed
             }
         }
@@ -428,22 +428,14 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     func load(url: URL, headers: [String: String]?, preset: PlayerPreset?) {
         Logger.shared.log("[VLCPlayer] load() called with URL: \(url.absoluteString)", type: "Stream")
         
-        // Set loading state
-        playerState?.isLoading = true
+        vlcRenderer.load(url: url, with: preset ?? .hd1080, headers: headers)
         
-        do {
-            try vlcRenderer.loadMedia(url: url, headers: headers, preset: preset)
-            
-            // Prepare to seek to last position if mediaInfo is set
-            if let info = mediaInfo {
-                prepareSeekToLastPosition(for: info)
-            }
-            
-            Logger.shared.log("[VLCPlayer] loadMedia completed successfully", type: "Stream")
-        } catch {
-            Logger.shared.log("Failed to load VLC media: \(error)", type: "Error")
-            playerState?.isLoading = false
+        // Prepare to seek to last position if mediaInfo is set
+        if let info = mediaInfo {
+            prepareSeekToLastPosition(for: info)
         }
+        
+        Logger.shared.log("[VLCPlayer] loadMedia called", type: "Stream")
     }
     
     deinit {

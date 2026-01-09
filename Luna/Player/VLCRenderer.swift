@@ -151,108 +151,152 @@ final class VLCRenderer: NSObject {
     
     // MARK: - Media Loading
     
-    func loadMedia(url: URL, headers: [String: String]? = nil, preset: PlayerPreset? = nil) throws {
-        Logger.shared.log("[VLCRenderer.loadMedia] Starting - isRunning: \(isRunning)", type: "Stream")
-        guard isRunning else {
-            Logger.shared.log("[VLCRenderer.loadMedia] ERROR: Renderer not running", type: "Error")
-            throw RendererError.vlcInitializationFailed
+    func loadMedia(url: URL, headers: [String: String]? = nil, preset: PlayerPreset? = nil) {
+        Logger.shared.log("[VLCRenderer.loadMedia] Starting load with URL: \(url.absoluteString)", type: "Stream")
+        Logger.shared.log("[VLCRenderer.loadMedia] Headers count: \(headers?.count ?? 0)", type: "Stream")
+        if let headers = headers {
+            for (k, v) in headers {
+                Logger.shared.log("[VLCRenderer.loadMedia] Header - \(k): \(v.prefix(50))...", type: "Stream")
+            }
         }
-        guard let mediaPlayer = mediaPlayer else {
-            Logger.shared.log("[VLCRenderer.loadMedia] ERROR: mediaPlayer is nil", type: "Error")
-            throw RendererError.vlcInitializationFailed
-        }
-        
-        Logger.shared.log("[VLCRenderer.loadMedia] URL: \(url.absoluteString)", type: "Stream")
         
         currentURL = url
-        currentHeaders = headers
         currentPreset = preset
+        currentHeaders = headers ?? [:]
         
-        let media = VLCMedia(url: url)
-        
-        Logger.shared.log("[VLCRenderer.loadMedia] VLCMedia created", type: "Stream")
-        
-        // Configure network options (match Luna-soupy settings)
-        media.addOption(":network-caching=1200")
-        media.addOption(":http-reconnect=true")
-        
-        // Add custom headers if provided (Luna-soupy pattern: individual headers)
-        if let headers = headers {
-            Logger.shared.log("[VLCRenderer.loadMedia] Applying \(headers.count) headers to VLCMedia", type: "Stream")
-            
-            // Prefer dedicated options when available (unquoted to match server expectations)
-            if let ua = headers["User-Agent"], !ua.isEmpty {
-                Logger.shared.log("[VLCRenderer.loadMedia] Setting User-Agent", type: "Stream")
-                media.addOption(":http-user-agent=\(ua)")
-            }
-            if let referer = headers["Referer"], !referer.isEmpty {
-                Logger.shared.log("[VLCRenderer.loadMedia] Setting Referer", type: "Stream")
-                media.addOption(":http-referrer=\(referer)")
-                // Some HLS mirrors expect the header form as well; set both to be safe.
-                media.addOption(":http-header=Referer: \(referer)")
-            }
-            if let cookie = headers["Cookie"], !cookie.isEmpty {
-                Logger.shared.log("[VLCRenderer.loadMedia] Setting Cookie", type: "Stream")
-                media.addOption(":http-cookie=\(cookie)")
-            }
-            
-            // Add remaining headers individually, skipping ones already set via dedicated options
-            let skippedKeys: Set<String> = ["User-Agent", "Referer", "Cookie"]
-            var headerCount = 0
-            for (key, value) in headers where !skippedKeys.contains(key) {
-                guard !value.isEmpty else { continue }
-                let headerLine = "\(key): \(value)"
-                Logger.shared.log("[VLCRenderer.loadMedia] Adding header: \(key)", type: "Stream")
-                media.addOption(":http-header=\(headerLine)")
-                headerCount += 1
-            }
-            Logger.shared.log("[VLCRenderer.loadMedia] Applied \(headerCount) additional headers plus User-Agent/Referer/Cookie", type: "Info")
+        isLoading = true
+        isReadyToSeek = false
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.renderer(self, didChangeLoading: true)
         }
         
-        // Enable hardware decoding if available
-        media.addOption(":codec=videotoolbox")
-        
-        currentMedia = media
-        mediaPlayer.media = media
-        
-        // Start playback immediately
-        mediaPlayer.play()
-        
-        // Apply audio preferences after a short delay to ensure media is loaded
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.applyAudioLanguagePreference()
-            self?.enableAutoSubtitles(self?.autoLoadSubtitles ?? true)
+        eventQueue.async { [weak self] in
+            guard let self, let player = self.mediaPlayer else {
+                Logger.shared.log("[VLCRenderer.loadMedia] ERROR: mediaPlayer is nil", type: "Error")
+                return
+            }
+            
+            Logger.shared.log("[VLCRenderer.loadMedia] Creating VLCMedia with URL", type: "Stream")
+            // Keep the URL untouched; apply headers via VLC media options
+            let media = VLCMedia(url: url)
+            if let headers = self.currentHeaders, !headers.isEmpty {
+                Logger.shared.log("[VLCRenderer.loadMedia] Applying \(headers.count) headers to VLCMedia", type: "Stream")
+                // Prefer dedicated options when available (unquoted to match server expectations)
+                if let ua = headers["User-Agent"], !ua.isEmpty {
+                    Logger.shared.log("[VLCRenderer.loadMedia] Setting User-Agent", type: "Stream")
+                    media.addOption(":http-user-agent=\(ua)")
+                }
+                if let referer = headers["Referer"], !referer.isEmpty {
+                    Logger.shared.log("[VLCRenderer.loadMedia] Setting Referer", type: "Stream")
+                    media.addOption(":http-referrer=\(referer)")
+                    // Some HLS mirrors expect the header form as well; set both to be safe.
+                    media.addOption(":http-header=Referer: \(referer)")
+                }
+                if let cookie = headers["Cookie"], !cookie.isEmpty {
+                    Logger.shared.log("[VLCRenderer.loadMedia] Setting Cookie", type: "Stream")
+                    media.addOption(":http-cookie=\(cookie)")
+                }
+                
+                // Let VLC reconnect on transient failures (common on these CDNs)
+                Logger.shared.log("[VLCRenderer.loadMedia] Setting http-reconnect=true", type: "Stream")
+                media.addOption(":http-reconnect=true")
+                
+                // Add remaining headers individually, skipping ones already set via dedicated options
+                let skippedKeys: Set<String> = ["User-Agent", "Referer", "Cookie"]
+                var headerCount = 0
+                for (key, value) in headers where !skippedKeys.contains(key) {
+                    guard !value.isEmpty else { continue }
+                    let headerLine = "\(key): \(value)"
+                    Logger.shared.log("[VLCRenderer.loadMedia] Adding header: \(key)", type: "Stream")
+                    media.addOption(":http-header=\(headerLine)")
+                    headerCount += 1
+                }
+                Logger.shared.log("[VLCRenderer.loadMedia] Applied \(headerCount) additional headers plus User-Agent/Referer/Cookie", type: "Info")
+            }
+            
+            // Increase network caching to reduce early EOF/errors on slow mirrors
+            media.addOption(":network-caching=1200")
+            // Keep reconnect enabled for flaky hosts
+            media.addOption(":http-reconnect=true")
+            
+            self.currentMedia = media
+            
+            Logger.shared.log("[VLCRenderer.loadMedia] Setting media on player and calling play()", type: "Stream")
+            player.media = media
+            player.play()
+            Logger.shared.log("[VLCRenderer.loadMedia] play() called", type: "Stream")
         }
-        
-        Logger.shared.log("[VLCRenderer] Loaded media and started playback: \(url.absoluteString)", type: "Stream")
     }
     
     // MARK: - Playback Control
     
     func play() {
-        mediaPlayer?.play()
-    }
-    
-    func pause() {
-        mediaPlayer?.pause()
-    }
-    
-    func togglePlayPause() {
-        if isPaused {
-            play()
-        } else {
-            pause()
+        eventQueue.async { [weak self] in
+            guard let self, let player = self.mediaPlayer else { return }
+            player.play()
         }
     }
     
-    func seek(to position: Double) {
-        guard let mediaPlayer = mediaPlayer else { return }
-        mediaPlayer.position = Float(position / (cachedDuration > 0 ? cachedDuration : 1.0))
+    func pausePlayback() {
+        eventQueue.async { [weak self] in
+            guard let self, let player = self.mediaPlayer else { return }
+            player.pause()
+        }
     }
     
-    func setPlaybackSpeed(_ speed: Double) {
-        currentPlaybackSpeed = speed
-        mediaPlayer?.rate = Float(speed)
+    func togglePause() {
+        if isPaused { play() } else { pausePlayback() }
+    }
+    
+    func seek(to seconds: Double) {
+        eventQueue.async { [weak self] in
+            guard let self, let player = self.mediaPlayer else { return }
+            let clamped = max(0, seconds)
+            
+            // If VLC already knows the duration, seek accurately using normalized position.
+            let durationMs = player.media?.length.value?.doubleValue ?? 0
+            let durationSec = durationMs / 1000.0
+            if durationSec > 0 {
+                let normalized = min(max(clamped / durationSec, 0), 1)
+                player.position = Float(normalized)
+                self.cachedDuration = durationSec
+                self.pendingAbsoluteSeek = nil
+                return
+            }
+            
+            // If we have a cached duration, fall back to it.
+            if self.cachedDuration > 0 {
+                let normalized = min(max(clamped / self.cachedDuration, 0), 1)
+                player.position = Float(normalized)
+                self.pendingAbsoluteSeek = clamped
+                return
+            }
+            
+            // Duration unknown: stash the seek request to apply once duration arrives.
+            self.pendingAbsoluteSeek = clamped
+        }
+    }
+    
+    func seek(by seconds: Double) {
+        eventQueue.async { [weak self] in
+            guard let self, let player = self.mediaPlayer else { return }
+            let newTime = self.cachedPosition + seconds
+            self.seek(to: newTime)
+        }
+    }
+    
+    func setSpeed(_ speed: Double) {
+        eventQueue.async { [weak self] in
+            guard let self, let player = self.mediaPlayer else { return }
+            self.currentPlaybackSpeed = max(0.1, speed)
+            player.rate = Float(speed)
+        }
+    }
+    
+    func getSpeed() -> Double {
+        guard let player = mediaPlayer else { return 1.0 }
+        return Double(player.rate)
     }
     
     // MARK: - Audio Tracks (VLC-exclusive)
@@ -561,8 +605,7 @@ final class VLCRenderer: NSObject {
 }
 
 #else
-// Fallback for tvOS or when MobileVLCKit is unavailable
-// Stub protocol and implementation
+// Stub when MobileVLCKit is not available (tvOS, etc.)
 
 protocol VLCRendererDelegate: AnyObject {
     func renderer(_ renderer: VLCRenderer, didUpdatePosition position: Double, duration: Double)
@@ -575,47 +618,36 @@ protocol VLCRendererDelegate: AnyObject {
     func rendererDidChangeTracks(_ renderer: VLCRenderer)
 }
 
-final class VLCRenderer: NSObject {
-    struct AudioTrack {
-        let id: Int
-        let name: String
-        let language: String?
-        let isDefault: Bool
+final class VLCRenderer {
+    enum RendererError: Error {
+        case vlcInitializationFailed
     }
     
-    struct SubtitleTrack {
-        let id: Int
-        let name: String
-        let isDefault: Bool
-        let isExternal: Bool
-    }
-    
+    init(displayLayer: AVSampleBufferDisplayLayer) { }
+    func getRenderingView() -> UIView { UIView() }
+    func start() throws { throw RendererError.vlcInitializationFailed }
+    func stop() { }
+    func load(url: URL, with preset: PlayerPreset, headers: [String: String]?) { }
+    func reloadCurrentItem() { }
+    func applyPreset(_ preset: PlayerPreset) { }
+    func play() { }
+    func pausePlayback() { }
+    func togglePause() { }
+    func seek(to seconds: Double) { }
+    func seek(by seconds: Double) { }
+    func setSpeed(_ speed: Double) { }
+    func getSpeed() -> Double { 1.0 }
+    func getAudioTracksDetailed() -> [(Int, String, String)] { [] }
+    func getAudioTracks() -> [(Int, String)] { [] }
+    func setAudioTrack(id: Int) { }
+    func getSubtitleTracks() -> [(Int, String)] { [] }
+    func setSubtitleTrack(id: Int) { }
+    func disableSubtitles() { }
+    func refreshSubtitleOverlay() { }
+    func loadExternalSubtitles(urls: [String]) { }
+    func clearSubtitleCache() { }
+    var isPausedState: Bool { true }
     weak var delegate: VLCRendererDelegate?
-    
-    init(displayLayer: AVSampleBufferDisplayLayer) {}
-    func getRenderingView() -> UIView { return UIView() }
-    func start() throws {}
-    func stop() {}
-    func loadMedia(url: URL, headers: [String: String]? = nil, preset: PlayerPreset? = nil) throws {}
-    func play() {}
-    func pause() {}
-    func togglePlayPause() {}
-    func seek(to position: Double) {}
-    func setPlaybackSpeed(_ speed: Double) {}
-    func getAudioTracks() -> [String] { [] }
-    func getAudioTracksDetailed() -> [AudioTrack] { [] }
-    func setAudioTrack(_ trackIndex: Int) {}
-    func setPreferredAudioLanguage(_ language: String) {}
-    func setAnimeAudioLanguage(_ language: String) {}
-    func getSubtitleTracks() -> [String] { [] }
-    func getSubtitleTracksDetailed() -> [SubtitleTrack] { [] }
-    func setSubtitleTrack(_ trackIndex: Int) {}
-    func getAvailableSubtitles() -> [String] { [] }
-    func loadExternalSubtitles(url: URL) throws {}
-    func disableSubtitles() {}
-    func enableAutoSubtitles(_ enabled: Bool) {}
-    var position: Double { 0 }
-    var duration: Double { 0 }
-    var isPlaying: Bool { false }
 }
-#endif
+
+#endif  // canImport(MobileVLCKit)
