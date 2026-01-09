@@ -395,13 +395,10 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         ]
         
         actions += subtitleTracks.map { track in
-            let isSelected = track.isDefault
             return UIAction(
-                title: track.name,
-                image: isSelected ? UIImage(systemName: "checkmark") : nil,
-                state: isSelected ? .on : .off
+                title: track.1
             ) { [weak self] _ in
-                self?.vlcRenderer.setSubtitleTrack(track.id)
+                self?.vlcRenderer.setSubtitleTrack(id: track.0)
             }
         }
         return UIMenu(title: "Subtitles", children: actions)
@@ -428,7 +425,8 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     func load(url: URL, headers: [String: String]?, preset: PlayerPreset?) {
         Logger.shared.log("[VLCPlayer] load() called with URL: \(url.absoluteString)", type: "Stream")
         
-        vlcRenderer.load(url: url, with: preset ?? .hd1080, headers: headers)
+        let defaultPreset = PlayerPreset(id: .hd1080, title: "HD 1080p", summary: "Default", stream: nil, commands: [])
+        vlcRenderer.load(url: url, with: preset ?? defaultPreset, headers: headers)
         
         // Prepare to seek to last position if mediaInfo is set
         if let info = mediaInfo {
@@ -638,8 +636,8 @@ class VLCPlayerState: NSObject, ObservableObject {
     @Published var isLoading = false
     @Published var showControls = true
     @Published var currentPlaybackSpeed: Double = 1.0
-    @Published var audioTracks: [VLCRenderer.AudioTrack] = []
-    @Published var subtitleTracks: [VLCRenderer.SubtitleTrack] = []
+    @Published var audioTracks: [(Int, String, String)] = []
+    @Published var subtitleTracks: [(Int, String)] = []
     @Published var selectedAudioLanguage = "en"
     @Published var enableAutoSubtitles = true
     

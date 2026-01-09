@@ -305,19 +305,13 @@ final class VLCRenderer: NSObject {
     
     // MARK: - Audio Tracks (VLC-exclusive)
     
-    struct AudioTrack {
-        let id: Int
-        let name: String
-        let language: String?
-        let isDefault: Bool
-    }
-    
     func getAudioTracks() -> [String] {
         guard let mediaPlayer = mediaPlayer else { return [] }
         return (mediaPlayer.audioTrackNames as? [String]) ?? []
     }
     
-    func getAudioTracksDetailed() -> [AudioTrack] {
+    // Returns (id, name, language) tuples to match stub implementation
+    func getAudioTracksDetailed() -> [(Int, String, String)] {
         guard let mediaPlayer = mediaPlayer else { return [] }
         
         let trackIds = (mediaPlayer.audioTrackIndexes as? [NSNumber]) ?? []
@@ -325,17 +319,12 @@ final class VLCRenderer: NSObject {
         
         return trackIds.enumerated().map { index, idNum in
             let trackName = index < trackNames.count ? trackNames[index] : "Audio Track \(index)"
-            let language = parseLanguageFromTrackName(trackName)
-            return AudioTrack(
-                id: idNum.intValue,
-                name: trackName,
-                language: language,
-                isDefault: idNum.intValue == mediaPlayer.currentAudioTrackIndex
-            )
+            let language = parseLanguageFromTrackName(trackName) ?? "und"
+            return (idNum.intValue, trackName, language)
         }
     }
     
-    func setAudioTrack(_ trackIndex: Int) {
+    func setAudioTrack(id trackIndex: Int) {
         guard let mediaPlayer = mediaPlayer else { return }
         mediaPlayer.currentAudioTrackIndex = Int32(trackIndex)
     }
@@ -428,19 +417,13 @@ final class VLCRenderer: NSObject {
     
     // MARK: - Subtitle Tracks (VLC-exclusive)
     
-    struct SubtitleTrack {
-        let id: Int
-        let name: String
-        let isDefault: Bool
-        let isExternal: Bool
-    }
-    
     func getSubtitleTracks() -> [String] {
         guard let mediaPlayer = mediaPlayer else { return [] }
         return (mediaPlayer.videoSubTitlesNames as? [String]) ?? []
     }
     
-    func getSubtitleTracksDetailed() -> [SubtitleTrack] {
+    // Returns (id, name) tuples to match stub implementation
+    func getSubtitleTracksDetailed() -> [(Int, String)] {
         guard let mediaPlayer = mediaPlayer else { return [] }
         
         let trackIds = (mediaPlayer.videoSubTitlesIndexes as? [NSNumber]) ?? []
@@ -448,16 +431,11 @@ final class VLCRenderer: NSObject {
         
         return trackIds.enumerated().map { index, idNum in
             let trackName = index < trackNames.count ? trackNames[index] : "Subtitle Track \(index)"
-            return SubtitleTrack(
-                id: idNum.intValue,
-                name: trackName,
-                isDefault: idNum.intValue == mediaPlayer.currentVideoSubTitleIndex,
-                isExternal: trackName.contains("srt") || trackName.contains("vtt") || trackName.contains("ass")
-            )
+            return (idNum.intValue, trackName)
         }
     }
     
-    func setSubtitleTrack(_ trackIndex: Int) {
+    func setSubtitleTrack(id trackIndex: Int) {
         guard let mediaPlayer = mediaPlayer else { return }
         mediaPlayer.currentVideoSubTitleIndex = Int32(trackIndex)
         delegate?.rendererDidChangeTracks(self)
@@ -644,9 +622,12 @@ final class VLCRenderer {
     func getAudioTracksDetailed() -> [(Int, String, String)] { [] }
     func getAudioTracks() -> [(Int, String)] { [] }
     func setAudioTrack(id: Int) { }
+    func setPreferredAudioLanguage(_ language: String) { }
+    func setAnimeAudioLanguage(_ language: String) { }
     func getSubtitleTracks() -> [(Int, String)] { [] }
     func setSubtitleTrack(id: Int) { }
     func disableSubtitles() { }
+    func enableAutoSubtitles(_ enabled: Bool) { }
     func refreshSubtitleOverlay() { }
     func loadExternalSubtitles(urls: [String]) { }
     func clearSubtitleCache() { }
