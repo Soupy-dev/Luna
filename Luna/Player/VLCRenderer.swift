@@ -10,7 +10,8 @@ import UIKit
 import AVFoundation
 
 // MARK: - Compatibility: VLC renderer is iOS-only (tvOS uses MPV)
-#if os(iOS)
+// Use canImport to gracefully handle when MobileVLCKit is not available
+#if os(iOS) && canImport(MobileVLCKit)
 import MobileVLCKit
 
 protocol VLCRendererDelegate: AnyObject {
@@ -475,19 +476,36 @@ final class VLCRenderer: NSObject {
 }
 
 #else
-// tvOS: Placeholder implementation that does nothing
+// Fallback for tvOS or when MobileVLCKit is unavailable
+// Stub protocol and implementation
+
+protocol VLCRendererDelegate: AnyObject {
+    func renderer(_ renderer: VLCRenderer, didUpdatePosition position: Double, duration: Double)
+    func renderer(_ renderer: VLCRenderer, didChangePause isPaused: Bool)
+    func renderer(_ renderer: VLCRenderer, didChangeLoading isLoading: Bool)
+    func renderer(_ renderer: VLCRenderer, didBecomeReadyToSeek: Bool)
+    func renderer(_ renderer: VLCRenderer, getSubtitleForTime time: Double) -> NSAttributedString?
+    func renderer(_ renderer: VLCRenderer, getSubtitleStyle: Void) -> SubtitleStyle
+    func renderer(_ renderer: VLCRenderer, subtitleTrackDidChange trackId: Int)
+    func rendererDidChangeTracks(_ renderer: VLCRenderer)
+}
+
 final class VLCRenderer: NSObject {
     struct AudioTrack {
         let id: Int
         let name: String
-        let language: String
+        let language: String?
+        let isDefault: Bool
     }
     
     struct SubtitleTrack {
         let id: Int
         let name: String
-        let language: String
+        let isDefault: Bool
+        let isExternal: Bool
     }
+    
+    weak var delegate: VLCRendererDelegate?
     
     init(displayLayer: AVSampleBufferDisplayLayer) {}
     func getRenderingView() -> UIView { return UIView() }
@@ -496,13 +514,21 @@ final class VLCRenderer: NSObject {
     func loadMedia(url: URL, headers: [String: String]? = nil, preset: PlayerPreset? = nil) throws {}
     func play() {}
     func pause() {}
+    func togglePlayPause() {}
     func seek(to position: Double) {}
     func setPlaybackSpeed(_ speed: Double) {}
+    func getAudioTracks() -> [String] { [] }
+    func getAudioTracksDetailed() -> [AudioTrack] { [] }
+    func setAudioTrack(_ trackIndex: Int) {}
     func setPreferredAudioLanguage(_ language: String) {}
     func setAnimeAudioLanguage(_ language: String) {}
-    func enableAutoSubtitles(_ enabled: Bool) {}
+    func getSubtitleTracks() -> [String] { [] }
+    func getSubtitleTracksDetailed() -> [SubtitleTrack] { [] }
     func setSubtitleTrack(_ trackIndex: Int) {}
     func getAvailableSubtitles() -> [String] { [] }
+    func loadExternalSubtitles(url: URL) throws {}
+    func disableSubtitles() {}
+    func enableAutoSubtitles(_ enabled: Bool) {}
     var position: Double { 0 }
     var duration: Double { 0 }
     var isPlaying: Bool { false }
