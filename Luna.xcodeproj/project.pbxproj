@@ -128,7 +128,6 @@
 	14CCCC032F1A000300CCCCCC /* DownloadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CCCC022F1A000300CCCCCC /* DownloadModels.swift */; };
 	14CCCC052F1A000500CCCCCC /* DownloadPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CCCC042F1A000500CCCCCC /* DownloadPersistence.swift */; };
 	14CCCC072F1A000700CCCCCC /* DownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CCCC062F1A000700CCCCCC /* DownloadsView.swift */; };
-	14CCCC092F1A000900CCCCCC /* DownloadServicesResultsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CCCC082F1A000900CCCCCC /* DownloadServicesResultsSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
