@@ -20,7 +20,7 @@ class Logger: @unchecked Sendable {
     private var logs: [LogEntry] = []
     private let logFileURL: URL
     
-    private let maxFileSize = 1024 * 512
+    private let maxFileSize = 1024 * 1024 // 1MB cap
     private let maxLogEntries = 1000
     
     private init() {
