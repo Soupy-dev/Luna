@@ -540,13 +540,21 @@ struct ContinueWatchingCard: View {
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
     
     @State private var posterURL: String?
-    @State private var title: String = ""
+    @State private var title: String
     @State private var isHovering: Bool = false
     @State private var isLoaded: Bool = false
     @State private var showingServices = false
     @State private var isAnime: Bool = false
     @State private var animeSeasonTitle: String?
     @State private var showingDetails = false
+    
+    init(item: ContinueWatchingItem, tmdbService: TMDBService) {
+        self.item = item
+        self.tmdbService = tmdbService
+        // Initialize with data from item
+        _posterURL = State(initialValue: item.posterURL)
+        _title = State(initialValue: item.title.isEmpty ? (item.isMovie ? "Loading..." : "Loading...") : item.title)
+    }
     
     private var cardWidth: CGFloat { isTvOS ? 280 : 120 }
     private var cardHeight: CGFloat { isTvOS ? 380 : 180 }
@@ -659,7 +667,8 @@ struct ContinueWatchingCard: View {
                         voteCount: 0
                     ),
                     tmdbId: item.tmdbId,
-                    animeSeasonTitle: isAnime ? animeSeasonTitle : nil
+                    animeSeasonTitle: isAnime ? animeSeasonTitle : nil,
+                    posterPath: posterURL
                 )
             }
         }
@@ -707,7 +716,11 @@ struct ContinueWatchingCard: View {
     }
     
     private func loadMediaDetails() async {
-        guard !isLoaded else { return }
+        // Only load if we don't have title or poster
+        guard title.isEmpty || posterURL == nil else {
+            isLoaded = true
+            return
+        }
         
         do {
             if item.isMovie {
@@ -715,9 +728,16 @@ struct ContinueWatchingCard: View {
                 let details = try await detailsTask
                 
                 await MainActor.run {
-                    self.title = details.title
-                    self.posterURL = details.fullPosterURL
+                    if self.title.isEmpty {
+                        self.title = details.title
+                    }
+                    if self.posterURL == nil {
+                        self.posterURL = details.fullPosterURL
+                    }
                     self.isLoaded = true
+                    
+                    // Update progress manager with poster URL
+                    ProgressManager.shared.updateMoviePoster(movieId: item.tmdbId, posterURL: details.fullPosterURL)
                 }
             } else {
                 async let detailsTask = tmdbService.getTVShowDetails(id: item.tmdbId)
@@ -727,10 +747,17 @@ struct ContinueWatchingCard: View {
                 let animeFlag = detectAnime(from: details)
                 
                 await MainActor.run {
-                    self.title = details.name
-                    self.posterURL = details.fullPosterURL
+                    if self.title.isEmpty {
+                        self.title = details.name
+                    }
+                    if self.posterURL == nil {
+                        self.posterURL = details.fullPosterURL
+                    }
                     self.isAnime = animeFlag
                     self.isLoaded = true
+                    
+                    // Update progress manager with show metadata
+                    ProgressManager.shared.updateShowMetadata(showId: item.tmdbId, title: details.name, posterURL: details.fullPosterURL)
                 }
                 
                 // If anime, fetch season titles from AniList

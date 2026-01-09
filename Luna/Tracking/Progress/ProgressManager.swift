@@ -11,9 +11,16 @@ import Combine
 
 // MARK: - Data Models
 
+struct ShowMetadata: Codable {
+    let showId: Int
+    var title: String
+    var posterURL: String?
+}
+
 struct ProgressData: Codable {
     var movieProgress: [MovieProgressEntry] = []
     var episodeProgress: [EpisodeProgressEntry] = []
+    var showMetadata: [Int: ShowMetadata] = [:]  // showId -> metadata
 
     mutating func updateMovie(_ entry: MovieProgressEntry) {
         if let index = movieProgress.firstIndex(where: { $0.id == entry.id }) {
@@ -30,6 +37,10 @@ struct ProgressData: Codable {
             episodeProgress.append(entry)
         }
     }
+    
+    mutating func updateShowMetadata(showId: Int, title: String, posterURL: String?) {
+        showMetadata[showId] = ShowMetadata(showId: showId, title: title, posterURL: posterURL)
+    }
 
     func findMovie(id: Int) -> MovieProgressEntry? {
         movieProgress.first { $0.id == id }
@@ -38,11 +49,16 @@ struct ProgressData: Codable {
     func findEpisode(showId: Int, season: Int, episode: Int) -> EpisodeProgressEntry? {
         episodeProgress.first { $0.showId == showId && $0.seasonNumber == season && $0.episodeNumber == episode }
     }
+    
+    func getShowMetadata(showId: Int) -> ShowMetadata? {
+        showMetadata[showId]
+    }
 }
 
 struct MovieProgressEntry: Codable, Identifiable {
     let id: Int
     let title: String
+    var posterURL: String? = nil
     var currentTime: Double = 0
     var totalDuration: Double = 0
     var isWatched: Bool = false
@@ -95,6 +111,8 @@ struct ContinueWatchingItem: Identifiable {
     let id: String
     let tmdbId: Int
     let isMovie: Bool
+    let title: String
+    let posterURL: String?
     let progress: Double
     let lastUpdated: Date
     let seasonNumber: Int?
@@ -210,7 +228,7 @@ final class ProgressManager: ObservableObject {
 
     // MARK: - Movie Progress
 
-    func updateMovieProgress(movieId: Int, title: String, currentTime: Double, totalDuration: Double) {
+    func updateMovieProgress(movieId: Int, title: String, currentTime: Double, totalDuration: Double, posterURL: String? = nil) {
         guard currentTime >= 0 && totalDuration > 0 && currentTime <= totalDuration else {
             Logger.shared.log("Invalid progress values for movie \(title): currentTime=\(currentTime), totalDuration=\(totalDuration)", type: "Warning")
             return
@@ -222,6 +240,11 @@ final class ProgressManager: ObservableObject {
             entry.currentTime = currentTime
             entry.totalDuration = totalDuration
             entry.lastUpdated = Date()
+            
+            // Update poster if provided
+            if let posterURL = posterURL {
+                entry.posterURL = posterURL
+            }
 
             if entry.progress >= 0.85 {
                 entry.isWatched = true
@@ -231,6 +254,18 @@ final class ProgressManager: ObservableObject {
             self.publishCurrentData()
         }
         debouncedSave()
+    }
+    
+    func updateMoviePoster(movieId: Int, posterURL: String) {
+        accessQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            if var entry = self.progressData.findMovie(id: movieId) {
+                entry.posterURL = posterURL
+                self.progressData.updateMovie(entry)
+                self.publishCurrentData()
+                self.debouncedSave()
+            }
+        }
     }
 
     func getMovieProgress(movieId: Int, title: String) -> Double {
@@ -335,7 +370,7 @@ final class ProgressManager: ObservableObject {
 
     // MARK: - Episode Progress
 
-    func updateEpisodeProgress(showId: Int, seasonNumber: Int, episodeNumber: Int, currentTime: Double, totalDuration: Double) {
+    func updateEpisodeProgress(showId: Int, seasonNumber: Int, episodeNumber: Int, currentTime: Double, totalDuration: Double, showTitle: String? = nil, showPosterURL: String? = nil) {
         guard currentTime >= 0 && totalDuration > 0 && currentTime <= totalDuration else {
             Logger.shared.log("Invalid progress values for episode S\(seasonNumber)E\(episodeNumber): currentTime=\(currentTime), totalDuration=\(totalDuration)", type: "Warning")       
             return
@@ -358,6 +393,12 @@ final class ProgressManager: ObservableObject {
             }
 
             self.progressData.updateEpisode(entry)
+            
+            // Update show metadata if provided
+            if let showTitle = showTitle {
+                self.progressData.updateShowMetadata(showId: showId, title: showTitle, posterURL: showPosterURL)
+            }
+            
             self.publishCurrentData()
 
             // Sync to trackers if just reached watched threshold
@@ -368,6 +409,15 @@ final class ProgressManager: ObservableObject {
             }
         }
         debouncedSave()
+    }
+    
+    func updateShowMetadata(showId: Int, title: String, posterURL: String?) {
+        accessQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            self.progressData.updateShowMetadata(showId: showId, title: title, posterURL: posterURL)
+            self.publishCurrentData()
+            self.debouncedSave()
+        }
     }
 
     func getEpisodeProgress(showId: Int, seasonNumber: Int, episodeNumber: Int) -> Double {
@@ -520,6 +570,8 @@ final class ProgressManager: ObservableObject {
                         id: "movie_\(movie.id)",
                         tmdbId: movie.id,
                         isMovie: true,
+                        title: movie.title,
+                        posterURL: movie.posterURL,
                         progress: movie.progress,
                         lastUpdated: movie.lastUpdated,
                         seasonNumber: nil,
@@ -542,10 +594,14 @@ final class ProgressManager: ObservableObject {
             }
             
             let episodes = showMap.values.map { episode in
-                ContinueWatchingItem(
+                // Look up show metadata
+                let showMeta = self.progressData.getShowMetadata(showId: episode.showId)
+                return ContinueWatchingItem(
                     id: "episode_\(episode.showId)",
                     tmdbId: episode.showId,
                     isMovie: false,
+                    title: showMeta?.title ?? "",
+                    posterURL: showMeta?.posterURL,
                     progress: episode.progress,
                     lastUpdated: episode.lastUpdated,
                     seasonNumber: episode.seasonNumber,
@@ -597,6 +653,6 @@ final class ProgressManager: ObservableObject {
 // MARK: - MediaInfo Enum
 
 enum MediaInfo {
-    case movie(id: Int, title: String)
-    case episode(showId: Int, seasonNumber: Int, episodeNumber: Int)
+    case movie(id: Int, title: String, posterURL: String? = nil)
+    case episode(showId: Int, seasonNumber: Int, episodeNumber: Int, showTitle: String? = nil, showPosterURL: String? = nil)
 }

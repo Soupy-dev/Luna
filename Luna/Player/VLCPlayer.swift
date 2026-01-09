@@ -15,11 +15,13 @@ struct VLCPlayer: UIViewControllerRepresentable {
     let url: URL
     var headers: [String: String]? = nil
     var preset: PlayerPreset? = nil
+    var mediaInfo: MediaInfo? = nil
     @ObservedObject var playerState: VLCPlayerState
     
     func makeUIViewController(context: Context) -> VLCPlayerViewController {
         let controller = VLCPlayerViewController()
         controller.playerState = playerState
+        controller.mediaInfo = mediaInfo
         controller.load(url: url, headers: headers, preset: preset)
         return controller
     }
@@ -57,6 +59,7 @@ class VLCPlayerState: NSObject, ObservableObject {
 class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     private let vlcRenderer: VLCRenderer
     var playerState: VLCPlayerState?
+    var mediaInfo: MediaInfo?
     
     private let controlsContainer = UIView()
     private let topControlsView = UIView()
@@ -67,6 +70,7 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     private let durationLabel = UILabel()
     
     private var positionUpdateTimer: Timer?
+    private var lastPlayedTime: Double?
     
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         let displayLayer = AVSampleBufferDisplayLayer()
@@ -367,6 +371,11 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     func load(url: URL, headers: [String: String]?, preset: PlayerPreset?) {
         do {
             try vlcRenderer.loadMedia(url: url, headers: headers, preset: preset)
+            
+            // Prepare to seek to last position if mediaInfo is set
+            if let info = mediaInfo {
+                prepareSeekToLastPosition(for: info)
+            }
         } catch {
             Logger.shared.log("Failed to load VLC media: \(error)", type: "Error")
         }
@@ -390,6 +399,9 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
             
             self.timeLabel.text = self.formatTime(position)
             self.durationLabel.text = self.formatTime(duration)
+            
+            // Record progress
+            self.recordProgress(position: position, duration: duration)
         }
     }
     
@@ -407,7 +419,12 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         }
     }
     
-    func renderer(_ renderer: VLCRenderer, didBecomeReadyToSeek: Bool) {}
+    func renderer(_ renderer: VLCRenderer, didBecomeReadyToSeek: Bool) {
+        if didBecomeReadyToSeek, let lastTime = lastPlayedTime, lastTime > 5.0 {
+            vlcRenderer.seek(to: lastTime)
+            lastPlayedTime = nil
+        }
+    }
     
     func renderer(_ renderer: VLCRenderer, getSubtitleForTime time: Double) -> NSAttributedString? {
         return nil
@@ -422,6 +439,34 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     func rendererDidChangeTracks(_ renderer: VLCRenderer) {
         playerState?.audioTracks = renderer.getAudioTracksDetailed()
         playerState?.subtitleTracks = renderer.getSubtitleTracksDetailed()
+    }
+    
+    // MARK: - Progress Tracking
+    
+    private func recordProgress(position: Double, duration: Double) {
+        guard duration.isFinite, duration > 0, position >= 0, let info = mediaInfo else { return }
+        
+        switch info {
+        case .movie(let id, let title, let posterURL):
+            ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: position, totalDuration: duration, posterURL: posterURL)
+        case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL):
+            ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: duration, showTitle: showTitle, showPosterURL: showPosterURL)
+        }
+    }
+    
+    private func prepareSeekToLastPosition(for mediaInfo: MediaInfo) {
+        var lastTime: Double?
+        
+        switch mediaInfo {
+        case .movie(let id, let title):
+            lastTime = ProgressManager.shared.getMovieCurrentTime(movieId: id, title: title)
+        case .episode(let showId, let seasonNumber, let episodeNumber):
+            lastTime = ProgressManager.shared.getEpisodeCurrentTime(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
+        }
+        
+        if let time = lastTime, time > 5.0 {
+            self.lastPlayedTime = time
+        }
     }
     
     private func formatTime(_ seconds: Double) -> String {
@@ -539,10 +584,12 @@ class VLCPlayerState: NSObject, ObservableObject {
     
     func scheduleHideControls() {}
 }
+
 struct VLCPlayer: UIViewControllerRepresentable {
     let url: URL
     var headers: [String: String]? = nil
     var preset: PlayerPreset? = nil
+    var mediaInfo: MediaInfo? = nil
     @ObservedObject var playerState: VLCPlayerState = VLCPlayerState()
     
     func makeUIViewController(context: Context) -> UIViewController {

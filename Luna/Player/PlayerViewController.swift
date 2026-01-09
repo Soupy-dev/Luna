@@ -1102,10 +1102,10 @@ final class PlayerViewController: UIViewController {
         guard duration.isFinite, duration > 0, position >= 0, let info = mediaInfo else { return }
         
         switch info {
-        case .movie(let id, let title):
-            ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: position, totalDuration: duration)
-        case .episode(let showId, let seasonNumber, let episodeNumber):
-            ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: duration)
+        case .movie(let id, let title, let posterURL):
+            ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: position, totalDuration: duration, posterURL: posterURL)
+        case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL):
+            ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: duration, showTitle: showTitle, showPosterURL: showPosterURL)
         }
     }
     

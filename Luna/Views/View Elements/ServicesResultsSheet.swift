@@ -86,6 +86,7 @@ struct ModulesSearchResultsSheet: View {
     let selectedEpisode: TMDBEpisode?
     let tmdbId: Int
     let animeSeasonTitle: String?
+    let posterPath: String?
     let isDownload: Bool = false
     let onDownloadSelected: ((String, URL, [String: String]?) -> Void)? = nil
     
@@ -1187,9 +1188,11 @@ struct ModulesSearchResultsSheet: View {
                     subtitles: subtitleArray
                 )
                 if isMovie {
-                    pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle)
+                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                    pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
                 } else if let episode = selectedEpisode {
-                    pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber)
+                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                    pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
                 }
                 pvc.modalPresentationStyle = .fullScreen
                 
@@ -1202,7 +1205,19 @@ struct ModulesSearchResultsSheet: View {
                 return
             } else if inAppPlayer == "VLC" {
                 #if os(iOS)
-                let vlcPlayer = VLCPlayer(url: streamURL, headers: finalHeaders, preset: nil as PlayerPreset?, playerState: VLCPlayerState())
+                let mediaInfo: MediaInfo
+                if isMovie {
+                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                    mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
+                } else if let episode = selectedEpisode {
+                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                    mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
+                } else {
+                    Logger.shared.log("Failed to create mediaInfo for VLC player", type: "Error")
+                    return
+                }
+                
+                let vlcPlayer = VLCPlayer(url: streamURL, headers: finalHeaders, preset: nil as PlayerPreset?, mediaInfo: mediaInfo, playerState: VLCPlayerState())
                 let hostingController = UIHostingController(rootView: vlcPlayer)
                 hostingController.modalPresentationStyle = .fullScreen
                 
@@ -1224,9 +1239,11 @@ struct ModulesSearchResultsSheet: View {
                     subtitles: subtitleArray
                 )
                 if isMovie {
-                    pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle)
+                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                    pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
                 } else if let episode = selectedEpisode {
-                    pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber)
+                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                    pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
                 }
                 pvc.modalPresentationStyle = .fullScreen
                 
@@ -1244,9 +1261,11 @@ struct ModulesSearchResultsSheet: View {
                 let item = AVPlayerItem(asset: asset)
                 playerVC.player = AVPlayer(playerItem: item)
                 if isMovie {
-                    playerVC.mediaInfo = .movie(id: tmdbId, title: mediaTitle)
+                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                    playerVC.mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
                 } else if let episode = selectedEpisode {
-                    playerVC.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber)
+                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                    playerVC.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
                 }
                 playerVC.modalPresentationStyle = .fullScreen
                 

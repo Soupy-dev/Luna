@@ -129,7 +129,8 @@ struct MediaDetailView: View {
                         return "anime" // Any non-nil value works as a flag
                     }
                     return nil
-                }()
+                }(),
+                posterPath: searchResult.isMovie ? movieDetail?.posterPath : tvShowDetail?.posterPath
             )
         }
         .sheet(isPresented: $showingAddToCollection) {
