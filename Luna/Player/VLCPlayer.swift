@@ -598,7 +598,7 @@ struct VLCPlayerControlsView: View {
                     Button("Off") { renderer.disableSubtitles() }
                     ForEach(0..<availableSubtitles.count, id: \.self) { index in
                         Button(availableSubtitles[index]) {
-                            renderer.setSubtitleTrack(index)
+                            renderer.setSubtitleTrack(id: index)
                         }
                     }
                 } label: {
