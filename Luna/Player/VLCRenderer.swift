@@ -35,7 +35,7 @@ final class VLCRenderer: NSObject {
     }
     
     private let displayLayer: AVSampleBufferDisplayLayer
-    private let eventQueue = DispatchQueue(label: "vlc.renderer.events", qos: .utility)
+    private let eventQueue = DispatchQueue(label: "vlc.renderer.events", qos: .userInitiated)
     private let stateQueue = DispatchQueue(label: "vlc.renderer.state", attributes: .concurrent)
     
     // VLC rendering container - uses OpenGL rendering
@@ -267,10 +267,6 @@ final class VLCRenderer: NSObject {
     func play() {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
-            
-            // Activate audio session before playing to prevent delay
-            try? AVAudioSession.sharedInstance().setActive(true)
-            
             player.play()
         }
     }
@@ -329,9 +325,6 @@ final class VLCRenderer: NSObject {
             
             // Track current speed for thermal optimization
             self.currentPlaybackSpeed = max(0.1, speed)
-            
-            // Activate audio session before changing speed to prevent audio delay
-            try? AVAudioSession.sharedInstance().setActive(true)
             
             player.rate = Float(speed)
         }

@@ -662,7 +662,24 @@ struct ModulesSearchResultsSheet: View {
             return
         }
         
-        let searchQuery = displayTitle
+        // Check if anime via TrackerManager
+        let isAnime = TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
+        let searchQuery: String
+        if let ep = selectedEpisode {
+            if isAnime {
+                // Anime: mediaTitle is already season-specific (e.g., "JJK 2nd Season")
+                // Just append E## format
+                searchQuery = ep.episodeNumber > 0 ? "\(mediaTitle) E\(ep.episodeNumber)" : mediaTitle
+            } else if ep.seasonNumber > 1 {
+                // Non-anime TV: add season suffix for seasons > 1
+                searchQuery = "\(mediaTitle) season \(ep.seasonNumber)"
+            } else {
+                searchQuery = mediaTitle
+            }
+        } else {
+            searchQuery = mediaTitle
+        }
+        let baseTitleQuery = searchQuery.caseInsensitiveCompare(mediaTitle) == .orderedSame ? nil : mediaTitle
         let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != mediaTitle.lowercased() } ?? false
         
         Task {
@@ -681,7 +698,60 @@ struct ModulesSearchResultsSheet: View {
                     }
                 },
                 onComplete: {
-                    if hasAlternativeTitle, let altTitle = self.originalTitle {
+                    // Second tier: search with base title if different from primary query
+                    if let baseTitleQuery = baseTitleQuery {
+                        Task {
+                            await self.serviceManager.searchInActiveServicesProgressively(
+                                query: baseTitleQuery,
+                                onResult: { service, additionalResults in
+                                    Task { @MainActor in
+                                        let additional = additionalResults ?? []
+                                        let existing = self.viewModel.moduleResults[service.id] ?? []
+                                        let existingHrefs = Set(existing.map { $0.href })
+                                        let newResults = additional.filter { !existingHrefs.contains($0.href) }
+                                        self.viewModel.moduleResults[service.id] = existing + newResults
+                                        
+                                        if additionalResults == nil {
+                                            self.viewModel.failedServices.insert(service.id)
+                                        }
+                                    }
+                                },
+                                onComplete: {
+                                    // Third tier: search with romaji/original title
+                                    if hasAlternativeTitle, let altTitle = self.originalTitle {
+                                        Task {
+                                            await self.serviceManager.searchInActiveServicesProgressively(
+                                                query: altTitle,
+                                                onResult: { service, additionalResults in
+                                                    Task { @MainActor in
+                                                        let additional = additionalResults ?? []
+                                                        let existing = self.viewModel.moduleResults[service.id] ?? []
+                                                        let existingHrefs = Set(existing.map { $0.href })
+                                                        let newResults = additional.filter { !existingHrefs.contains($0.href) }
+                                                        self.viewModel.moduleResults[service.id] = existing + newResults
+                                                        
+                                                        if additionalResults == nil {
+                                                            self.viewModel.failedServices.insert(service.id)
+                                                        }
+                                                    }
+                                                },
+                                                onComplete: {
+                                                    Task { @MainActor in
+                                                        self.viewModel.isSearching = false
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    } else {
+                                        Task { @MainActor in
+                                            self.viewModel.isSearching = false
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    } else if hasAlternativeTitle, let altTitle = self.originalTitle {
+                        // No base title query, go straight to romaji
                         Task {
                             await self.serviceManager.searchInActiveServicesProgressively(
                                 query: altTitle,

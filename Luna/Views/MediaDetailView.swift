@@ -118,7 +118,14 @@ struct MediaDetailView: View {
         }
         .sheet(isPresented: $showingSearchResults) {
             ModulesSearchResultsSheet(
-                mediaTitle: searchResult.displayTitle,
+                mediaTitle: {
+                    // For anime, use the season-specific AniList title (e.g., "JJK 2nd Season")
+                    if isAnimeShow, let episode = selectedEpisodeForSearch, 
+                       let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                        return seasonTitle
+                    }
+                    return searchResult.displayTitle
+                }(),
                 originalTitle: romajiTitle,
                 isMovie: searchResult.isMovie,
                 selectedEpisode: selectedEpisodeForSearch,
