@@ -304,12 +304,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private lazy var renderer: Any = {
         // Select renderer based on Settings
         let playerChoice = Settings.shared.playerChoice
+        Logger.shared.log("[PlayerViewController.renderer] Settings.playerChoice = \(playerChoice)", type: "Stream")
         
         if playerChoice == .vlc {
+            Logger.shared.log("[PlayerViewController.renderer] Creating VLC renderer", type: "Stream")
             let r = VLCRenderer(displayLayer: displayLayer)
             r.delegate = self
             return r
         } else {
+            Logger.shared.log("[PlayerViewController.renderer] Creating MPV renderer", type: "Stream")
             let r = MPVSoftwareRenderer(displayLayer: displayLayer)
             r.delegate = self
             return r

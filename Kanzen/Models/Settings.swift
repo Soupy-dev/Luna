@@ -50,14 +50,18 @@ class Settings: ObservableObject {
         get {
             // Read from inAppPlayer setting used in PlayerSettingsView
             let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
+            Logger.shared.log("[Settings.playerChoice] inAppPlayer UserDefault = '\(inAppRaw)'", type: "Stream")
             switch inAppRaw {
             case "VLC":
+                Logger.shared.log("[Settings.playerChoice] Returning .vlc", type: "Stream")
                 return .vlc
             case "mpv":
+                Logger.shared.log("[Settings.playerChoice] Returning .mpv", type: "Stream")
                 return .mpv
             default:
                 // "Normal" uses native iOS player, not PlayerViewController
                 // This should not be called when Normal is selected
+                Logger.shared.log("[Settings.playerChoice] Unknown value '\(inAppRaw)', returning .mpv fallback", type: "Stream")
                 return .mpv  // Fallback
             }
         }
