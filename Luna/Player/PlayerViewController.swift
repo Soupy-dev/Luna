@@ -499,8 +499,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererSetAudioTrack(id: Int) {
         if let vlc = vlcRenderer {
             vlc.setAudioTrack(id: id)
-        } else if let mpv = mpvRenderer {
-            mpv.setAudioTrack(id: id)
         }
     }
     
@@ -514,24 +512,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererSetSubtitleTrack(id: Int) {
         if let vlc = vlcRenderer {
             vlc.setSubtitleTrack(id: id)
-        } else if let mpv = mpvRenderer {
-            mpv.setSubtitleTrack(id: id)
         }
     }
     
     private func rendererDisableSubtitles() {
         if let vlc = vlcRenderer {
             vlc.disableSubtitles()
-        } else if let mpv = mpvRenderer {
-            mpv.disableSubtitles()
         }
     }
     
     private func rendererRefreshSubtitleOverlay() {
         if let vlc = vlcRenderer {
             vlc.refreshSubtitleOverlay()
-        } else if let mpv = mpvRenderer {
-            mpv.refreshSubtitleOverlay()
         }
     }
     
