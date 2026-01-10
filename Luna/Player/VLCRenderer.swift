@@ -239,8 +239,8 @@ final class VLCRenderer: NSObject {
                 Logger.shared.log("[VLCRenderer.load] Applied \(headerCount) additional headers plus User-Agent/Referer/Cookie", type: "Info")
             }
 
-            // Increase network caching to reduce early EOF/errors on slow mirrors
-            media.addOption(":network-caching=1200")
+            // 5-minute rolling buffer: VLC starts playback quickly, then maintains buffer for instant seeking
+            media.addOption(":network-caching=300000")  // 300 seconds (5 minutes)
             // Keep reconnect enabled for flaky hosts
             media.addOption(":http-reconnect=true")
 
@@ -267,6 +267,10 @@ final class VLCRenderer: NSObject {
     func play() {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
+            
+            // Activate audio session before playing to prevent delay
+            try? AVAudioSession.sharedInstance().setActive(true)
+            
             player.play()
         }
     }
@@ -325,6 +329,9 @@ final class VLCRenderer: NSObject {
             
             // Track current speed for thermal optimization
             self.currentPlaybackSpeed = max(0.1, speed)
+            
+            // Activate audio session before changing speed to prevent audio delay
+            try? AVAudioSession.sharedInstance().setActive(true)
             
             player.rate = Float(speed)
         }
