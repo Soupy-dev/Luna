@@ -1235,7 +1235,6 @@ struct ModulesSearchResultsSheet: View {
                     Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
                 }
                 return
-                #endif
             } else {
                 let playerVC = NormalPlayer()
                 let asset = AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": finalHeaders])
