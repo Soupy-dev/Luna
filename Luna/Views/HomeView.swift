@@ -652,6 +652,7 @@ struct ContinueWatchingCard: View {
             if isLoaded {
                 ModulesSearchResultsSheet(
                     mediaTitle: title,
+                    seasonTitleOverride: isAnime ? animeSeasonTitle : nil,
                     originalTitle: nil,
                     isMovie: item.isMovie,
                     selectedEpisode: item.isMovie ? nil : TMDBEpisode(
