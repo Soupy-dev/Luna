@@ -315,9 +315,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             return r
         }
     }()
-
-    // Fallback renderer used when MPV fails to start
-    private var fallbackVlcRenderer: VLCRenderer?
     
     // Helper properties to access renderer methods regardless of type
     private var mpvRenderer: MPVSoftwareRenderer? {
@@ -325,7 +322,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private var vlcRenderer: VLCRenderer? {
-        return fallbackVlcRenderer ?? (renderer as? VLCRenderer)
+        return renderer as? VLCRenderer
     }
     
     var mediaInfo: MediaInfo?
@@ -437,18 +434,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
     }
 
-    private func enableVLCFallback(after error: Error) throws {
-        Logger.shared.log("MPV failed, switching to VLC fallback: \(error)", type: "Error")
-        let fallback = VLCRenderer(displayLayer: displayLayer)
-        fallback.delegate = self
-        fallbackVlcRenderer = fallback
-        try fallback.start()
-        presentErrorAlert(
-            title: "MPV Unavailable",
-            message: "MPV failed to start (\(error)). Switched to VLC automatically."
-        )
-    }
-    
     private func rendererSeek(to seconds: Double) {
         Logger.shared.log("[PlayerViewController.rendererSeek] Seek to \(seconds)s", type: "Stream")
         if let vlc = vlcRenderer {

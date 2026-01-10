@@ -48,13 +48,30 @@ class Settings: ObservableObject {
     
     var playerChoice: PlayerChoice {
         get {
-            if let raw = UserDefaults.standard.string(forKey: "playerChoice"),
-               let choice = PlayerChoice(rawValue: raw) {
-                return choice
+            // Read from inAppPlayer setting used in PlayerSettingsView
+            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
+            switch inAppRaw {
+            case "VLC":
+                return .vlc
+            case "mpv":
+                return .mpv
+            default:
+                // "Normal" uses native iOS player, not PlayerViewController
+                // This should not be called when Normal is selected
+                return .mpv  // Fallback
             }
-            return .vlc  // Default to VLC for this user
         }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "playerChoice") }
+        set {
+            // Sync back to inAppPlayer setting
+            let inAppValue: String
+            switch newValue {
+            case .vlc:
+                inAppValue = "VLC"
+            case .mpv:
+                inAppValue = "mpv"
+            }
+            UserDefaults.standard.set(inAppValue, forKey: "inAppPlayer")
+        }
     }
     
     init() {
