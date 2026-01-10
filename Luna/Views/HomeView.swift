@@ -773,31 +773,7 @@ struct ContinueWatchingCard: View {
                     ProgressManager.shared.updateShowMetadata(showId: item.tmdbId, title: details.name, posterURL: seasonPosterURL ?? details.fullPosterURL)
                 }
                 
-                // If anime, fetch season titles and posters from AniList
-                if animeFlag, let seasonNumber = item.seasonNumber {
-                    do {
-                        let aniDetails = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
-                            title: details.name,
-                            tmdbShowId: item.tmdbId,
-                            tmdbService: tmdbService,
-                            tmdbShowPoster: details.posterPath,
-                            token: nil
-                        )
-                        
-                        if let animeSeason = aniDetails.seasons.first(where: { $0.seasonNumber == seasonNumber }) {
-                            await MainActor.run {
-                                // Use anime season poster if available, overriding TMDB season poster
-                                if let animePosterURL = animeSeason.posterUrl {
-                                    self.posterURL = animePosterURL
-                                    // Update progress manager with anime poster
-                                    ProgressManager.shared.updateShowMetadata(showId: item.tmdbId, title: details.name, posterURL: animePosterURL)
-                                }
-                            }
-                        }
-                    } catch {
-                        Logger.shared.log("Failed to fetch anime season title: \(error.localizedDescription)", type: "Error")
-                    }
-                }
+                // Removed AniList poster overrides; visuals use TMDB season/show posters only
             }
         } catch {
             await MainActor.run {
