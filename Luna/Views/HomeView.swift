@@ -545,6 +545,7 @@ struct ContinueWatchingCard: View {
     @State private var isLoaded: Bool = false
     @State private var showingServices = false
     @State private var isAnime: Bool = false
+    @State private var animeSeasonTitle: String?
     @State private var showingDetails = false
     
     init(item: ContinueWatchingItem, tmdbService: TMDBService) {
@@ -651,6 +652,7 @@ struct ContinueWatchingCard: View {
             if isLoaded {
                 ModulesSearchResultsSheet(
                     mediaTitle: title,
+                    seasonTitleOverride: isAnime ? animeSeasonTitle : nil,
                     originalTitle: nil,
                     isMovie: item.isMovie,
                     selectedEpisode: item.isMovie ? nil : TMDBEpisode(
@@ -666,6 +668,7 @@ struct ContinueWatchingCard: View {
                         voteCount: 0
                     ),
                     tmdbId: item.tmdbId,
+                    animeSeasonTitle: isAnime ? animeSeasonTitle : nil,
                     posterPath: posterURL
                 )
             }
@@ -773,7 +776,30 @@ struct ContinueWatchingCard: View {
                     ProgressManager.shared.updateShowMetadata(showId: item.tmdbId, title: details.name, posterURL: seasonPosterURL ?? details.fullPosterURL)
                 }
                 
-                // Removed AniList poster overrides; visuals use TMDB season/show posters only
+                // If anime, fetch season titles and posters from AniList
+                if animeFlag, let seasonNumber = item.seasonNumber {
+                    do {
+                        let aniDetails = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
+                            title: details.name,
+                            tmdbShowId: item.tmdbId,
+                            tmdbService: tmdbService,
+                            tmdbShowPoster: details.posterPath,
+                            token: nil
+                        )
+                        
+                        if let animeSeason = aniDetails.seasons.first(where: { $0.seasonNumber == seasonNumber }) {
+                            await MainActor.run {
+                                self.animeSeasonTitle = animeSeason.title
+                                if let animePosterURL = animeSeason.posterUrl {
+                                    self.posterURL = animePosterURL
+                                    ProgressManager.shared.updateShowMetadata(showId: item.tmdbId, title: details.name, posterURL: animePosterURL)
+                                }
+                            }
+                        }
+                    } catch {
+                        Logger.shared.log("Failed to fetch anime season title: \(error.localizedDescription)", type: "Error")
+                    }
+                }
             }
         } catch {
             await MainActor.run {

@@ -80,12 +80,16 @@ final class ModulesSearchResultsViewModel: ObservableObject {
 }
 
 struct ModulesSearchResultsSheet: View {
-    /// Title from TMDB
+    /// Base title from caller (TMDB or season-specific)
     let mediaTitle: String
+    /// Optional season-specific override (AniList season title)
+    let seasonTitleOverride: String?
     let originalTitle: String?
     let isMovie: Bool
     let selectedEpisode: TMDBEpisode?
     let tmdbId: Int
+    /// Non-nil for anime to force E## format
+    let animeSeasonTitle: String?
     let posterPath: String?
     
     @Environment(\.presentationMode) var presentationMode
@@ -93,11 +97,16 @@ struct ModulesSearchResultsSheet: View {
     @StateObject private var serviceManager = ServiceManager.shared
     @StateObject private var algorithmManager = AlgorithmManager.shared
 
+    private var effectiveTitle: String { seasonTitleOverride ?? mediaTitle }
+
     private var displayTitle: String {
         if let episode = selectedEpisode {
-            return "\(mediaTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
+            if animeSeasonTitle != nil {
+                return "\(effectiveTitle) E\(episode.episodeNumber)"
+            }
+            return "\(effectiveTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
         }
-        return mediaTitle
+        return effectiveTitle
     }
     
     private var episodeSeasonInfo: String {
@@ -288,7 +297,7 @@ struct ModulesSearchResultsSheet: View {
         ForEach(filteredResults.highQuality, id: \.id) { searchResult in
             EnhancedMediaResultRow(
                 result: searchResult,
-                originalTitle: mediaTitle,
+                originalTitle: effectiveTitle,
                 alternativeTitle: originalTitle,
                 episode: selectedEpisode,
                 onTap: {
@@ -338,7 +347,7 @@ struct ModulesSearchResultsSheet: View {
             ForEach(filteredResults.lowQuality, id: \.id) { searchResult in
                 CompactMediaResultRow(
                     result: searchResult,
-                    originalTitle: mediaTitle,
+                    originalTitle: effectiveTitle,
                     alternativeTitle: originalTitle,
                     episode: selectedEpisode,
                     onTap: {
@@ -657,25 +666,30 @@ struct ModulesSearchResultsSheet: View {
             return
         }
         
-        // Check if anime via TrackerManager (for potential future use)
+        // Check if anime via TrackerManager (for logging)
         let isAnime = TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
         
-        // Build search query - always use TMDB format with S#E# for TV shows
+        // Build search query
         let searchQuery: String
         if let ep = selectedEpisode {
-            // For TV shows: use standard "Title S#E#" format
-            searchQuery = "\(mediaTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
+            if animeSeasonTitle != nil {
+                searchQuery = "\(effectiveTitle) E\(ep.episodeNumber)"
+            } else {
+                searchQuery = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
+            }
         } else {
-            searchQuery = mediaTitle
+            searchQuery = effectiveTitle
         }
         
         // Debug logging
         Logger.shared.log("[ServicesResultsSheet] mediaTitle: '\(mediaTitle)'", type: "Debug")
+        Logger.shared.log("[ServicesResultsSheet] seasonTitleOverride: '\(seasonTitleOverride ?? "nil")'", type: "Debug")
+        Logger.shared.log("[ServicesResultsSheet] effectiveTitle: '\(effectiveTitle)'", type: "Debug")
         Logger.shared.log("[ServicesResultsSheet] searchQuery: '\(searchQuery)'", type: "Debug")
         Logger.shared.log("[ServicesResultsSheet] isAnime: \(isAnime)", type: "Debug")
         
-        let baseTitleQuery = searchQuery.caseInsensitiveCompare(mediaTitle) == .orderedSame ? nil : mediaTitle
-        let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != mediaTitle.lowercased() } ?? false
+        let baseTitleQuery = searchQuery.caseInsensitiveCompare(effectiveTitle) == .orderedSame ? nil : effectiveTitle
+        let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != effectiveTitle.lowercased() } ?? false
         
         Task {
             await serviceManager.searchInActiveServicesProgressively(
