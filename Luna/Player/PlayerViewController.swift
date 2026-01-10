@@ -2069,8 +2069,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         switch info {
         case .movie(let id, let title, _):
             ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: position, totalDuration: effectiveDuration)
-        case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
-            ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: effectiveDuration)
+        case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL):
+            ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: effectiveDuration, showTitle: showTitle, showPosterURL: showPosterURL)
         }
     }
     
