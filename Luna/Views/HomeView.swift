@@ -651,7 +651,7 @@ struct ContinueWatchingCard: View {
         .sheet(isPresented: $showingServices) {
             if isLoaded {
                 ModulesSearchResultsSheet(
-                    mediaTitle: title,
+                    mediaTitle: isAnime ? (animeSeasonTitle ?? title) : title,
                     seasonTitleOverride: isAnime ? animeSeasonTitle : nil,
                     originalTitle: nil,
                     isMovie: item.isMovie,

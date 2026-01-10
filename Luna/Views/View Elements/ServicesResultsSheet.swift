@@ -98,11 +98,18 @@ struct ModulesSearchResultsSheet: View {
     @StateObject private var algorithmManager = AlgorithmManager.shared
 
     private var effectiveTitle: String { seasonTitleOverride ?? mediaTitle }
+    private var animeEffectiveTitle: String {
+        guard animeSeasonTitle != nil else { return effectiveTitle }
+        let stripped = effectiveTitle
+            .replacingOccurrences(of: "(?i)season\\s+\\d+", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stripped.isEmpty ? effectiveTitle : stripped
+    }
 
     private var displayTitle: String {
         if let episode = selectedEpisode {
             if animeSeasonTitle != nil {
-                return "\(effectiveTitle) E\(episode.episodeNumber)"
+                return "\(animeEffectiveTitle) E\(episode.episodeNumber)"
             }
             return "\(effectiveTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
         }
@@ -673,7 +680,7 @@ struct ModulesSearchResultsSheet: View {
         let searchQuery: String
         if let ep = selectedEpisode {
             if animeSeasonTitle != nil {
-                searchQuery = "\(effectiveTitle) E\(ep.episodeNumber)"
+                searchQuery = "\(animeEffectiveTitle) E\(ep.episodeNumber)"
             } else {
                 searchQuery = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
             }
