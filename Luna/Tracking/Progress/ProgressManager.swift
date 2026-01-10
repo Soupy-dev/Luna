@@ -153,6 +153,15 @@ final class ProgressManager: ObservableObject {
         self.progressFileURL = Self.documentsDirectory.appendingPathComponent("ProgressData.json")
         loadProgressData()
     }
+    
+    // MARK: - Public Access
+    
+    /// Returns a snapshot of the current progress data for backup purposes
+    func getProgressData() -> ProgressData {
+        return accessQueue.sync {
+            return self.progressData
+        }
+    }
 
     private func publishCurrentData() {
         accessQueue.async { [weak self] in

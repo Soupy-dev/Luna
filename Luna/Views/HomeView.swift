@@ -716,8 +716,8 @@ struct ContinueWatchingCard: View {
     }
     
     private func loadMediaDetails() async {
-        // Only load if we don't have title or poster
-        guard title.isEmpty || posterURL == nil else {
+        // Only load if we don't have title or poster (or title is still the placeholder)
+        guard title == "Loading..." || posterURL == nil else {
             isLoaded = true
             return
         }

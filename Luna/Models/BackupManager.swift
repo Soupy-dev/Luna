@@ -225,11 +225,9 @@ class BackupManager {
         let libraryManager = LibraryManager.shared
         let backupCollections = libraryManager.collections.map { BackupCollection(from: $0) }
         
-        // Get progress data - create a snapshot from the published lists
+        // Get progress data - read directly from the internal storage
         let progressManager = ProgressManager.shared
-        var progressData = ProgressData()
-        progressData.movieProgress = progressManager.movieProgressList
-        progressData.episodeProgress = progressManager.episodeProgressList
+        let progressData = progressManager.getProgressData()
         
         // Get tracker state
         let trackerManager = TrackerManager.shared

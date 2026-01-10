@@ -115,6 +115,9 @@ final class VLCRenderer: NSObject {
                 throw RendererError.vlcInitializationFailed
             }
             
+            // Enable audio time stretching for smoother speed changes
+            mediaPlayer.audioTimeStretch = true
+            
             // Render directly into the VLC view (stable video output)
             mediaPlayer.drawable = vlcView
             

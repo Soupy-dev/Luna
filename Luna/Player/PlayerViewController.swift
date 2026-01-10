@@ -1363,6 +1363,32 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         speedButton.menu = speedMenu
     }
     
+    private func updateAudioTracksMenuWhenReady() {
+        // Stop retrying if user manually selected a track
+        if userSelectedAudioTrack {
+            updateAudioTracksMenu()
+            return
+        }
+        
+        let detailedTracks = rendererGetAudioTracksDetailed()
+        
+        // If tracks are populated, proceed with auto-selection
+        if !detailedTracks.isEmpty {
+            updateAudioTracksMenu()
+            return
+        }
+        
+        // Tracks not ready yet for VLC - retry shortly
+        if vlcRenderer != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.updateAudioTracksMenuWhenReady()
+            }
+        } else {
+            // Not VLC - just update menu as-is
+            updateAudioTracksMenu()
+        }
+    }
+    
     private func updateAudioTracksMenu() {
         let detailedTracks = rendererGetAudioTracksDetailed()
         let tracks = detailedTracks.map { ($0.0, $0.1) }
@@ -2189,7 +2215,7 @@ extension PlayerViewController: VLCRendererDelegate {
             guard let self else { return }
             
             // Update audio and subtitle tracks now that the video is ready
-            self.updateAudioTracksMenu()
+            self.updateAudioTracksMenuWhenReady()
             self.updateSubtitleTracksMenu()
             
             if let seekTime = self.pendingSeekTime {
