@@ -748,21 +748,34 @@ struct ContinueWatchingCard: View {
                 // Check if this is anime
                 let animeFlag = detectAnime(from: details)
                 
+                // Fetch season-specific poster if we have a season number
+                var seasonPosterURL: String? = nil
+                if let seasonNumber = item.seasonNumber {
+                    do {
+                        let seasonDetails = try await tmdbService.getSeasonDetails(tvShowId: item.tmdbId, seasonNumber: seasonNumber)
+                        seasonPosterURL = seasonDetails.fullPosterURL
+                    } catch {
+                        // Fallback to show poster if season fetch fails
+                        seasonPosterURL = details.fullPosterURL
+                    }
+                }
+                
                 await MainActor.run {
                     if self.title.isEmpty {
                         self.title = details.name
                     }
                     if self.posterURL == nil {
-                        self.posterURL = details.fullPosterURL
+                        // Use season poster if available, otherwise use show poster
+                        self.posterURL = seasonPosterURL ?? details.fullPosterURL
                     }
                     self.isAnime = animeFlag
                     self.isLoaded = true
                     
-                    // Update progress manager with show metadata
-                    ProgressManager.shared.updateShowMetadata(showId: item.tmdbId, title: details.name, posterURL: details.fullPosterURL)
+                    // Update progress manager with season poster if available
+                    ProgressManager.shared.updateShowMetadata(showId: item.tmdbId, title: details.name, posterURL: seasonPosterURL ?? details.fullPosterURL)
                 }
                 
-                // If anime, fetch season titles from AniList
+                // If anime, fetch season titles and posters from AniList
                 if animeFlag, let seasonNumber = item.seasonNumber {
                     do {
                         let aniDetails = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
@@ -773,9 +786,15 @@ struct ContinueWatchingCard: View {
                             token: nil
                         )
                         
-                        if let seasonTitle = aniDetails.seasons.first(where: { $0.seasonNumber == seasonNumber })?.title {
+                        if let animeSeason = aniDetails.seasons.first(where: { $0.seasonNumber == seasonNumber }) {
                             await MainActor.run {
-                                self.animeSeasonTitle = seasonTitle
+                                self.animeSeasonTitle = animeSeason.title
+                                // Use anime season poster if available, overriding TMDB season poster
+                                if let animePosterURL = animeSeason.posterUrl {
+                                    self.posterURL = animePosterURL
+                                    // Update progress manager with anime poster
+                                    ProgressManager.shared.updateShowMetadata(showId: item.tmdbId, title: details.name, posterURL: animePosterURL)
+                                }
                             }
                         }
                     } catch {
