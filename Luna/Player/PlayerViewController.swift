@@ -680,18 +680,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         } catch {
             let rendererName = vlcRenderer != nil ? "VLC" : "MPV"
             Logger.shared.log("Failed to start \(rendererName) renderer: \(error)", type: "Error")
-
-            // If MPV failed, automatically fall back to VLC to avoid crashes
-            if rendererName == "MPV" {
-                do {
-                    try enableVLCFallback(after: error)
-                } catch {
-                    Logger.shared.log("VLC fallback also failed: \(error)", type: "Error")
-                    presentErrorAlert(title: "Playback Error", message: "Failed to start playback: \(error)")
-                }
-            } else {
-                presentErrorAlert(title: "Playback Error", message: "Failed to start \(rendererName) renderer: \(error)")
-            }
+            presentErrorAlert(title: "Playback Error", message: "Failed to start \(rendererName) renderer: \(error)")
         }
         
         // PiP is only supported with MPV renderer
