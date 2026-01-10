@@ -152,14 +152,6 @@ struct TVShowSeasonsSection: View {
         }
     }
     
-    private func getSearchTitle() -> String {
-        // For anime, use the currently selected season's name (which is the AniList title)
-        if isAnime, let seasonName = selectedSeason?.name, !seasonName.isEmpty {
-            return seasonName
-        }
-        return tvShow?.name ?? "Unknown Show"
-    }
-    
     @ViewBuilder
     private var episodesSectionHeader: some View {
         HStack {
