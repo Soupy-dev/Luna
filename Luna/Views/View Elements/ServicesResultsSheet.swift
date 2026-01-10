@@ -1210,32 +1210,7 @@ struct ModulesSearchResultsSheet: View {
                 }
                 return
             } else if inAppPlayer == "VLC" {
-                #if os(iOS)
-                let mediaInfo: MediaInfo
-                if isMovie {
-                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
-                    mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
-                } else if let episode = selectedEpisode {
-                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
-                    mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
-                } else {
-                    Logger.shared.log("Failed to create mediaInfo for VLC player", type: "Error")
-                    return
-                }
-                
-                let vlcPlayer = VLCPlayer(url: streamURL, headers: finalHeaders, preset: nil as PlayerPreset?, mediaInfo: mediaInfo, playerState: VLCPlayerState())
-                let hostingController = UIHostingController(rootView: vlcPlayer)
-                hostingController.modalPresentationStyle = .fullScreen
-                
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.topmostViewController().present(hostingController, animated: true)
-                } else {
-                    Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
-                }
-                return
-                #else
-                // tvOS falls back to MPV
+                // VLC uses same PlayerViewController as MPV
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
                 let pvc = PlayerViewController(
@@ -1257,7 +1232,7 @@ struct ModulesSearchResultsSheet: View {
                    let rootVC = windowScene.windows.first?.rootViewController {
                     rootVC.topmostViewController().present(pvc, animated: true, completion: nil)
                 } else {
-                    Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
+                    Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
                 }
                 return
                 #endif
