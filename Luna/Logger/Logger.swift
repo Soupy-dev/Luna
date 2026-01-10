@@ -39,7 +39,7 @@ class Logger: @unchecked Sendable {
                 self.logs.removeFirst(self.logs.count - self.maxLogEntries)
             }
             
-            self.saveLogToFile(entry)
+            // File writing disabled - logs only kept in memory
             self.debugLog(entry)
             
             DispatchQueue.main.async {
