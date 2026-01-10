@@ -27,7 +27,7 @@ struct VLCPlayer: UIViewControllerRepresentable {
     
     func updateUIViewController(_ uiViewController: PlayerViewController, context: Context) {
         // Load media if needed
-        if let url = url, let preset = preset {
+        if let preset = preset {
             uiViewController.loadMedia(url: url, preset: preset, headers: headers)
         }
     }

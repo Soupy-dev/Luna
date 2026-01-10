@@ -485,8 +485,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererGetAudioTracksDetailed() -> [(Int, String, String)] {
         if let vlc = vlcRenderer {
             return vlc.getAudioTracksDetailed()
-        } else if let mpv = mpvRenderer {
-            return mpv.getAudioTracksDetailed()
         }
         return []
     }
@@ -494,8 +492,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererGetAudioTracks() -> [(Int, String)] {
         if let vlc = vlcRenderer {
             return vlc.getAudioTracks()
-        } else if let mpv = mpvRenderer {
-            return mpv.getAudioTracks()
         }
         return []
     }
@@ -511,8 +507,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererGetSubtitleTracks() -> [(Int, String)] {
         if let vlc = vlcRenderer {
             return vlc.getSubtitleTracks()
-        } else if let mpv = mpvRenderer {
-            return mpv.getSubtitleTracks()
         }
         return []
     }
@@ -838,19 +832,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let lastPlayedTime: Double
         
         switch mediaInfo {
-        case .movie(let id, let title):
+        case .movie(let id, let title, _):
             lastPlayedTime = ProgressManager.shared.getMovieCurrentTime(movieId: id, title: title)
             
-        case .episode(let showId, let seasonNumber, let episodeNumber):
+        case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
             lastPlayedTime = ProgressManager.shared.getEpisodeCurrentTime(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
         }
         
         if lastPlayedTime != 0 {
             let progress: Double
             switch mediaInfo {
-            case .movie(let id, let title):
+            case .movie(let id, let title, _):
                 progress = ProgressManager.shared.getMovieProgress(movieId: id, title: title)
-            case .episode(let showId, let seasonNumber, let episodeNumber):
+            case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
                 progress = ProgressManager.shared.getEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
             }
             
@@ -1475,7 +1469,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         switch info {
         case .movie:
             return false
-        case .episode(let showId, _, _):
+        case .episode(let showId, _, _, _, _):
             return trackerManager.cachedAniListId(for: showId) != nil
         }
     }
@@ -2095,9 +2089,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard effectiveDuration.isFinite, effectiveDuration > 0, position >= 0, let info = mediaInfo else { return }
         
         switch info {
-        case .movie(let id, let title):
+        case .movie(let id, let title, _):
             ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: position, totalDuration: effectiveDuration)
-        case .episode(let showId, let seasonNumber, let episodeNumber):
+        case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
             ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: effectiveDuration)
         }
     }

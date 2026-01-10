@@ -42,6 +42,21 @@ class Settings: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "preferredAnimeAudioLanguage") }
     }
     
+    enum PlayerChoice: String {
+        case mpv, vlc
+    }
+    
+    var playerChoice: PlayerChoice {
+        get {
+            if let raw = UserDefaults.standard.string(forKey: "playerChoice"),
+               let choice = PlayerChoice(rawValue: raw) {
+                return choice
+            }
+            return .vlc  // Default to VLC for this user
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "playerChoice") }
+    }
+    
     init() {
         if let colorData = UserDefaults.standard.data(forKey: "accentColor"),
            let uiColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData) {
