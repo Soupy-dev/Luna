@@ -80,7 +80,10 @@ final class ModulesSearchResultsViewModel: ObservableObject {
 }
 
 struct ModulesSearchResultsSheet: View {
+    /// Base title from caller (TMDB or season-specific)
     let mediaTitle: String
+    /// Optional season-specific override (AniList season title) to force anime sequels to use the correct season name
+    let seasonTitleOverride: String?
     let originalTitle: String?
     let isMovie: Bool
     let selectedEpisode: TMDBEpisode?
@@ -93,16 +96,18 @@ struct ModulesSearchResultsSheet: View {
     @StateObject private var serviceManager = ServiceManager.shared
     @StateObject private var algorithmManager = AlgorithmManager.shared
     
+    private var effectiveTitle: String { seasonTitleOverride ?? mediaTitle }
+
     private var displayTitle: String {
         if let episode = selectedEpisode {
             // If animeSeasonTitle is provided (non-nil), use "Title E##" format for anime
             if animeSeasonTitle != nil {
-                return "\(mediaTitle) E\(episode.episodeNumber)"
+                return "\(effectiveTitle) E\(episode.episodeNumber)"
             }
             // For regular shows, use "Title S#E#" format
-            return "\(mediaTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
+            return "\(effectiveTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
         }
-        return mediaTitle
+        return effectiveTitle
     }
     
     private var episodeSeasonInfo: String {
@@ -664,23 +669,24 @@ struct ModulesSearchResultsSheet: View {
         
         // Check if anime via TrackerManager
         let isAnime = TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
+        let titleForSearch = effectiveTitle
         let searchQuery: String
         if let ep = selectedEpisode {
             if isAnime {
                 // Anime: mediaTitle is already season-specific (e.g., "JJK 2nd Season")
                 // Just append E## format
-                searchQuery = ep.episodeNumber > 0 ? "\(mediaTitle) E\(ep.episodeNumber)" : mediaTitle
+                searchQuery = ep.episodeNumber > 0 ? "\(titleForSearch) E\(ep.episodeNumber)" : titleForSearch
             } else if ep.seasonNumber > 1 {
                 // Non-anime TV: add season suffix for seasons > 1
-                searchQuery = "\(mediaTitle) season \(ep.seasonNumber)"
+                searchQuery = "\(titleForSearch) season \(ep.seasonNumber)"
             } else {
-                searchQuery = mediaTitle
+                searchQuery = titleForSearch
             }
         } else {
-            searchQuery = mediaTitle
+            searchQuery = titleForSearch
         }
-        let baseTitleQuery = searchQuery.caseInsensitiveCompare(mediaTitle) == .orderedSame ? nil : mediaTitle
-        let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != mediaTitle.lowercased() } ?? false
+        let baseTitleQuery = searchQuery.caseInsensitiveCompare(titleForSearch) == .orderedSame ? nil : titleForSearch
+        let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != titleForSearch.lowercased() } ?? false
         
         Task {
             await serviceManager.searchInActiveServicesProgressively(

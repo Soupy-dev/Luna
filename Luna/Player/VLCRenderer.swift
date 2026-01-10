@@ -96,6 +96,9 @@ final class VLCRenderer: NSObject {
         
         do {
             Logger.shared.log("[VLCRenderer.start] Initializing VLCMediaPlayer", type: "Stream")
+
+            // Ensure audio session is ready before playback to avoid dropouts on resume
+            configureAudioSession()
             
             // Initialize VLC with proper options for video rendering
             mediaPlayer = VLCMediaPlayer()
@@ -138,6 +141,17 @@ final class VLCRenderer: NSObject {
             Logger.shared.log("[VLCRenderer.start] isRunning=true", type: "Stream")
         } catch {
             throw RendererError.vlcInitializationFailed
+        }
+    }
+
+    private func configureAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            // Use playback category so iOS keeps audio active between pause/resume
+            try session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP])
+            try session.setActive(true)
+        } catch {
+            Logger.shared.log("[VLCRenderer] Failed to configure audio session: \(error.localizedDescription)", type: "Error")
         }
     }
     

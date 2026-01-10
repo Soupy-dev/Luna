@@ -128,6 +128,7 @@ struct TVShowSeasonsSection: View {
         .sheet(isPresented: $showingSearchResults) {
             ModulesSearchResultsSheet(
                 mediaTitle: getSearchTitle(),
+                seasonTitleOverride: getSearchTitle(),
                 originalTitle: romajiTitle,
                 isMovie: false,
                 selectedEpisode: selectedEpisodeForSearch,

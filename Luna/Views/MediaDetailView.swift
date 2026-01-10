@@ -126,6 +126,12 @@ struct MediaDetailView: View {
                     }
                     return searchResult.displayTitle
                 }(),
+                seasonTitleOverride: {
+                    if isAnimeShow, let episode = selectedEpisodeForSearch, let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                        return seasonTitle
+                    }
+                    return nil
+                }(),
                 originalTitle: romajiTitle,
                 isMovie: searchResult.isMovie,
                 selectedEpisode: selectedEpisodeForSearch,
