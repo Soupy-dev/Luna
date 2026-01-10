@@ -31,8 +31,7 @@ struct MediaDetailView: View {
     @State private var romajiTitle: String?
     @State private var logoURL: String?
     @State private var isAnimeShow = false
-    @State private var anilistEpisodes: [AniListEpisode]? = nil
-    @State private var animeSeasonTitles: [Int: String]? = nil
+    
     @State private var hasLoadedContent = false
     
     @StateObject private var serviceManager = ServiceManager.shared
@@ -118,31 +117,11 @@ struct MediaDetailView: View {
         }
         .sheet(isPresented: $showingSearchResults) {
             ModulesSearchResultsSheet(
-                mediaTitle: {
-                    // For anime, use the season-specific AniList title (e.g., "JJK 2nd Season")
-                    if isAnimeShow, let episode = selectedEpisodeForSearch, 
-                       let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
-                        return seasonTitle
-                    }
-                    return searchResult.displayTitle
-                }(),
-                seasonTitleOverride: {
-                    if isAnimeShow, let episode = selectedEpisodeForSearch, let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
-                        return seasonTitle
-                    }
-                    return nil
-                }(),
+                mediaTitle: searchResult.displayTitle,
                 originalTitle: romajiTitle,
                 isMovie: searchResult.isMovie,
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: searchResult.id,
-                animeSeasonTitle: {
-                    // Pass non-nil if anime to trigger E## format instead of S#E#
-                    if isAnimeShow, selectedEpisodeForSearch != nil {
-                        return "anime" // Any non-nil value works as a flag
-                    }
-                    return nil
-                }(),
                 posterPath: searchResult.isMovie ? movieDetail?.posterPath : tvShowDetail?.posterPath
             )
         }
@@ -411,8 +390,6 @@ struct MediaDetailView: View {
                 selectedSeason: $selectedSeason,
                 seasonDetail: $seasonDetail,
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
-                animeEpisodes: anilistEpisodes,
-                animeSeasonTitles: animeSeasonTitles,
                 tmdbService: tmdbService
             )
         }
@@ -564,17 +541,8 @@ struct MediaDetailView: View {
                             
                             self.tvShowDetail = detailWithAniSeasons
                             
-                            // Store season titles and episodes
-                            var seasonTitles: [Int: String] = [:]
-                            var allEpisodes: [AniListEpisode] = []
-                            for season in animeData.seasons {
-                                seasonTitles[season.seasonNumber] = season.title
-                                allEpisodes.append(contentsOf: season.episodes)
-                                Logger.shared.log("MediaDetailView: Season \(season.seasonNumber) -> '\(season.title)'", type: "AniList")
-                            }
-                            self.animeSeasonTitles = seasonTitles
-                            self.anilistEpisodes = allEpisodes
-                            Logger.shared.log("MediaDetailView: Stored \(seasonTitles.count) season titles", type: "AniList")
+                            // Store episodes
+                            // (Optional) If needed later, anime episodes can be derived from AniList
                             
                             // Select first AniList season
                             if let firstSeason = aniSeasons.first {

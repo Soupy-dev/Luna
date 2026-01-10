@@ -14,15 +14,12 @@ struct TVShowSeasonsSection: View {
     @Binding var selectedSeason: TMDBSeason?
     @Binding var seasonDetail: TMDBSeasonDetail?
     @Binding var selectedEpisodeForSearch: TMDBEpisode?
-    var animeEpisodes: [AniListEpisode]? = nil
-    var animeSeasonTitles: [Int: String]? = nil
     let tmdbService: TMDBService
     
     @State private var isLoadingSeason = false
     @State private var showingSearchResults = false
     @State private var showingNoServicesAlert = false
     @State private var romajiTitle: String?
-    @State private var currentSeasonTitle: String?
     
     @StateObject private var serviceManager = ServiceManager.shared
     @AppStorage("horizontalEpisodeList") private var horizontalEpisodeList: Bool = false
@@ -33,14 +30,6 @@ struct TVShowSeasonsSection: View {
     
     private var useSeasonMenu: Bool {
         return UserDefaults.standard.bool(forKey: "seasonMenu")
-    }
-    
-    private func getSearchTitle() -> String {
-        // For anime, use the currently selected season's name (which is the AniList title)
-        if isAnime, let seasonName = selectedSeason?.name, !seasonName.isEmpty {
-            return seasonName
-        }
-        return tvShow?.name ?? "Unknown Show"
     }
     
     var body: some View {
@@ -135,13 +124,11 @@ struct TVShowSeasonsSection: View {
         }
         .sheet(isPresented: $showingSearchResults) {
             ModulesSearchResultsSheet(
-                mediaTitle: getSearchTitle(),
-                seasonTitleOverride: getSearchTitle(),
+                mediaTitle: tvShow?.name ?? "Unknown Show",
                 originalTitle: romajiTitle,
                 isMovie: false,
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: tvShow?.id ?? 0,
-                animeSeasonTitle: isAnime ? "anime" : nil,
                 posterPath: tvShow?.posterPath
             )
         }
@@ -321,14 +308,6 @@ struct TVShowSeasonsSection: View {
     
     private func episodeTapAction(episode: TMDBEpisode) {
         selectedEpisodeForSearch = episode
-        
-        // Ensure current season title is set before opening search
-        if let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
-            currentSeasonTitle = seasonTitle
-        } else {
-            currentSeasonTitle = nil
-        }
-        
         searchInServicesForEpisode(episode: episode)
     }
     
@@ -368,56 +347,13 @@ struct TVShowSeasonsSection: View {
         
         Task {
             do {
-                // For anime, build season detail from cached AniList episodes
-                if isAnime, let animeEpisodes = animeEpisodes {
-                    let seasonEpisodes = animeEpisodes.filter { $0.seasonNumber == season.seasonNumber }
-                    
-                    let tmdbEpisodes: [TMDBEpisode] = seasonEpisodes.map { aniEp in
-                        TMDBEpisode(
-                            id: tvShowId * 1000 + season.seasonNumber * 100 + aniEp.number,
-                            name: aniEp.title,
-                            overview: aniEp.description,
-                            stillPath: aniEp.stillPath,
-                            episodeNumber: aniEp.number,
-                            seasonNumber: aniEp.seasonNumber,
-                            airDate: aniEp.airDate,
-                            runtime: nil,
-                            voteAverage: 0,
-                            voteCount: 0
-                        )
-                    }
-                    
-                    let detail = TMDBSeasonDetail(
-                        id: season.id,
-                        name: season.name,
-                        overview: season.overview ?? "",
-                        posterPath: season.posterPath,
-                        seasonNumber: season.seasonNumber,
-                        airDate: season.airDate,
-                        episodes: tmdbEpisodes
-                    )
-                    
-                    await MainActor.run {
-                        // Update current season title for anime
-                        if let seasonTitle = animeSeasonTitles?[season.seasonNumber] {
-                            self.currentSeasonTitle = seasonTitle
-                        }
-                        self.seasonDetail = detail
-                        self.isLoadingSeason = false
-                        if let firstEpisode = detail.episodes.first {
-                            self.selectedEpisodeForSearch = firstEpisode
-                        }
-                    }
-                } else {
-                    // For regular TV shows, fetch from TMDB
-                    let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShowId, seasonNumber: season.seasonNumber)
-                    await MainActor.run {
-                        self.currentSeasonTitle = nil
-                        self.seasonDetail = detail
-                        self.isLoadingSeason = false
-                        if let firstEpisode = detail.episodes.first {
-                            self.selectedEpisodeForSearch = firstEpisode
-                        }
+                // Always fetch season details from TMDB for consistent structure and metadata
+                let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShowId, seasonNumber: season.seasonNumber)
+                await MainActor.run {
+                    self.seasonDetail = detail
+                    self.isLoadingSeason = false
+                    if let firstEpisode = detail.episodes.first {
+                        self.selectedEpisodeForSearch = firstEpisode
                     }
                 }
             } catch {

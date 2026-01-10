@@ -545,7 +545,6 @@ struct ContinueWatchingCard: View {
     @State private var isLoaded: Bool = false
     @State private var showingServices = false
     @State private var isAnime: Bool = false
-    @State private var animeSeasonTitle: String?
     @State private var showingDetails = false
     
     init(item: ContinueWatchingItem, tmdbService: TMDBService) {
@@ -652,7 +651,6 @@ struct ContinueWatchingCard: View {
             if isLoaded {
                 ModulesSearchResultsSheet(
                     mediaTitle: title,
-                    seasonTitleOverride: isAnime ? animeSeasonTitle : nil,
                     originalTitle: nil,
                     isMovie: item.isMovie,
                     selectedEpisode: item.isMovie ? nil : TMDBEpisode(
@@ -668,7 +666,6 @@ struct ContinueWatchingCard: View {
                         voteCount: 0
                     ),
                     tmdbId: item.tmdbId,
-                    animeSeasonTitle: isAnime ? animeSeasonTitle : nil,
                     posterPath: posterURL
                 )
             }
@@ -789,7 +786,6 @@ struct ContinueWatchingCard: View {
                         
                         if let animeSeason = aniDetails.seasons.first(where: { $0.seasonNumber == seasonNumber }) {
                             await MainActor.run {
-                                self.animeSeasonTitle = animeSeason.title
                                 // Use anime season poster if available, overriding TMDB season poster
                                 if let animePosterURL = animeSeason.posterUrl {
                                     self.posterURL = animePosterURL
