@@ -335,6 +335,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var cachedDuration: Double = 0
     private var cachedPosition: Double = 0
     private var isClosing = false
+    private var isRunning = false  // Track if renderer has been started
     private var pipController: PiPController?
     private var initialURL: URL?
     private var initialPreset: PlayerPreset?
@@ -388,6 +389,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             Logger.shared.log("[PlayerViewController.rendererStart] Using MPV renderer", type: "Stream")
             try mpv.start()
         }
+        isRunning = true
     }
     
     private func rendererStop() {
@@ -399,6 +401,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             Logger.shared.log("[PlayerViewController.rendererStop] Using MPV renderer", type: "Stream")
             mpv.stop()
         }
+        isRunning = false
     }
     
     private func rendererPlay() {
@@ -797,6 +800,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         Logger.shared.log("[PlayerViewController.load] MPV renderer: \(mpvRenderer != nil)", type: "Stream")
         Logger.shared.log("[PlayerViewController.load] VLC renderer: \(vlcRenderer != nil)", type: "Stream")
         logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
+        
+        // Ensure renderer is started before loading media
+        if !isRunning {
+            do {
+                Logger.shared.log("[PlayerViewController.load] Renderer not running, starting it first", type: "Stream")
+                try rendererStart()
+            } catch {
+                Logger.shared.log("[PlayerViewController.load] Failed to start renderer: \(error)", type: "Error")
+                return
+            }
+        }
+        
         userSelectedAudioTrack = false
         userSelectedSubtitleTrack = false
         Logger.shared.log("[PlayerViewController.load] Calling rendererLoad", type: "Stream")
