@@ -9,7 +9,10 @@ import UIKit
 import SwiftUI
 import AVFoundation
 
-final class PlayerViewController: UIViewController {
+final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate {
+    private let playerLogId = UUID().uuidString.prefix(8)
+    private let trackerManager = TrackerManager.shared
+
     private let videoContainer: UIView = {
         let v = UIView()
         v.translatesAutoresizingMaskIntoConstraints = false
@@ -18,7 +21,32 @@ final class PlayerViewController: UIViewController {
         return v
     }()
     
+    private let tapOverlayView: UIView = {
+        let v = UIView()
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.backgroundColor = .clear
+        v.isUserInteractionEnabled = true
+        return v
+    }()
+    
     private let displayLayer = AVSampleBufferDisplayLayer()
+    
+    private func createSymbolButton(symbolName: String, pointSize: CGFloat = 18, weight: UIImage.SymbolWeight = .semibold, backgroundColor: UIColor? = nil) -> UIButton {
+        let b = UIButton(type: .system)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        let cfg = UIImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
+        let img = UIImage(systemName: symbolName, withConfiguration: cfg)
+        b.setImage(img, for: .normal)
+        b.tintColor = .white
+        if let bg = backgroundColor {
+            b.backgroundColor = bg
+            b.layer.cornerRadius = pointSize + 10
+            b.clipsToBounds = true
+        } else {
+            b.alpha = 0.0
+        }
+        return b
+    }
     
     private let centerPlayPauseButton: UIButton = {
         let b = UIButton(type: .system)
@@ -49,6 +77,7 @@ final class PlayerViewController: UIViewController {
         v.backgroundColor = UIColor(white: 0.0, alpha: 0.4)
         v.alpha = 0.0
         v.isUserInteractionEnabled = false
+        v.isHidden = true
         return v
     }()
     
@@ -133,7 +162,7 @@ final class PlayerViewController: UIViewController {
         let b = UIButton(type: .system)
         b.translatesAutoresizingMaskIntoConstraints = false
         let cfg = UIImage.SymbolConfiguration(pointSize: 28, weight: .semibold)
-        let img = UIImage(systemName: "gobackward.15", withConfiguration: cfg)
+        let img = UIImage(systemName: "gobackward.10", withConfiguration: cfg)
         b.setImage(img, for: .normal)
         b.tintColor = .white
         b.alpha = 0.0
@@ -144,7 +173,7 @@ final class PlayerViewController: UIViewController {
         let b = UIButton(type: .system)
         b.translatesAutoresizingMaskIntoConstraints = false
         let cfg = UIImage.SymbolConfiguration(pointSize: 28, weight: .semibold)
-        let img = UIImage(systemName: "goforward.15", withConfiguration: cfg)
+        let img = UIImage(systemName: "goforward.10", withConfiguration: cfg)
         b.setImage(img, for: .normal)
         b.tintColor = .white
         b.alpha = 0.0
@@ -172,10 +201,82 @@ final class PlayerViewController: UIViewController {
         b.setImage(img, for: .normal)
         b.tintColor = .white
         b.alpha = 0.0
-        b.isHidden = true
+        // Will be set dynamically based on renderer type
+        b.showsMenuAsPrimaryAction = false
+        return b
+    }()
+    
+    private let speedButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        let cfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        let img = UIImage(systemName: "hare.fill", withConfiguration: cfg)
+        b.setImage(img, for: .normal)
+        b.tintColor = .white
+        b.alpha = 0.0
         b.showsMenuAsPrimaryAction = true
         return b
     }()
+    
+    private let audioButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        let cfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        let img = UIImage(systemName: "speaker.wave.2", withConfiguration: cfg)
+        b.setImage(img, for: .normal)
+        b.tintColor = .white
+        b.alpha = 0.0
+        b.showsMenuAsPrimaryAction = true
+        return b
+    }()
+
+    private let dimmingView: UIView = {
+        let v = UIView()
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.backgroundColor = .black
+        v.alpha = 0.0
+        v.isUserInteractionEnabled = false
+        return v
+    }()
+
+#if !os(tvOS)
+    private let brightnessContainer: UIVisualEffectView = {
+        let effect: UIBlurEffect
+        if #available(iOS 15.0, *) {
+            effect = UIBlurEffect(style: .systemThinMaterialDark)
+        } else {
+            effect = UIBlurEffect(style: .dark)
+        }
+        let v = UIVisualEffectView(effect: effect)
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.layer.cornerRadius = 12
+        v.clipsToBounds = true
+        v.alpha = 0.0
+        v.isHidden = true
+        return v
+    }()
+
+    private let brightnessSlider: UISlider = {
+        let slider = UISlider()
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        slider.minimumValue = 0.0
+        slider.maximumValue = 1.0
+        slider.value = 1.0
+        slider.minimumTrackTintColor = .white
+        slider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.3)
+        slider.thumbTintColor = .white
+        slider.transform = CGAffineTransform(rotationAngle: -.pi / 2)
+        return slider
+    }()
+
+    private let brightnessIcon: UIImageView = {
+        let icon = UIImageView(image: UIImage(systemName: "sun.max.fill"))
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.tintColor = .white
+        icon.alpha = 0.8
+        return icon
+    }()
+#endif
     
     private let progressContainer: UIView = {
         let v = UIView()
@@ -191,25 +292,287 @@ final class PlayerViewController: UIViewController {
         @Published var duration: Double = 1
     }
     private var progressModel = ProgressModel()
+
+    private var containerTapGesture: UITapGestureRecognizer?
+    private var leftDoubleTapGesture: UITapGestureRecognizer?
+    private var rightDoubleTapGesture: UITapGestureRecognizer?
+
+    private var brightnessLevel: Float = 1.0
+    private let twoFingerSettingKey = "mpvTwoFingerTapEnabled"
+    private let brightnessLevelKey = "mpvBrightnessLevel"
     
-    private lazy var renderer: MPVSoftwareRenderer = {
-        let r = MPVSoftwareRenderer(displayLayer: displayLayer)
-        r.delegate = self
-        return r
+    private lazy var renderer: Any = {
+        // Select renderer based on Settings
+        let playerChoice = Settings.shared.playerChoice
+        
+        if playerChoice == .vlc {
+            let r = VLCRenderer(displayLayer: displayLayer)
+            r.delegate = self
+            return r
+        } else {
+            let r = MPVSoftwareRenderer(displayLayer: displayLayer)
+            r.delegate = self
+            return r
+        }
     }()
+
+    // Fallback renderer used when MPV fails to start
+    private var fallbackVlcRenderer: VLCRenderer?
+    
+    // Helper properties to access renderer methods regardless of type
+    private var mpvRenderer: MPVSoftwareRenderer? {
+        return renderer as? MPVSoftwareRenderer
+    }
+    
+    private var vlcRenderer: VLCRenderer? {
+        return fallbackVlcRenderer ?? (renderer as? VLCRenderer)
+    }
+    
     var mediaInfo: MediaInfo?
+    // Optional override: when true, treat content as anime regardless of tracker mapping
+    var isAnimeHint: Bool?
     private var isSeeking = false
     private var cachedDuration: Double = 0
     private var cachedPosition: Double = 0
+    private var isClosing = false
     private var pipController: PiPController?
     private var initialURL: URL?
     private var initialPreset: PlayerPreset?
     private var initialHeaders: [String: String]?
     private var initialSubtitles: [String]?
+    private var userSelectedAudioTrack = false
+    private var userSelectedSubtitleTrack = false
+    
+    // MARK: - Renderer Wrapper Methods
+    // These methods abstract away differences between MPVSoftwareRenderer and VLCRenderer
+    
+    private func rendererLoad(url: URL, preset: PlayerPreset, headers: [String: String]?) {
+        Logger.shared.log("[PlayerViewController.rendererLoad] Starting", type: "Stream")
+        Logger.shared.log("[PlayerViewController.rendererLoad] VLC renderer exists: \(vlcRenderer != nil)", type: "Stream")
+        Logger.shared.log("[PlayerViewController.rendererLoad] MPV renderer exists: \(mpvRenderer != nil)", type: "Stream")
+        if let vlc = vlcRenderer {
+            Logger.shared.log("[PlayerViewController.rendererLoad] Calling VLC load", type: "Stream")
+            vlc.load(url: url, with: preset, headers: headers)
+            Logger.shared.log("[PlayerViewController.rendererLoad] VLC load returned", type: "Stream")
+        } else if let mpv = mpvRenderer {
+            Logger.shared.log("[PlayerViewController.rendererLoad] Calling MPV load", type: "Stream")
+            mpv.load(url: url, with: preset, headers: headers)
+            Logger.shared.log("[PlayerViewController.rendererLoad] MPV load returned", type: "Stream")
+        } else {
+            Logger.shared.log("[PlayerViewController.rendererLoad] ERROR: Neither VLC nor MPV renderer available", type: "Error")
+        }
+    }
+    
+    private func rendererReloadCurrentItem() {
+        if let vlc = vlcRenderer {
+            vlc.reloadCurrentItem()
+        } else if let mpv = mpvRenderer {
+            mpv.reloadCurrentItem()
+        }
+    }
+    
+    private func rendererApplyPreset(_ preset: PlayerPreset) {
+        if let vlc = vlcRenderer {
+            vlc.applyPreset(preset)
+        } else if let mpv = mpvRenderer {
+            mpv.applyPreset(preset)
+        }
+    }
+    
+    private func rendererStart() throws {
+        Logger.shared.log("[PlayerViewController.rendererStart] Starting renderer", type: "Stream")
+        if let vlc = vlcRenderer {
+            Logger.shared.log("[PlayerViewController.rendererStart] Using VLC renderer", type: "Stream")
+            try vlc.start()
+        } else if let mpv = mpvRenderer {
+            Logger.shared.log("[PlayerViewController.rendererStart] Using MPV renderer", type: "Stream")
+            try mpv.start()
+        }
+    }
+    
+    private func rendererStop() {
+        Logger.shared.log("[PlayerViewController.rendererStop] Stopping renderer", type: "Stream")
+        if let vlc = vlcRenderer {
+            Logger.shared.log("[PlayerViewController.rendererStop] Using VLC renderer", type: "Stream")
+            vlc.stop()
+        } else if let mpv = mpvRenderer {
+            Logger.shared.log("[PlayerViewController.rendererStop] Using MPV renderer", type: "Stream")
+            mpv.stop()
+        }
+    }
+    
+    private func rendererPlay() {
+        Logger.shared.log("[PlayerViewController.rendererPlay] Play", type: "Stream")
+        if let vlc = vlcRenderer {
+            Logger.shared.log("[PlayerViewController.rendererPlay] Using VLC renderer", type: "Stream")
+            vlc.play()
+        } else if let mpv = mpvRenderer {
+            Logger.shared.log("[PlayerViewController.rendererPlay] Using MPV renderer", type: "Stream")
+            mpv.play()
+        }
+    }
+    
+    private func rendererPausePlayback() {
+        Logger.shared.log("[PlayerViewController.rendererPausePlayback] Pause", type: "Stream")
+        if let vlc = vlcRenderer {
+            Logger.shared.log("[PlayerViewController.rendererPausePlayback] Using VLC renderer", type: "Stream")
+            vlc.pausePlayback()
+        } else if let mpv = mpvRenderer {
+            Logger.shared.log("[PlayerViewController.rendererPausePlayback] Using MPV renderer", type: "Stream")
+            mpv.pausePlayback()
+        }
+    }
+    
+    private func rendererTogglePause() {
+        Logger.shared.log("[PlayerViewController.rendererTogglePause] Toggle pause", type: "Stream")
+        if let vlc = vlcRenderer {
+            Logger.shared.log("[PlayerViewController.rendererTogglePause] Using VLC renderer", type: "Stream")
+            vlc.togglePause()
+        } else if let mpv = mpvRenderer {
+            Logger.shared.log("[PlayerViewController.rendererTogglePause] Using MPV renderer", type: "Stream")
+            mpv.togglePause()
+        }
+    }
+
+    private func enableVLCFallback(after error: Error) throws {
+        Logger.shared.log("MPV failed, switching to VLC fallback: \(error)", type: "Error")
+        let fallback = VLCRenderer(displayLayer: displayLayer)
+        fallback.delegate = self
+        fallbackVlcRenderer = fallback
+        try fallback.start()
+        presentErrorAlert(
+            title: "MPV Unavailable",
+            message: "MPV failed to start (\(error)). Switched to VLC automatically."
+        )
+    }
+    
+    private func rendererSeek(to seconds: Double) {
+        Logger.shared.log("[PlayerViewController.rendererSeek] Seek to \(seconds)s", type: "Stream")
+        if let vlc = vlcRenderer {
+            vlc.seek(to: seconds)
+        } else if let mpv = mpvRenderer {
+            mpv.seek(to: seconds)
+        }
+    }
+    
+    private func rendererSeek(by seconds: Double) {
+        Logger.shared.log("[PlayerViewController.rendererSeek] Seek by \(seconds)s", type: "Stream")
+        if let vlc = vlcRenderer {
+            vlc.seek(by: seconds)
+        } else if let mpv = mpvRenderer {
+            mpv.seek(by: seconds)
+        }
+    }
+    
+    private func rendererSetSpeed(_ speed: Double) {
+        Logger.shared.log("[PlayerViewController.rendererSetSpeed] Speed=\(speed)", type: "Stream")
+        if let vlc = vlcRenderer {
+            vlc.setSpeed(speed)
+        } else if let mpv = mpvRenderer {
+            mpv.setSpeed(speed)
+        }
+    }
+    
+    private func rendererGetSpeed() -> Double {
+        if let vlc = vlcRenderer {
+            return vlc.getSpeed()
+        } else if let mpv = mpvRenderer {
+            return mpv.getSpeed()
+        }
+        return 1.0
+    }
+    
+    private func rendererGetAudioTracksDetailed() -> [(Int, String, String)] {
+        if let vlc = vlcRenderer {
+            return vlc.getAudioTracksDetailed()
+        } else if let mpv = mpvRenderer {
+            return mpv.getAudioTracksDetailed()
+        }
+        return []
+    }
+    
+    private func rendererGetAudioTracks() -> [(Int, String)] {
+        if let vlc = vlcRenderer {
+            return vlc.getAudioTracks()
+        } else if let mpv = mpvRenderer {
+            return mpv.getAudioTracks()
+        }
+        return []
+    }
+    
+    private func rendererSetAudioTrack(id: Int) {
+        if let vlc = vlcRenderer {
+            vlc.setAudioTrack(id: id)
+        } else if let mpv = mpvRenderer {
+            mpv.setAudioTrack(id: id)
+        }
+    }
+    
+    private func rendererGetSubtitleTracks() -> [(Int, String)] {
+        if let vlc = vlcRenderer {
+            return vlc.getSubtitleTracks()
+        } else if let mpv = mpvRenderer {
+            return mpv.getSubtitleTracks()
+        }
+        return []
+    }
+    
+    private func rendererSetSubtitleTrack(id: Int) {
+        if let vlc = vlcRenderer {
+            vlc.setSubtitleTrack(id: id)
+        } else if let mpv = mpvRenderer {
+            mpv.setSubtitleTrack(id: id)
+        }
+    }
+    
+    private func rendererDisableSubtitles() {
+        if let vlc = vlcRenderer {
+            vlc.disableSubtitles()
+        } else if let mpv = mpvRenderer {
+            mpv.disableSubtitles()
+        }
+    }
+    
+    private func rendererRefreshSubtitleOverlay() {
+        if let vlc = vlcRenderer {
+            vlc.refreshSubtitleOverlay()
+        } else if let mpv = mpvRenderer {
+            mpv.refreshSubtitleOverlay()
+        }
+    }
+    
+    private func rendererLoadExternalSubtitles(urls: [String]) {
+        if let vlc = vlcRenderer {
+            vlc.loadExternalSubtitles(urls: urls)
+        } else if let mpv = mpvRenderer {
+            mpv.loadExternalSubtitles(urls: urls)
+        }
+    }
+    
+    private func rendererClearSubtitleCache() {
+        if let vlc = vlcRenderer {
+            vlc.clearSubtitleCache()
+        } else if let mpv = mpvRenderer {
+            mpv.clearSubtitleCache()
+        }
+    }
+    
+    private func rendererIsPausedState() -> Bool {
+        if let vlc = vlcRenderer {
+            return vlc.isPausedState
+        } else if let mpv = mpvRenderer {
+            return mpv.isPausedState
+        }
+        return true
+    }
     
     private var subtitleURLs: [String] = []
     private var currentSubtitleIndex: Int = 0
     private var subtitleEntries: [SubtitleEntry] = []
+
+    private func logMPV(_ message: String) {
+        Logger.shared.log("[MPV \(playerLogId)] " + message, type: "MPV")
+    }
     
     class SubtitleModel: ObservableObject {
         @Published var currentAttributedText: NSAttributedString = NSAttributedString()
@@ -289,6 +652,16 @@ final class PlayerViewController: UIViewController {
         }
     }
     private var subtitleModel = SubtitleModel()
+
+    private var isTwoFingerTapEnabled: Bool {
+        if UserDefaults.standard.object(forKey: twoFingerSettingKey) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: twoFingerSettingKey)
+    }
+    private var isBrightnessControlEnabled: Bool {
+        return false
+    }
     
     private var originalSpeed: Double = 1.0
     private var holdGesture: UILongPressGestureRecognizer?
@@ -300,33 +673,57 @@ final class PlayerViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        logMPV("viewDidLoad, initialURL=")
         
 #if !os(tvOS)
         modalPresentationCapturesStatusBarAppearance = true
 #endif
         setupLayout()
+        
         setupActions()
         setupHoldGesture()
+        setupDoubleTapSkipGestures()
+    #if !os(tvOS)
+        setupBrightnessControls()
+    #endif
         
         NotificationCenter.default.addObserver(self, selector: #selector(handleLoggerNotification(_:)), name: NSNotification.Name("LoggerNotification"), object: nil)
         
         do {
-            try renderer.start()
+            try rendererStart()
+            logMPV("renderer.start succeeded")
         } catch {
-            Logger.shared.log("Failed to start MPV renderer: \(error)", type: "Error")
-            presentErrorAlert(title: "Playback Error", message: "Failed to start renderer: \(error)")
+            let rendererName = vlcRenderer != nil ? "VLC" : "MPV"
+            Logger.shared.log("Failed to start \(rendererName) renderer: \(error)", type: "Error")
+
+            // If MPV failed, automatically fall back to VLC to avoid crashes
+            if rendererName == "MPV" {
+                do {
+                    try enableVLCFallback(after: error)
+                } catch {
+                    Logger.shared.log("VLC fallback also failed: \(error)", type: "Error")
+                    presentErrorAlert(title: "Playback Error", message: "Failed to start playback: \(error)")
+                }
+            } else {
+                presentErrorAlert(title: "Playback Error", message: "Failed to start \(rendererName) renderer: \(error)")
+            }
         }
         
-        pipController = PiPController(sampleBufferDisplayLayer: displayLayer)
-        pipController?.delegate = self
+        // PiP is only supported with MPV renderer
+        if vlcRenderer == nil {
+            pipController = PiPController(sampleBufferDisplayLayer: displayLayer)
+            pipController?.delegate = self
+        }
         
         showControlsTemporarily()
         
         if let url = initialURL, let preset = initialPreset {
+            logMPV("loading initial url=\(url.absoluteString) preset=\(preset.id.rawValue)")
             load(url: url, preset: preset, headers: initialHeaders)
         }
         
         updateProgressHostingController()
+        updateSpeedMenu()
         
         NotificationCenter.default.addObserver(self, selector: #selector(appDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(appWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
@@ -365,9 +762,11 @@ final class PlayerViewController: UIViewController {
         
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        displayLayer.frame = videoContainer.bounds
-        displayLayer.isHidden = false
-        displayLayer.opacity = 1.0
+        
+        // Only update displayLayer frame when using MPV
+        if vlcRenderer == nil {
+            displayLayer.frame = videoContainer.bounds
+        }
         
         if let gradientLayer = controlsOverlayView.layer.sublayers?.first(where: { $0.name == "gradientLayer" }) {
             gradientLayer.frame = controlsOverlayView.bounds
@@ -377,13 +776,25 @@ final class PlayerViewController: UIViewController {
     }
     
     deinit {
+        isClosing = true
+        if let mpv = mpvRenderer {
+            mpv.delegate = nil
+        } else if let vlc = vlcRenderer {
+            vlc.delegate = nil
+        }
+        logMPV("deinit; stopping renderer and restoring state")
         pipController?.delegate = nil
         if pipController?.isPictureInPictureActive == true {
             pipController?.stopPictureInPicture()
         }
         pipController?.invalidate()
-        renderer.stop()
-        displayLayer.removeFromSuperlayer()
+        rendererStop()
+        
+        // Only remove displayLayer if it was added (MPV only)
+        if vlcRenderer == nil {
+            displayLayer.removeFromSuperlayer()
+        }
+        
         NotificationCenter.default.removeObserver(self)
     }
     
@@ -393,10 +804,22 @@ final class PlayerViewController: UIViewController {
         self.initialPreset = preset
         self.initialHeaders = headers
         self.initialSubtitles = subtitles
+        Logger.shared.log("[PlayerViewController.init] URL=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0) subtitles=\(subtitles?.count ?? 0)", type: "Stream")
     }
     
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
-        renderer.load(url: url, with: preset, headers: headers)
+        Logger.shared.log("[PlayerViewController.load] Starting load", type: "Stream")
+        Logger.shared.log("[PlayerViewController.load] URL: \(url.absoluteString)", type: "Stream")
+        Logger.shared.log("[PlayerViewController.load] Preset: \(preset.id.rawValue)", type: "Stream")
+        Logger.shared.log("[PlayerViewController.load] Headers count: \(headers?.count ?? 0)", type: "Stream")
+        Logger.shared.log("[PlayerViewController.load] MPV renderer: \(mpvRenderer != nil)", type: "Stream")
+        Logger.shared.log("[PlayerViewController.load] VLC renderer: \(vlcRenderer != nil)", type: "Stream")
+        logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
+        userSelectedAudioTrack = false
+        userSelectedSubtitleTrack = false
+        Logger.shared.log("[PlayerViewController.load] Calling rendererLoad", type: "Stream")
+        rendererLoad(url: url, preset: preset, headers: headers)
+        Logger.shared.log("[PlayerViewController.load] rendererLoad returned", type: "Stream")
         if let info = mediaInfo {
             prepareSeekToLastPosition(for: info)
         }
@@ -406,23 +829,28 @@ final class PlayerViewController: UIViewController {
         }
     }
     
+    // Convenience wrapper for SwiftUI
+    func loadMedia(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
+        load(url: url, preset: preset, headers: headers)
+    }
+    
     private func prepareSeekToLastPosition(for mediaInfo: MediaInfo) {
         let lastPlayedTime: Double
         
         switch mediaInfo {
-        case .movie(let id, let title, _):
+        case .movie(let id, let title):
             lastPlayedTime = ProgressManager.shared.getMovieCurrentTime(movieId: id, title: title)
             
-        case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
+        case .episode(let showId, let seasonNumber, let episodeNumber):
             lastPlayedTime = ProgressManager.shared.getEpisodeCurrentTime(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
         }
         
         if lastPlayedTime != 0 {
             let progress: Double
             switch mediaInfo {
-            case .movie(let id, let title, _):
+            case .movie(let id, let title):
                 progress = ProgressManager.shared.getMovieProgress(movieId: id, title: title)
-            case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
+            case .episode(let showId, let seasonNumber, let episodeNumber):
                 progress = ProgressManager.shared.getEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
             }
             
@@ -435,26 +863,48 @@ final class PlayerViewController: UIViewController {
     private func setupLayout() {
         view.addSubview(videoContainer)
         
-        displayLayer.frame = videoContainer.bounds
-        displayLayer.videoGravity = .resizeAspect
+        // Only add displayLayer for MPV; VLC uses its own UIView rendering
+        if vlcRenderer == nil {
+            displayLayer.frame = videoContainer.bounds
+            // Keep full video visible; avoid cropping for downloaded media
+            displayLayer.videoGravity = .resizeAspect
+            displayLayer.isOpaque = true
 #if compiler(>=6.0)
-        if #available(iOS 26.0, tvOS 26.0, *) {
-            displayLayer.preferredDynamicRange = .automatic
-        } else {
+            if #available(iOS 26.0, tvOS 26.0, *) {
+                displayLayer.preferredDynamicRange = .automatic
+            } else {
 #if !os(tvOS)
+                if #available(iOS 17.0, *) {
+                    displayLayer.wantsExtendedDynamicRangeContent = true
+                }
+#endif
+            }
+#elseif !os(tvOS)
             if #available(iOS 17.0, *) {
                 displayLayer.wantsExtendedDynamicRangeContent = true
             }
 #endif
+            displayLayer.backgroundColor = UIColor.black.cgColor
+            
+            videoContainer.layer.addSublayer(displayLayer)
         }
-#elseif !os(tvOS)
-        if #available(iOS 17.0, *) {
-            displayLayer.wantsExtendedDynamicRangeContent = true
-        }
-#endif
-        displayLayer.backgroundColor = UIColor.black.cgColor
         
-        videoContainer.layer.addSublayer(displayLayer)
+        // Add VLC rendering view FIRST (before all UI elements) so it renders behind controls
+        if let vlc = vlcRenderer {
+            let vlcView = vlc.getRenderingView()
+            videoContainer.addSubview(vlcView)
+            vlcView.translatesAutoresizingMaskIntoConstraints = false
+            // Ensure container remains interactive for gesture recognition
+            videoContainer.isUserInteractionEnabled = true
+            NSLayoutConstraint.activate([
+                vlcView.topAnchor.constraint(equalTo: videoContainer.topAnchor),
+                vlcView.bottomAnchor.constraint(equalTo: videoContainer.bottomAnchor),
+                vlcView.leadingAnchor.constraint(equalTo: videoContainer.leadingAnchor),
+                vlcView.trailingAnchor.constraint(equalTo: videoContainer.trailingAnchor)
+            ])
+        }
+        
+        videoContainer.addSubview(dimmingView)
         videoContainer.addSubview(controlsOverlayView)
         videoContainer.addSubview(loadingIndicator)
         view.addSubview(errorBanner)
@@ -466,6 +916,16 @@ final class PlayerViewController: UIViewController {
         videoContainer.addSubview(skipForwardButton)
         videoContainer.addSubview(speedIndicatorLabel)
         videoContainer.addSubview(subtitleButton)
+        videoContainer.addSubview(speedButton)
+        videoContainer.addSubview(audioButton)
+    #if !os(tvOS)
+        videoContainer.addSubview(brightnessContainer)
+        brightnessContainer.contentView.addSubview(brightnessSlider)
+        brightnessContainer.contentView.addSubview(brightnessIcon)
+    #endif
+
+        // Hide PiP control when VLC is active (PiP remains MPV-only)
+        pipButton.isHidden = (vlcRenderer != nil)
         
         NSLayoutConstraint.activate([
             videoContainer.topAnchor.constraint(equalTo: view.topAnchor),
@@ -477,6 +937,11 @@ final class PlayerViewController: UIViewController {
             progressContainer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
             progressContainer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
             progressContainer.heightAnchor.constraint(equalToConstant: 44),
+
+            dimmingView.topAnchor.constraint(equalTo: videoContainer.topAnchor),
+            dimmingView.leadingAnchor.constraint(equalTo: videoContainer.leadingAnchor),
+            dimmingView.trailingAnchor.constraint(equalTo: videoContainer.trailingAnchor),
+            dimmingView.bottomAnchor.constraint(equalTo: videoContainer.bottomAnchor),
             
             controlsOverlayView.topAnchor.constraint(equalTo: videoContainer.topAnchor),
             controlsOverlayView.leadingAnchor.constraint(equalTo: videoContainer.leadingAnchor),
@@ -526,8 +991,56 @@ final class PlayerViewController: UIViewController {
             subtitleButton.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor, constant: 0),
             subtitleButton.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: -8),
             subtitleButton.widthAnchor.constraint(equalToConstant: 32),
-            subtitleButton.heightAnchor.constraint(equalToConstant: 32)
+            subtitleButton.heightAnchor.constraint(equalToConstant: 32),
+            
+            speedButton.trailingAnchor.constraint(equalTo: subtitleButton.leadingAnchor, constant: -8),
+            speedButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
+            speedButton.widthAnchor.constraint(equalToConstant: 32),
+            speedButton.heightAnchor.constraint(equalToConstant: 32),
+            
+            audioButton.trailingAnchor.constraint(equalTo: speedButton.leadingAnchor, constant: -8),
+            audioButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
+            audioButton.widthAnchor.constraint(equalToConstant: 32),
+            audioButton.heightAnchor.constraint(equalToConstant: 32)
         ])
+#if !os(tvOS)
+        NSLayoutConstraint.activate([
+            brightnessContainer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            brightnessContainer.centerYAnchor.constraint(equalTo: videoContainer.centerYAnchor),
+            brightnessContainer.widthAnchor.constraint(equalToConstant: 52),
+            brightnessContainer.heightAnchor.constraint(equalToConstant: 220),
+
+            brightnessSlider.centerXAnchor.constraint(equalTo: brightnessContainer.contentView.centerXAnchor),
+            brightnessSlider.centerYAnchor.constraint(equalTo: brightnessContainer.contentView.centerYAnchor),
+            brightnessSlider.widthAnchor.constraint(equalTo: brightnessContainer.contentView.heightAnchor, multiplier: 0.82),
+            brightnessSlider.heightAnchor.constraint(equalToConstant: 34),
+
+            brightnessIcon.centerXAnchor.constraint(equalTo: brightnessContainer.contentView.centerXAnchor),
+            brightnessIcon.topAnchor.constraint(equalTo: brightnessContainer.contentView.topAnchor, constant: 8),
+            brightnessIcon.heightAnchor.constraint(equalToConstant: 20),
+            brightnessIcon.widthAnchor.constraint(equalToConstant: 20)
+        ])
+#endif
+        
+        // CRITICAL: After all UI elements are added, ensure VLC view is at the very back
+        if let vlc = vlcRenderer {
+            let vlcView = vlc.getRenderingView()
+            videoContainer.sendSubviewToBack(vlcView)
+            // Double-ensure VLC view doesn't steal touches
+            vlcView.isUserInteractionEnabled = false
+            #if !os(tvOS)
+            vlcView.isExclusiveTouch = false
+            #endif
+            
+            // Add transparent tap overlay on top to guarantee tap detection
+            videoContainer.addSubview(tapOverlayView)
+            NSLayoutConstraint.activate([
+                tapOverlayView.topAnchor.constraint(equalTo: videoContainer.topAnchor),
+                tapOverlayView.leadingAnchor.constraint(equalTo: videoContainer.leadingAnchor),
+                tapOverlayView.trailingAnchor.constraint(equalTo: videoContainer.trailingAnchor),
+                tapOverlayView.bottomAnchor.constraint(equalTo: videoContainer.bottomAnchor)
+            ])
+        }
     }
     
     private func setupActions() {
@@ -536,8 +1049,28 @@ final class PlayerViewController: UIViewController {
         pipButton.addTarget(self, action: #selector(pipTapped), for: .touchUpInside)
         skipBackwardButton.addTarget(self, action: #selector(skipBackwardTapped), for: .touchUpInside)
         skipForwardButton.addTarget(self, action: #selector(skipForwardTapped), for: .touchUpInside)
+        subtitleButton.addTarget(self, action: #selector(subtitleButtonTapped), for: .touchUpInside)
+        
+        // Ensure buttons work with VLC
+        if vlcRenderer != nil {
+            [centerPlayPauseButton, closeButton, pipButton, skipBackwardButton, 
+             skipForwardButton, subtitleButton, speedButton, audioButton].forEach {
+                $0.isUserInteractionEnabled = true
+            }
+        }
+        
         let tap = UITapGestureRecognizer(target: self, action: #selector(containerTapped))
-        videoContainer.addGestureRecognizer(tap)
+        tap.delegate = self
+        tap.cancelsTouchesInView = false
+        tap.delaysTouchesBegan = false
+        
+        // For VLC, attach gesture to tap overlay; otherwise to container
+        if vlcRenderer != nil {
+            tapOverlayView.addGestureRecognizer(tap)
+        } else {
+            videoContainer.addGestureRecognizer(tap)
+        }
+        containerTapGesture = tap
     }
     
     private func setupHoldGesture() {
@@ -548,6 +1081,98 @@ final class PlayerViewController: UIViewController {
         }
     }
     
+    private func setupDoubleTapSkipGestures() {
+        let leftDoubleTap = UITapGestureRecognizer(target: self, action: #selector(leftSideDoubleTapped))
+        leftDoubleTap.numberOfTapsRequired = 2
+        leftDoubleTap.delegate = self
+        leftDoubleTapGesture = leftDoubleTap
+        videoContainer.addGestureRecognizer(leftDoubleTap)
+        
+        let rightDoubleTap = UITapGestureRecognizer(target: self, action: #selector(rightSideDoubleTapped))
+        rightDoubleTap.numberOfTapsRequired = 2
+        rightDoubleTap.delegate = self
+        rightDoubleTapGesture = rightDoubleTap
+        videoContainer.addGestureRecognizer(rightDoubleTap)
+        
+        #if !os(tvOS)
+        if isTwoFingerTapEnabled {
+            let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(twoFingerTapped))
+            twoFingerTap.numberOfTouchesRequired = 2
+            twoFingerTap.delegate = self
+            videoContainer.addGestureRecognizer(twoFingerTap)
+        }
+        #endif
+    }
+
+    @objc private func leftSideDoubleTapped(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: videoContainer)
+        let isLeftSide = location.x < videoContainer.bounds.width / 2
+        guard isLeftSide else { return }
+        rendererSeek(by: -10)
+        animateButtonTap(skipBackwardButton)
+        showControlsTemporarily()
+    }
+
+    @objc private func rightSideDoubleTapped(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: videoContainer)
+        let isRightSide = location.x >= videoContainer.bounds.width / 2
+        guard isRightSide else { return }
+        rendererSeek(by: 10)
+        animateButtonTap(skipForwardButton)
+        showControlsTemporarily()
+    }
+
+    @objc private func twoFingerTapped(_ gesture: UITapGestureRecognizer) {
+        centerPlayPauseTapped()
+    }
+
+    private func setupBrightnessControls() {
+#if !os(tvOS)
+        brightnessSlider.addTarget(self, action: #selector(brightnessSliderChanged(_:)), for: .valueChanged)
+        loadBrightnessLevel()
+        updateBrightnessControlVisibility()
+#endif
+    }
+
+#if !os(tvOS)
+    private func loadBrightnessLevel() {
+        if UserDefaults.standard.object(forKey: brightnessLevelKey) == nil {
+            UserDefaults.standard.set(Float(UIScreen.main.brightness), forKey: brightnessLevelKey)
+        }
+        let stored = UserDefaults.standard.float(forKey: brightnessLevelKey)
+        brightnessLevel = max(0.0, min(stored, 1.0))
+        brightnessSlider.value = brightnessLevel
+        applyBrightnessLevel(brightnessLevel)
+    }
+
+    @objc private func brightnessSliderChanged(_ sender: UISlider) {
+        applyBrightnessLevel(sender.value)
+        showControlsTemporarily()
+    }
+
+    private func applyBrightnessLevel(_ value: Float) {
+        if isClosing { return }
+        let clamped = max(0.0, min(value, 1.0))
+        brightnessLevel = clamped
+        UserDefaults.standard.set(clamped, forKey: brightnessLevelKey)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.isClosing { return }
+            self.dimmingView.alpha = 0.0
+        }
+    }
+
+    private func updateBrightnessControlVisibility() {
+        if isClosing { return }
+        brightnessContainer.isHidden = true
+        brightnessContainer.alpha = 0.0
+    }
+
+#else
+    // tvOS stub to satisfy shared call sites when brightness UI is unavailable
+    private func updateBrightnessControlVisibility() { }
+#endif
+
     @objc private func handleHoldGesture(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
         case .began:
@@ -560,10 +1185,10 @@ final class PlayerViewController: UIViewController {
     }
     
     private func beginHoldSpeed() {
-        originalSpeed = renderer.getSpeed()
+        originalSpeed = rendererGetSpeed()
         let holdSpeed = UserDefaults.standard.float(forKey: "holdSpeedPlayer")
         let targetSpeed = holdSpeed > 0 ? Double(holdSpeed) : 2.0
-        renderer.setSpeed(targetSpeed)
+        rendererSetSpeed(targetSpeed)
         
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -575,7 +1200,7 @@ final class PlayerViewController: UIViewController {
     }
     
     private func endHoldSpeed() {
-        renderer.setSpeed(originalSpeed)
+        rendererSetSpeed(originalSpeed)
         
         DispatchQueue.main.async { [weak self] in
             UIView.animate(withDuration: 0.2) {
@@ -585,11 +1210,11 @@ final class PlayerViewController: UIViewController {
     }
     
     @objc private func playPauseTapped() {
-        if renderer.isPausedState {
-            renderer.play()
+        if rendererIsPausedState() {
+            rendererPlay()
             updatePlayPauseButton(isPaused: false)
         } else {
-            renderer.pausePlayback()
+            rendererPausePlayback()
             updatePlayPauseButton(isPaused: true)
         }
     }
@@ -599,17 +1224,16 @@ final class PlayerViewController: UIViewController {
     }
     
     @objc private func skipBackwardTapped() {
-        renderer.seek(by: -15)
+        rendererSeek(by: -10)
         animateButtonTap(skipBackwardButton)
         showControlsTemporarily()
     }
     
     @objc private func skipForwardTapped() {
-        renderer.seek(by: 15)
+        rendererSeek(by: 10)
         animateButtonTap(skipForwardButton)
         showControlsTemporarily()
     }
-    
     private func updateSubtitleMenu() {
         var trackActions: [UIAction] = []
         
@@ -754,16 +1378,221 @@ final class PlayerViewController: UIViewController {
         subtitleButton.setImage(img, for: .normal)
     }
     
+    private func updateSpeedMenu() {
+        let currentSpeed = rendererGetSpeed()
+        let speeds: [(String, Double)] = [
+            ("0.25x", 0.25),
+            ("0.5x", 0.5),
+            ("0.75x", 0.75),
+            ("1.0x", 1.0),
+            ("1.25x", 1.25),
+            ("1.5x", 1.5),
+            ("1.75x", 1.75),
+            ("2.0x", 2.0)
+        ]
+        
+        let speedActions = speeds.map { (name, speed) in
+            UIAction(
+                title: name,
+                state: abs(currentSpeed - speed) < 0.01 ? .on : .off
+            ) { [weak self] _ in
+                self?.rendererSetSpeed(speed)
+                self?.speedIndicatorLabel.text = String(format: "%.2fx", speed)
+                DispatchQueue.main.async {
+                    UIView.animate(withDuration: 0.2) {
+                        self?.speedIndicatorLabel.alpha = 1.0
+                    } completion: { _ in
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            UIView.animate(withDuration: 0.2) {
+                                self?.speedIndicatorLabel.alpha = 0.0
+                            }
+                        }
+                    }
+                }
+                self?.updateSpeedMenu()
+            }
+        }
+        
+        let speedMenu = UIMenu(title: "Playback Speed", image: UIImage(systemName: "hare.fill"), children: speedActions)
+        speedButton.menu = speedMenu
+    }
+    
+    private func updateAudioTracksMenu() {
+        let detailedTracks = rendererGetAudioTracksDetailed()
+        let tracks = detailedTracks.map { ($0.0, $0.1) }
+        var trackActions: [UIAction] = []
+        
+        // Always show the audio button so the user can view the menu even when empty
+        audioButton.isHidden = false
+        
+        if tracks.isEmpty {
+            let noTracksAction = UIAction(title: "No audio tracks available", state: .off) { _ in }
+            let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: [noTracksAction])
+            audioButton.menu = audioMenu
+            return
+        }
+
+        trackActions = tracks.map { (id, name) in
+            UIAction(
+                title: name,
+                state: .off
+            ) { [weak self] _ in
+                self?.userSelectedAudioTrack = true
+                self?.rendererSetAudioTrack(id: id)
+                self?.updateAudioTracksMenu()
+            }
+        }
+
+        // Auto-select preferred anime audio language when applicable
+        var didAutoSelectPreferred = false
+        if isAnimeContent() && !userSelectedAudioTrack {
+            let preferredLang = Settings.shared.preferredAnimeAudioLanguage.lowercased()
+            let preferredLangName = languageName(for: preferredLang)
+
+            if let matching = detailedTracks.first(where: {
+                let langCode = $0.2.lowercased()
+                let title = $0.1.lowercased()
+                if !preferredLang.isEmpty && langCode.contains(preferredLang) { return true }
+                if !preferredLangName.isEmpty && langCode.contains(preferredLangName.lowercased()) { return true }
+                if !preferredLang.isEmpty && title.contains(preferredLang) { return true }
+                if !preferredLangName.isEmpty && title.contains(preferredLangName.lowercased()) { return true }
+                return false
+            }) {
+                userSelectedAudioTrack = true
+                rendererSetAudioTrack(id: matching.0)
+                didAutoSelectPreferred = true
+            }
+        }
+        // Per requirement: do not auto-select anime language without an AniList mapping
+        
+        let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: trackActions)
+        audioButton.menu = audioMenu
+    }
+
+    private func isAnimeContent() -> Bool {
+        guard let info = mediaInfo else { return false }
+        if let hint = isAnimeHint, hint == true { return true }
+        switch info {
+        case .movie:
+            return false
+        case .episode(let showId, _, _):
+            return trackerManager.cachedAniListId(for: showId) != nil
+        }
+    }
+
+    private func isLocalFile() -> Bool {
+        return initialURL?.isFileURL == true
+    }
+
+    private func languageName(for code: String) -> String {
+        switch code.lowercased() {
+        case "jpn", "ja", "jp": return "japanese"
+        case "eng", "en", "us", "uk": return "english"
+        case "spa", "es", "esp": return "spanish"
+        case "fre", "fra", "fr": return "french"
+        case "ger", "deu", "de": return "german"
+        case "ita", "it": return "italian"
+        case "por", "pt": return "portuguese"
+        case "rus", "ru": return "russian"
+        case "chi", "zho", "zh": return "chinese"
+        case "kor", "ko": return "korean"
+        default: return ""
+        }
+    }
+    
+    private func updateSubtitleTracksMenu() {
+        // Always allow subtitle UI; for VLC we still surface tracks even if external URLs were supplied
+        if !subtitleURLs.isEmpty && vlcRenderer == nil {
+            return
+        }
+
+        let tracks = rendererGetSubtitleTracks()
+
+        // Always show the subtitle button so the user can view the menu even when empty
+        subtitleButton.isHidden = false
+        
+        // VLC uses menu-only approach to avoid presentation conflicts
+        subtitleButton.showsMenuAsPrimaryAction = (vlcRenderer != nil)
+
+        // Apply default subtitle settings if enabled and tracks exist
+        if !tracks.isEmpty && !userSelectedSubtitleTrack {
+            let settings = Settings.shared
+            if settings.enableSubtitlesByDefault {
+                let preferredLang = settings.defaultSubtitleLanguage
+                if let matchingTrack = tracks.first(where: { $0.1.lowercased().contains(preferredLang.lowercased()) }) {
+                    rendererSetSubtitleTrack(id: matchingTrack.0)
+                    userSelectedSubtitleTrack = true
+                    // Ensure visibility when selecting programmatically (especially for MPV path)
+                    subtitleModel.isVisible = true
+                    updateSubtitleButtonAppearance()
+                }
+            }
+        }
+        
+        var trackActions: [UIAction] = []
+
+        let disableAction = UIAction(
+            title: "Disable Subtitles",
+            image: UIImage(systemName: "xmark"),
+            state: .off
+        ) { [weak self] _ in
+            self?.subtitleModel.isVisible = false
+            self?.userSelectedSubtitleTrack = true
+            self?.rendererDisableSubtitles()
+            self?.updateSubtitleButtonAppearance()
+            self?.updateSubtitleTracksMenu()
+        }
+        trackActions.append(disableAction)
+        
+        if tracks.isEmpty {
+            // Inform the user; keep menu available
+            let noTracksAction = UIAction(title: "No subtitles in stream", state: .off) { _ in }
+            trackActions.append(noTracksAction)
+        } else {
+            let subtitleActions = tracks.map { (id, name) in
+                UIAction(
+                    title: name,
+                    image: UIImage(systemName: "captions.bubble"),
+                    state: .off
+                ) { [weak self] _ in
+                    self?.subtitleModel.isVisible = true
+                    self?.userSelectedSubtitleTrack = true
+                    self?.rendererSetSubtitleTrack(id: id)
+                    self?.updateSubtitleButtonAppearance()
+                    self?.updateSubtitleTracksMenu()
+                }
+            }
+            trackActions.append(contentsOf: subtitleActions)
+        }
+        
+        let subtitleMenu = UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: trackActions)
+        subtitleButton.menu = subtitleMenu
+    }
     private func loadSubtitles(_ urls: [String]) {
         subtitleURLs = urls
+        userSelectedSubtitleTrack = false
         
         if !urls.isEmpty {
             subtitleButton.isHidden = false
             currentSubtitleIndex = 0
             subtitleModel.isVisible = true
-            loadCurrentSubtitle()
+            
+            // VLC can load external subtitles natively; MPV uses manual parsing
+            if vlcRenderer != nil {
+                rendererLoadExternalSubtitles(urls: urls)
+                // Update subtitle menu after VLC loads the external subs
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.updateSubtitleTracksMenu()
+                }
+            } else {
+                // MPV: manually download and parse subtitles
+                loadCurrentSubtitle()
+            }
+            
             updateSubtitleButtonAppearance()
             updateSubtitleMenu()
+        } else {
+            Logger.shared.log("No subtitle URLs to load", type: "Info")
         }
     }
     
@@ -771,43 +1600,119 @@ final class PlayerViewController: UIViewController {
         guard currentSubtitleIndex < subtitleURLs.count else { return }
         let urlString = subtitleURLs[currentSubtitleIndex]
         
+        Logger.shared.log("Loading subtitle from: \(urlString)", type: "Info")
+        
         guard let url = URL(string: urlString) else {
             Logger.shared.log("Invalid subtitle URL: \(urlString)", type: "Error")
             return
         }
         
-        URLSession.custom.dataTask(with: url) { [weak self] data, response, error in
+        var request = URLRequest(url: url)
+        request.setValue(URLSession.randomUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(url.scheme! + "://" + (url.host ?? ""), forHTTPHeaderField: "Origin")
+        request.setValue(url.absoluteString, forHTTPHeaderField: "Referer")
+        request.timeoutInterval = 30
+        
+        // Download on background queue to avoid blocking main thread
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             
-            if let error = error {
-                Logger.shared.log("Failed to download subtitles: \(error.localizedDescription)", type: "Error")
-                return
-            }
-            
-            guard let data = data, let subtitleContent = String(data: data, encoding: .utf8) else {
-                Logger.shared.log("Failed to parse subtitle data", type: "Error")
-                return
-            }
-            
-            self.parseAndDisplaySubtitles(subtitleContent)
-        }.resume()
+            URLSession.custom.dataTask(with: request) { [weak self] data, response, error in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    Logger.shared.log("Failed to download subtitles: \(error.localizedDescription)", type: "Error")
+                    return
+                }
+                
+                if let httpResponse = response as? HTTPURLResponse {
+                    Logger.shared.log("Subtitle download response: \(httpResponse.statusCode)", type: "Info")
+                    if httpResponse.statusCode != 200 {
+                        Logger.shared.log("Subtitle download failed with status \(httpResponse.statusCode)", type: "Error")
+                        return
+                    }
+                }
+                
+                guard let data = data, let subtitleContent = String(data: data, encoding: .utf8) else {
+                    Logger.shared.log("Failed to parse subtitle data (size: \(data?.count ?? 0) bytes)", type: "Error")
+                    return
+                }
+                
+                Logger.shared.log("Subtitle content loaded: \(subtitleContent.prefix(100))...", type: "Info")
+                
+                // Parse subtitles on background queue (heavy text processing)
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    guard let self = self else { return }
+                    self.parseAndDisplaySubtitles(subtitleContent)
+                }
+            }.resume()
+        }
     }
     
     private func parseAndDisplaySubtitles(_ content: String) {
-        subtitleEntries = SubtitleLoader.parseSubtitles(from: content, fontSize: subtitleModel.fontSize, foregroundColor: subtitleModel.foregroundColor)
-        Logger.shared.log("Loaded \(subtitleEntries.count) subtitle entries", type: "Info")
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.subtitleEntries = SubtitleLoader.parseSubtitles(from: content, fontSize: self.subtitleModel.fontSize, foregroundColor: self.subtitleModel.foregroundColor)
+            Logger.shared.log("Loaded \(self.subtitleEntries.count) subtitle entries", type: "Info")
+            self.rendererRefreshSubtitleOverlay()
+        }
     }
     
     @objc private func subtitleButtonTapped() {
-        guard !subtitleURLs.isEmpty else { return }
-        
-        if subtitleURLs.count == 1 {
-            subtitleModel.isVisible.toggle()
-            updateSubtitleButtonAppearance()
-        } else {
-            showSubtitleSelectionMenu()
+        // VLC uses menu system directly; this handler is for MPV only
+        if vlcRenderer != nil {
+            return
         }
         
+        // External subtitles present (MPV)
+        if !subtitleURLs.isEmpty {
+            if subtitleURLs.count == 1 {
+                subtitleModel.isVisible.toggle()
+                rendererRefreshSubtitleOverlay()
+                updateSubtitleButtonAppearance()
+            } else {
+                showSubtitleSelectionMenu()
+            }
+            showControlsTemporarily()
+            Logger.shared.log("subtitleButtonTapped: handled external subtitle flow", type: "Info")
+            return
+        }
+
+        // Embedded subtitles flow (MPV only at this point)
+        let embeddedTracks = rendererGetSubtitleTracks()
+        Logger.shared.log("subtitleButtonTapped: embedded flow, tracks=\(embeddedTracks.count)", type: "Info")
+
+        let alert = UIAlertController(title: "Select Subtitle", message: nil, preferredStyle: .actionSheet)
+
+        let disable = UIAlertAction(title: "Disable Subtitles", style: .destructive) { [weak self] _ in
+            Logger.shared.log("Embedded subtitles disabled via action sheet", type: "Info")
+            self?.userSelectedSubtitleTrack = true
+            self?.rendererDisableSubtitles()
+            self?.updateSubtitleTracksMenu()
+        }
+        alert.addAction(disable)
+
+        if embeddedTracks.isEmpty {
+            alert.addAction(UIAlertAction(title: "No subtitles in stream", style: .cancel, handler: nil))
+        } else {
+            for (id, name) in embeddedTracks {
+                alert.addAction(UIAlertAction(title: name, style: .default) { [weak self] _ in
+                    Logger.shared.log("Embedded subtitle selected via action sheet: id=\(id) name=\(name)", type: "Info")
+                    self?.userSelectedSubtitleTrack = true
+                    self?.rendererSetSubtitleTrack(id: id)
+                    self?.updateSubtitleTracksMenu()
+                })
+            }
+        }
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+
+        if let pop = alert.popoverPresentationController {
+            pop.sourceView = subtitleButton
+            pop.sourceRect = subtitleButton.bounds
+        }
+
+        present(alert, animated: true)
         showControlsTemporarily()
     }
     
@@ -816,6 +1721,8 @@ final class PlayerViewController: UIViewController {
         
         let disableAction = UIAlertAction(title: "Disable Subtitles", style: .default) { [weak self] _ in
             self?.subtitleModel.isVisible = false
+            self?.userSelectedSubtitleTrack = true
+            self?.rendererRefreshSubtitleOverlay()
             self?.updateSubtitleButtonAppearance()
         }
         alert.addAction(disableAction)
@@ -824,6 +1731,7 @@ final class PlayerViewController: UIViewController {
             let action = UIAlertAction(title: "Subtitle \(index + 1)", style: .default) { [weak self] _ in
                 self?.currentSubtitleIndex = index
                 self?.subtitleModel.isVisible = true
+                self?.userSelectedSubtitleTrack = true
                 self?.loadCurrentSubtitle()
                 self?.updateSubtitleButtonAppearance()
             }
@@ -868,23 +1776,21 @@ final class PlayerViewController: UIViewController {
             guard let self = self else { return }
             self.isSeeking = editing
             if !editing {
-                self.renderer.seek(to: max(0, self.progressModel.position))
+                self.rendererSeek(to: max(0, self.progressModel.position))
             }
         })))
-        
-        progressHostingController = host
+
         addChild(host)
         host.view.translatesAutoresizingMaskIntoConstraints = false
-        host.view.backgroundColor = .clear
-        host.view.isOpaque = false
         progressContainer.addSubview(host.view)
         NSLayoutConstraint.activate([
             host.view.topAnchor.constraint(equalTo: progressContainer.topAnchor),
             host.view.bottomAnchor.constraint(equalTo: progressContainer.bottomAnchor),
             host.view.leadingAnchor.constraint(equalTo: progressContainer.leadingAnchor),
-            host.view.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor)
         ])
         host.didMove(toParent: self)
+        progressHostingController = host
     }
     
     private func updatePlayPauseButton(isPaused: Bool) {
@@ -1019,8 +1925,26 @@ final class PlayerViewController: UIViewController {
     private func showControlsTemporarily() {
         controlsHideWorkItem?.cancel()
         controlsVisible = true
+        updateBrightnessControlVisibility()
+
+        // Ensure controls sit above the video layer/view
+        videoContainer.bringSubviewToFront(controlsOverlayView)
+        videoContainer.bringSubviewToFront(centerPlayPauseButton)
+        videoContainer.bringSubviewToFront(progressContainer)
+        videoContainer.bringSubviewToFront(closeButton)
+        videoContainer.bringSubviewToFront(pipButton)
+        videoContainer.bringSubviewToFront(skipBackwardButton)
+        videoContainer.bringSubviewToFront(skipForwardButton)
+        videoContainer.bringSubviewToFront(speedIndicatorLabel)
+        videoContainer.bringSubviewToFront(subtitleButton)
+        videoContainer.bringSubviewToFront(speedButton)
+        videoContainer.bringSubviewToFront(audioButton)
+#if !os(tvOS)
+        videoContainer.bringSubviewToFront(brightnessContainer)
+#endif
         
         DispatchQueue.main.async {
+            self.controlsOverlayView.isHidden = false
             UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
                 self.centerPlayPauseButton.alpha = 1.0
                 self.controlsOverlayView.alpha = 1.0
@@ -1032,6 +1956,16 @@ final class PlayerViewController: UIViewController {
                 if !self.subtitleButton.isHidden {
                     self.subtitleButton.alpha = 1.0
                 }
+                self.speedButton.alpha = 1.0
+                if !self.audioButton.isHidden {
+                    self.audioButton.alpha = 1.0
+                }
+#if !os(tvOS)
+                if self.isBrightnessControlEnabled {
+                    self.brightnessContainer.isHidden = false
+                    self.brightnessContainer.alpha = 1.0
+                }
+#endif
             }
         }
         
@@ -1056,17 +1990,59 @@ final class PlayerViewController: UIViewController {
                 self.skipBackwardButton.alpha = 0.0
                 self.skipForwardButton.alpha = 0.0
                 self.subtitleButton.alpha = 0.0
+                self.speedButton.alpha = 0.0
+                self.audioButton.alpha = 0.0
+#if !os(tvOS)
+                self.brightnessContainer.alpha = 0.0
+#endif
+            } completion: { _ in
+                self.controlsOverlayView.isHidden = true
             }
         }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.updateBrightnessControlVisibility()
+        }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        #if !os(tvOS)
+        if isBrightnessControlEnabled {
+            let location = touch.location(in: brightnessContainer)
+            if brightnessContainer.bounds.contains(location) {
+                return false
+            }
+        }
+        #endif
+        
+        // Filter double-tap gestures by screen side
+        let location = touch.location(in: videoContainer)
+        let isLeftSide = location.x < videoContainer.bounds.width / 2
+        
+        if gestureRecognizer === leftDoubleTapGesture {
+            return isLeftSide
+        } else if gestureRecognizer === rightDoubleTapGesture {
+            return !isLeftSide
+        }
+        
+        return true
     }
     
     @objc private func closeTapped() {
+        isClosing = true
+        logMPV("closeTapped; pipActive=\(pipController?.isPictureInPictureActive == true); mediaInfo=\(String(describing: mediaInfo))")
+        if let mpv = mpvRenderer {
+            mpv.delegate = nil
+        } else if let vlc = vlcRenderer {
+            vlc.delegate = nil
+        }
         pipController?.delegate = nil
         if pipController?.isPictureInPictureActive == true {
             pipController?.stopPictureInPicture()
         }
         
-        renderer.stop()
+        rendererStop()
+        logMPV("renderer.stop called from closeTapped")
         
         if presentingViewController != nil {
             dismiss(animated: true, completion: nil)
@@ -1076,7 +2052,7 @@ final class PlayerViewController: UIViewController {
     }
     
     @objc private func pipTapped() {
-        guard let pip = pipController else { return }
+        guard vlcRenderer == nil, let pip = pipController else { return }
         if pip.isPictureInPictureActive {
             pip.stopPictureInPicture()
         } else if pip.isPictureInPicturePossible {
@@ -1085,27 +2061,44 @@ final class PlayerViewController: UIViewController {
     }
     
     private func updatePosition(_ position: Double, duration: Double) {
+        // Some VLC/HLS sources report 0 duration for a while; keep the last good duration so progress persists.
+        let effectiveDuration: Double
+        if duration.isFinite, duration > 0 {
+            effectiveDuration = duration
+        } else {
+            effectiveDuration = cachedDuration
+        }
+
         DispatchQueue.main.async {
-            self.cachedDuration = duration
+            if duration.isFinite, duration > 0 {
+                self.cachedDuration = duration
+            }
             self.cachedPosition = position
-            if duration > 0 {
+            if effectiveDuration > 0 {
                 self.updateProgressHostingController()
             }
             self.progressModel.position = position
-            self.progressModel.duration = max(duration, 1.0)
+            self.progressModel.duration = max(effectiveDuration, 1.0)
             
             if self.pipController?.isPictureInPictureActive == true {
                 self.pipController?.updatePlaybackState()
             }
+
+            // If playback is progressing, force-hide any lingering loading spinner
+            if self.loadingIndicator.alpha > 0.0 || self.loadingIndicator.isAnimating {
+                self.loadingIndicator.stopAnimating()
+                self.loadingIndicator.alpha = 0.0
+                self.centerPlayPauseButton.isHidden = false
+            }
         }
         
-        guard duration.isFinite, duration > 0, position >= 0, let info = mediaInfo else { return }
+        guard effectiveDuration.isFinite, effectiveDuration > 0, position >= 0, let info = mediaInfo else { return }
         
         switch info {
-        case .movie(let id, let title, let posterURL):
-            ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: position, totalDuration: duration, posterURL: posterURL)
-        case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL):
-            ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: duration, showTitle: showTitle, showPosterURL: showPosterURL)
+        case .movie(let id, let title):
+            ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: position, totalDuration: effectiveDuration)
+        case .episode(let showId, let seasonNumber, let episodeNumber):
+            ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: effectiveDuration)
         }
     }
     
@@ -1126,15 +2119,18 @@ final class PlayerViewController: UIViewController {
 // MARK: - MPVSoftwareRendererDelegate
 extension PlayerViewController: MPVSoftwareRendererDelegate {
     func renderer(_ renderer: MPVSoftwareRenderer, didUpdatePosition position: Double, duration: Double) {
+        if isClosing { return }
         updatePosition(position, duration: duration)
     }
     
     func renderer(_ renderer: MPVSoftwareRenderer, didChangePause isPaused: Bool) {
+        if isClosing { return }
         updatePlayPauseButton(isPaused: isPaused)
         pipController?.updatePlaybackState()
     }
     
     func renderer(_ renderer: MPVSoftwareRenderer, didChangeLoading isLoading: Bool) {
+        if isClosing { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if isLoading {
@@ -1144,19 +2140,34 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
             } else {
                 self.loadingIndicator.stopAnimating()
                 self.loadingIndicator.alpha = 0.0
-                self.updatePlayPauseButton(isPaused: self.renderer.isPausedState)
+                self.centerPlayPauseButton.isHidden = false
+                self.updatePlayPauseButton(isPaused: self.rendererIsPausedState())
             }
         }
     }
     
     func renderer(_ renderer: MPVSoftwareRenderer, didBecomeReadyToSeek: Bool) {
+        if isClosing { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            
+            // Update audio and subtitle tracks now that the video is ready
+            self.updateAudioTracksMenu()
+            self.updateSubtitleTracksMenu()
+            
             if let seekTime = self.pendingSeekTime {
-                self.renderer.seek(to: seekTime)
+                self.rendererSeek(to: seekTime)
                 Logger.shared.log("Resumed MPV playback from \(Int(seekTime))s", type: "Progress")
                 self.pendingSeekTime = nil
             }
+        }
+    }
+
+    func rendererDidChangeTracks(_ renderer: MPVSoftwareRenderer) {
+        if isClosing { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateAudioTracksMenu()
         }
     }
     
@@ -1176,11 +2187,111 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
         let style = SubtitleStyle(
             foregroundColor: subtitleModel.foregroundColor,
             strokeColor: subtitleModel.strokeColor,
+            strokeWidth: 1.0,
+            fontSize: 38.0,
+            isVisible: subtitleModel.isVisible
+        )
+        return style
+    }
+    
+    func renderer(_ renderer: MPVSoftwareRenderer, subtitleTrackDidChange trackId: Int) {
+        if isClosing { return }
+        // When an embedded subtitle track is selected, enable subtitle display
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.subtitleModel.isVisible = true
+            self.updateSubtitleButtonAppearance()
+            // Embedded subtitles are extracted from mpv and rendered manually
+        }
+    }
+
+}
+
+// MARK: - VLCRendererDelegate
+extension PlayerViewController: VLCRendererDelegate {
+    func renderer(_ renderer: VLCRenderer, didUpdatePosition position: Double, duration: Double) {
+        if isClosing { return }
+        updatePosition(position, duration: duration)
+    }
+    
+    func renderer(_ renderer: VLCRenderer, didChangePause isPaused: Bool) {
+        if isClosing { return }
+        updatePlayPauseButton(isPaused: isPaused)
+        pipController?.updatePlaybackState()
+    }
+    
+    func renderer(_ renderer: VLCRenderer, didChangeLoading isLoading: Bool) {
+        if isClosing { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if isLoading {
+                self.centerPlayPauseButton.isHidden = true
+                self.loadingIndicator.alpha = 1.0
+                self.loadingIndicator.startAnimating()
+            } else {
+                self.loadingIndicator.stopAnimating()
+                self.loadingIndicator.alpha = 0.0
+                self.centerPlayPauseButton.isHidden = false
+                self.updatePlayPauseButton(isPaused: self.rendererIsPausedState())
+            }
+        }
+    }
+    
+    func renderer(_ renderer: VLCRenderer, didBecomeReadyToSeek: Bool) {
+        if isClosing { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            
+            // Update audio and subtitle tracks now that the video is ready
+            self.updateAudioTracksMenu()
+            self.updateSubtitleTracksMenu()
+            
+            if let seekTime = self.pendingSeekTime {
+                self.rendererSeek(to: seekTime)
+                Logger.shared.log("Resumed VLC playback from \(Int(seekTime))s", type: "Progress")
+                self.pendingSeekTime = nil
+            }
+        }
+    }
+
+    func rendererDidChangeTracks(_ renderer: VLCRenderer) {
+        if isClosing { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateAudioTracksMenu()
+            self.updateSubtitleTracksMenu()
+        }
+    }
+    
+    func renderer(_ renderer: VLCRenderer, getSubtitleForTime time: Double) -> NSAttributedString? {
+        guard subtitleModel.isVisible, !subtitleEntries.isEmpty else {
+            return nil
+        }
+        
+        if let entry = subtitleEntries.first(where: { $0.startTime <= time && time <= $0.endTime }) {
+            return entry.attributedText
+        }
+        return nil
+    }
+    
+    func renderer(_ renderer: VLCRenderer, getSubtitleStyle: Void) -> SubtitleStyle {
+        return SubtitleStyle(
+            foregroundColor: subtitleModel.foregroundColor,
+            strokeColor: subtitleModel.strokeColor,
             strokeWidth: subtitleModel.strokeWidth,
             fontSize: subtitleModel.fontSize,
             isVisible: subtitleModel.isVisible
         )
-        return style
+    }
+    
+    func renderer(_ renderer: VLCRenderer, subtitleTrackDidChange trackId: Int) {
+        if isClosing { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.subtitleModel.isVisible = true
+            self.updateSubtitleButtonAppearance()
+            // VLC natively renders ASS subtitles
+        }
     }
 }
 
@@ -1201,22 +2312,23 @@ extension PlayerViewController: PiPControllerDelegate {
             completionHandler(true)
         }
     }
-    func pipControllerPlay(_ controller: PiPController) { renderer.play() }
-    func pipControllerPause(_ controller: PiPController) { renderer.pausePlayback() }
+    func pipControllerPlay(_ controller: PiPController) { rendererPlay() }
+    func pipControllerPause(_ controller: PiPController) { rendererPausePlayback() }
     func pipController(_ controller: PiPController, skipByInterval interval: CMTime) {
         let seconds = CMTimeGetSeconds(interval)
         let target = max(0, cachedPosition + seconds)
-        renderer.seek(to: target)
+        rendererSeek(to: target)
         pipController?.updatePlaybackState()
     }
-    func pipControllerIsPlaying(_ controller: PiPController) -> Bool { return !renderer.isPausedState }
+    func pipControllerIsPlaying(_ controller: PiPController) -> Bool { return !rendererIsPausedState() }
     func pipControllerDuration(_ controller: PiPController) -> Double { return cachedDuration }
     func pipControllerCurrentTime(_ controller: PiPController) -> Double { return cachedPosition }
     
     @objc private func appDidEnterBackground() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let pip = self.pipController else { return }
-            if pip.isPictureInPicturePossible && !pip.isPictureInPictureActive {
+            if self.vlcRenderer == nil, pip.isPictureInPicturePossible && !pip.isPictureInPictureActive {
+                self.logMPV("Entering background; starting PiP")
                 pip.startPictureInPicture()
             }
         }
@@ -1225,7 +2337,8 @@ extension PlayerViewController: PiPControllerDelegate {
     @objc private func appWillEnterForeground() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let pip = self.pipController else { return }
-            if pip.isPictureInPictureActive {
+            if self.vlcRenderer == nil, pip.isPictureInPictureActive {
+                self.logMPV("Returning to foreground; stopping PiP")
                 pip.stopPictureInPicture()
             }
         }

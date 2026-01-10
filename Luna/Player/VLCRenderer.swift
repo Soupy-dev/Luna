@@ -96,6 +96,19 @@ final class VLCRenderer: NSObject {
         
         do {
             Logger.shared.log("[VLCRenderer.start] Initializing VLCMediaPlayer", type: "Stream")
+            
+            // Configure audio session for playback
+            #if os(iOS)
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                try audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
+                try audioSession.setActive(true)
+                Logger.shared.log("[VLCRenderer.start] Audio session configured", type: "Stream")
+            } catch {
+                Logger.shared.log("[VLCRenderer.start] Failed to configure audio session: \(error)", type: "Error")
+            }
+            #endif
+            
             // Initialize VLC with proper options for video rendering
             mediaPlayer = VLCMediaPlayer()
             guard let mediaPlayer = mediaPlayer else {
@@ -266,6 +279,16 @@ final class VLCRenderer: NSObject {
     func play() {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
+            
+            // Ensure audio session is active before playing
+            #if os(iOS)
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                Logger.shared.log("[VLCRenderer.play] Failed to activate audio session: \(error)", type: "Error")
+            }
+            #endif
+            
             player.play()
         }
     }

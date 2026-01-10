@@ -26,6 +26,22 @@ class Settings: ObservableObject {
         }
     }
     
+    // VLC Player Settings
+    var enableSubtitlesByDefault: Bool {
+        get { UserDefaults.standard.bool(forKey: "enableSubtitlesByDefault") }
+        set { UserDefaults.standard.set(newValue, forKey: "enableSubtitlesByDefault") }
+    }
+    
+    var defaultSubtitleLanguage: String {
+        get { UserDefaults.standard.string(forKey: "defaultSubtitleLanguage") ?? "eng" }
+        set { UserDefaults.standard.set(newValue, forKey: "defaultSubtitleLanguage") }
+    }
+    
+    var preferredAnimeAudioLanguage: String {
+        get { UserDefaults.standard.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn" }
+        set { UserDefaults.standard.set(newValue, forKey: "preferredAnimeAudioLanguage") }
+    }
+    
     init() {
         if let colorData = UserDefaults.standard.data(forKey: "accentColor"),
            let uiColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: colorData) {
