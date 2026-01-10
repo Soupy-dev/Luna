@@ -35,6 +35,14 @@ struct TVShowSeasonsSection: View {
         return UserDefaults.standard.bool(forKey: "seasonMenu")
     }
     
+    private func getSearchTitle() -> String {
+        // For anime, use the currently selected season's name (which is the AniList title)
+        if isAnime, let seasonName = selectedSeason?.name, !seasonName.isEmpty {
+            return seasonName
+        }
+        return tvShow?.name ?? "Unknown Show"
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let tvShow = tvShow {
