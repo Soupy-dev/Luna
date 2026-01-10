@@ -59,7 +59,7 @@ class VLCPlayerState: NSObject, ObservableObject {
 
 // MARK: - VLC Player View Controller
 
-class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
+class VLCPlayerViewController: UIViewController, VLCRendererDelegate, UIGestureRecognizerDelegate {
     private let vlcRenderer: VLCRenderer
     var playerState: VLCPlayerState?
     var mediaInfo: MediaInfo?
@@ -324,26 +324,28 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
     }
     
     private func setupGestureRecognizers() {
-        // Single tap to toggle controls
+        // Single tap to toggle controls - lower priority
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        tapGesture.delegate = self
+        tapGesture.numberOfTapsRequired = 1
         view.addGestureRecognizer(tapGesture)
         
         // Two-finger tap to toggle play/pause
         let twoFingerTapGesture = UITapGestureRecognizer(target: self, action: #selector(togglePlayPause))
         twoFingerTapGesture.numberOfTouchesRequired = 2
-        twoFingerTapGesture.cancelsTouchesInView = false
+        twoFingerTapGesture.numberOfTapsRequired = 1
         view.addGestureRecognizer(twoFingerTapGesture)
         
         // Double tap left side to go back 10s
         let doubleTapLeftGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapLeft(_:)))
         doubleTapLeftGesture.numberOfTapsRequired = 2
-        doubleTapLeftGesture.cancelsTouchesInView = false
+        doubleTapLeftGesture.numberOfTouchesRequired = 1
         view.addGestureRecognizer(doubleTapLeftGesture)
         
         // Double tap right side to skip forward 10s
         let doubleTapRightGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTapRight(_:)))
         doubleTapRightGesture.numberOfTapsRequired = 2
-        doubleTapRightGesture.cancelsTouchesInView = false
+        doubleTapRightGesture.numberOfTouchesRequired = 1
         view.addGestureRecognizer(doubleTapRightGesture)
         
         // Prevent single tap from firing when double tapping
@@ -354,6 +356,11 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate {
         let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
         longPressGesture.minimumPressDuration = 0.5
         view.addGestureRecognizer(longPressGesture)
+    }
+    
+    // Allow gestures to work simultaneously when needed
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        return false
     }
     
     @objc private func backButtonTapped() {

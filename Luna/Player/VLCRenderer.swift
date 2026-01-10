@@ -599,6 +599,18 @@ final class VLCRenderer: NSObject {
             
             Logger.shared.log("[VLCRenderer] Now playing", type: "Stream")
             
+            // Ensure audio session is active when entering playing state
+            DispatchQueue.main.async {
+                do {
+                    let audioSession = AVAudioSession.sharedInstance()
+                    try audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
+                    try audioSession.setActive(true)
+                    Logger.shared.log("[VLCRenderer] Audio session activated on playing state", type: "Stream")
+                } catch {
+                    Logger.shared.log("[VLCRenderer] Failed to activate audio session on playing: \(error)", type: "Error")
+                }
+            }
+            
             // Apply audio and subtitle preferences when tracks become available
             applyAudioLanguagePreference()
             if autoLoadSubtitles {
