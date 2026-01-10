@@ -26,10 +26,9 @@ struct VLCPlayer: UIViewControllerRepresentable {
     }
     
     func updateUIViewController(_ uiViewController: PlayerViewController, context: Context) {
-        // Load media if needed
-        if let preset = preset {
-            uiViewController.loadMedia(url: url, preset: preset, headers: headers)
-        }
+        // Load media - use provided preset or default
+        let actualPreset = preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: [])
+        uiViewController.loadMedia(url: url, preset: actualPreset, headers: headers)
     }
 }
 
