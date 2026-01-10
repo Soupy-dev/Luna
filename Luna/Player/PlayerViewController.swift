@@ -530,16 +530,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererLoadExternalSubtitles(urls: [String]) {
         if let vlc = vlcRenderer {
             vlc.loadExternalSubtitles(urls: urls)
-        } else if let mpv = mpvRenderer {
-            mpv.loadExternalSubtitles(urls: urls)
         }
     }
     
     private func rendererClearSubtitleCache() {
         if let vlc = vlcRenderer {
             vlc.clearSubtitleCache()
-        } else if let mpv = mpvRenderer {
-            mpv.clearSubtitleCache()
         }
     }
     
