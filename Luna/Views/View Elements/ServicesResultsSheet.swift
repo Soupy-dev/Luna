@@ -685,6 +685,14 @@ struct ModulesSearchResultsSheet: View {
         } else {
             searchQuery = titleForSearch
         }
+        
+        // Debug logging
+        Logger.shared.log("[ServicesResultsSheet] mediaTitle: '\(mediaTitle)'", type: "Debug")
+        Logger.shared.log("[ServicesResultsSheet] seasonTitleOverride: '\(seasonTitleOverride ?? "nil")'", type: "Debug")
+        Logger.shared.log("[ServicesResultsSheet] effectiveTitle: '\(effectiveTitle)'", type: "Debug")
+        Logger.shared.log("[ServicesResultsSheet] searchQuery: '\(searchQuery)'", type: "Debug")
+        Logger.shared.log("[ServicesResultsSheet] isAnime: \(isAnime)", type: "Debug")
+        
         let baseTitleQuery = searchQuery.caseInsensitiveCompare(titleForSearch) == .orderedSame ? nil : titleForSearch
         let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != titleForSearch.lowercased() } ?? false
         
