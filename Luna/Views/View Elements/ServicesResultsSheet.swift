@@ -298,7 +298,7 @@ struct ModulesSearchResultsSheet: View {
         ForEach(filteredResults.highQuality, id: \.id) { searchResult in
             EnhancedMediaResultRow(
                 result: searchResult,
-                originalTitle: mediaTitle,
+                originalTitle: effectiveTitle,
                 alternativeTitle: originalTitle,
                 episode: selectedEpisode,
                 onTap: {
@@ -348,7 +348,7 @@ struct ModulesSearchResultsSheet: View {
             ForEach(filteredResults.lowQuality, id: \.id) { searchResult in
                 CompactMediaResultRow(
                     result: searchResult,
-                    originalTitle: mediaTitle,
+                    originalTitle: effectiveTitle,
                     alternativeTitle: originalTitle,
                     episode: selectedEpisode,
                     onTap: {
