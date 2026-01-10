@@ -97,26 +97,11 @@ final class VLCRenderer: NSObject {
         do {
             Logger.shared.log("[VLCRenderer.start] Initializing VLCMediaPlayer", type: "Stream")
             
-            // Configure audio session for playback
-            #if os(iOS)
-            do {
-                let audioSession = AVAudioSession.sharedInstance()
-                try audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
-                try audioSession.setActive(true)
-                Logger.shared.log("[VLCRenderer.start] Audio session configured", type: "Stream")
-            } catch {
-                Logger.shared.log("[VLCRenderer.start] Failed to configure audio session: \(error)", type: "Error")
-            }
-            #endif
-            
             // Initialize VLC with proper options for video rendering
             mediaPlayer = VLCMediaPlayer()
             guard let mediaPlayer = mediaPlayer else {
                 throw RendererError.vlcInitializationFailed
             }
-            
-            // Enable audio time stretching for smoother speed changes
-            mediaPlayer.audioTimeStretch = true
             
             // Render directly into the VLC view (stable video output)
             mediaPlayer.drawable = vlcView
