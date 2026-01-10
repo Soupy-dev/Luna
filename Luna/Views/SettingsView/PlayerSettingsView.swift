@@ -246,60 +246,8 @@ struct PlayerSettingsView: View {
                     }
                 }
             }
-            
-            Section(header: Text("Debug Logs"), footer: Text("Player logs are saved to: \(Logger.shared.getLogFilePath())")) {
-                Button {
-                    shareLogFile()
-                } label: {
-                    HStack {
-                        Text("Share Log File")
-                            .foregroundColor(.primary)
-                        Spacer()
-                        Image(systemName: "square.and.arrow.up")
-                            .foregroundColor(accentColorManager.currentAccentColor)
-                    }
-                }
-                
-                Button(role: .destructive) {
-                    Logger.shared.clearLogs()
-                } label: {
-                    HStack {
-                        Text("Clear Logs")
-                        Spacer()
-                        Image(systemName: "trash")
-                    }
-                }
-            }
         }
         .navigationTitle("Media Player")
-    }
-    
-    private func shareLogFile() {
-        let logURL = Logger.shared.getLogFileURL()
-        
-        // Ensure file exists
-        if !FileManager.default.fileExists(atPath: logURL.path) {
-            // Create empty file if it doesn't exist
-            try? "No logs yet.\n".write(to: logURL, atomically: true, encoding: .utf8)
-        }
-        
-        // Get the root view controller to present the share sheet
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first,
-              let rootViewController = window.rootViewController else {
-            return
-        }
-        
-        let activityVC = UIActivityViewController(activityItems: [logURL], applicationActivities: nil)
-        
-        // For iPad support
-        if let popover = activityVC.popoverPresentationController {
-            popover.sourceView = window
-            popover.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
-            popover.permittedArrowDirections = []
-        }
-        
-        rootViewController.present(activityVC, animated: true)
     }
     
     private func getLanguageName(_ code: String) -> String {

@@ -279,16 +279,6 @@ final class VLCRenderer: NSObject {
     func play() {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
-            
-            // Ensure audio session is active before playing
-            #if os(iOS)
-            do {
-                try AVAudioSession.sharedInstance().setActive(true)
-            } catch {
-                Logger.shared.log("[VLCRenderer.play] Failed to activate audio session: \(error)", type: "Error")
-            }
-            #endif
-            
             player.play()
         }
     }

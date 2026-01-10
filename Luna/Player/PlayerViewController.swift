@@ -304,15 +304,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private lazy var renderer: Any = {
         // Select renderer based on Settings
         let playerChoice = Settings.shared.playerChoice
-        Logger.shared.log("[PlayerViewController.renderer] Settings.playerChoice = \(playerChoice)", type: "Stream")
         
         if playerChoice == .vlc {
-            Logger.shared.log("[PlayerViewController.renderer] Creating VLC renderer", type: "Stream")
             let r = VLCRenderer(displayLayer: displayLayer)
             r.delegate = self
             return r
         } else {
-            Logger.shared.log("[PlayerViewController.renderer] Creating MPV renderer", type: "Stream")
             let r = MPVSoftwareRenderer(displayLayer: displayLayer)
             r.delegate = self
             return r
@@ -348,19 +345,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     // These methods abstract away differences between MPVSoftwareRenderer and VLCRenderer
     
     private func rendererLoad(url: URL, preset: PlayerPreset, headers: [String: String]?) {
-        Logger.shared.log("[PlayerViewController.rendererLoad] Starting", type: "Stream")
-        Logger.shared.log("[PlayerViewController.rendererLoad] VLC renderer exists: \(vlcRenderer != nil)", type: "Stream")
-        Logger.shared.log("[PlayerViewController.rendererLoad] MPV renderer exists: \(mpvRenderer != nil)", type: "Stream")
         if let vlc = vlcRenderer {
-            Logger.shared.log("[PlayerViewController.rendererLoad] Calling VLC load", type: "Stream")
             vlc.load(url: url, with: preset, headers: headers)
-            Logger.shared.log("[PlayerViewController.rendererLoad] VLC load returned", type: "Stream")
         } else if let mpv = mpvRenderer {
-            Logger.shared.log("[PlayerViewController.rendererLoad] Calling MPV load", type: "Stream")
             mpv.load(url: url, with: preset, headers: headers)
-            Logger.shared.log("[PlayerViewController.rendererLoad] MPV load returned", type: "Stream")
-        } else {
-            Logger.shared.log("[PlayerViewController.rendererLoad] ERROR: Neither VLC nor MPV renderer available", type: "Error")
         }
     }
     
@@ -381,24 +369,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func rendererStart() throws {
-        Logger.shared.log("[PlayerViewController.rendererStart] Starting renderer", type: "Stream")
         if let vlc = vlcRenderer {
-            Logger.shared.log("[PlayerViewController.rendererStart] Using VLC renderer", type: "Stream")
             try vlc.start()
         } else if let mpv = mpvRenderer {
-            Logger.shared.log("[PlayerViewController.rendererStart] Using MPV renderer", type: "Stream")
             try mpv.start()
         }
         isRunning = true
     }
     
     private func rendererStop() {
-        Logger.shared.log("[PlayerViewController.rendererStop] Stopping renderer", type: "Stream")
         if let vlc = vlcRenderer {
-            Logger.shared.log("[PlayerViewController.rendererStop] Using VLC renderer", type: "Stream")
             vlc.stop()
         } else if let mpv = mpvRenderer {
-            Logger.shared.log("[PlayerViewController.rendererStop] Using MPV renderer", type: "Stream")
             mpv.stop()
         }
         isRunning = false
@@ -770,30 +752,20 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
-        Logger.shared.log("[PlayerViewController.load] Starting load", type: "Stream")
-        Logger.shared.log("[PlayerViewController.load] URL: \(url.absoluteString)", type: "Stream")
-        Logger.shared.log("[PlayerViewController.load] Preset: \(preset.id.rawValue)", type: "Stream")
-        Logger.shared.log("[PlayerViewController.load] Headers count: \(headers?.count ?? 0)", type: "Stream")
-        Logger.shared.log("[PlayerViewController.load] MPV renderer: \(mpvRenderer != nil)", type: "Stream")
-        Logger.shared.log("[PlayerViewController.load] VLC renderer: \(vlcRenderer != nil)", type: "Stream")
         logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
         
         // Ensure renderer is started before loading media
         if !isRunning {
             do {
-                Logger.shared.log("[PlayerViewController.load] Renderer not running, starting it first", type: "Stream")
                 try rendererStart()
             } catch {
-                Logger.shared.log("[PlayerViewController.load] Failed to start renderer: \(error)", type: "Error")
                 return
             }
         }
         
         userSelectedAudioTrack = false
         userSelectedSubtitleTrack = false
-        Logger.shared.log("[PlayerViewController.load] Calling rendererLoad", type: "Stream")
         rendererLoad(url: url, preset: preset, headers: headers)
-        Logger.shared.log("[PlayerViewController.load] rendererLoad returned", type: "Stream")
         if let info = mediaInfo {
             prepareSeekToLastPosition(for: info)
         }
