@@ -72,6 +72,9 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate, UIGestureR
     private let topControlsView = UIView()
     private let bottomControlsView = UIView()
     private let centerPlayButton = UIButton(type: .system)
+    private let skipBackwardButton = UIButton(type: .system)
+    private let skipForwardButton = UIButton(type: .system)
+    private let speedIndicatorLabel = UILabel()
     private let progressBar = UISlider()
     private let timeLabel = UILabel()
     private let durationLabel = UILabel()
@@ -187,18 +190,24 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate, UIGestureR
         ])
         
         let backButton = UIButton(type: .system)
-        backButton.setTitle("← Back", for: .normal)
+        let closeCfg = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        backButton.setImage(UIImage(systemName: "xmark", withConfiguration: closeCfg), for: .normal)
         backButton.tintColor = .white
         backButton.addTarget(self, action: #selector(backButtonTapped), for: .touchUpInside)
         topControlsView.addSubview(backButton)
         backButton.translatesAutoresizingMaskIntoConstraints = false
-        backButton.leadingAnchor.constraint(equalTo: topControlsView.leadingAnchor, constant: 12).isActive = true
+        backButton.leadingAnchor.constraint(equalTo: topControlsView.leadingAnchor, constant: 16).isActive = true
         backButton.centerYAnchor.constraint(equalTo: topControlsView.centerYAnchor).isActive = true
+        backButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        backButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
         
-        // Center play button
-        centerPlayButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+        // Center play button with polished styling matching soupy
+        let cfg = UIImage.SymbolConfiguration(pointSize: 32, weight: .semibold)
+        centerPlayButton.setImage(UIImage(systemName: "play.fill", withConfiguration: cfg), for: .normal)
         centerPlayButton.tintColor = .white
-        centerPlayButton.titleLabel?.font = UIFont.systemFont(ofSize: 48)
+        centerPlayButton.backgroundColor = UIColor(white: 0.2, alpha: 0.5)
+        centerPlayButton.layer.cornerRadius = 35
+        centerPlayButton.clipsToBounds = true
         centerPlayButton.addTarget(self, action: #selector(togglePlayPause), for: .touchUpInside)
         controlsContainer.addSubview(centerPlayButton)
         centerPlayButton.translatesAutoresizingMaskIntoConstraints = false
@@ -206,8 +215,56 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate, UIGestureR
         NSLayoutConstraint.activate([
             centerPlayButton.centerXAnchor.constraint(equalTo: controlsContainer.centerXAnchor),
             centerPlayButton.centerYAnchor.constraint(equalTo: controlsContainer.centerYAnchor),
-            centerPlayButton.widthAnchor.constraint(equalToConstant: 80),
-            centerPlayButton.heightAnchor.constraint(equalToConstant: 80)
+            centerPlayButton.widthAnchor.constraint(equalToConstant: 70),
+            centerPlayButton.heightAnchor.constraint(equalToConstant: 70)
+        ])
+        
+        // Skip backward button (left of center)
+        let skipBackCfg = UIImage.SymbolConfiguration(pointSize: 28, weight: .semibold)
+        skipBackwardButton.setImage(UIImage(systemName: "gobackward.10", withConfiguration: skipBackCfg), for: .normal)
+        skipBackwardButton.tintColor = .white
+        skipBackwardButton.addTarget(self, action: #selector(skipBackward), for: .touchUpInside)
+        controlsContainer.addSubview(skipBackwardButton)
+        skipBackwardButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            skipBackwardButton.trailingAnchor.constraint(equalTo: centerPlayButton.leadingAnchor, constant: -48),
+            skipBackwardButton.centerYAnchor.constraint(equalTo: centerPlayButton.centerYAnchor),
+            skipBackwardButton.widthAnchor.constraint(equalToConstant: 50),
+            skipBackwardButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+        
+        // Skip forward button (right of center)
+        let skipForwardCfg = UIImage.SymbolConfiguration(pointSize: 28, weight: .semibold)
+        skipForwardButton.setImage(UIImage(systemName: "goforward.10", withConfiguration: skipForwardCfg), for: .normal)
+        skipForwardButton.tintColor = .white
+        skipForwardButton.addTarget(self, action: #selector(skipForward), for: .touchUpInside)
+        controlsContainer.addSubview(skipForwardButton)
+        skipForwardButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            skipForwardButton.leadingAnchor.constraint(equalTo: centerPlayButton.trailingAnchor, constant: 48),
+            skipForwardButton.centerYAnchor.constraint(equalTo: centerPlayButton.centerYAnchor),
+            skipForwardButton.widthAnchor.constraint(equalToConstant: 50),
+            skipForwardButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+        
+        // Speed indicator label
+        speedIndicatorLabel.textColor = .white
+        speedIndicatorLabel.font = .systemFont(ofSize: 16, weight: .bold)
+        speedIndicatorLabel.textAlignment = .center
+        speedIndicatorLabel.backgroundColor = UIColor(white: 0.2, alpha: 0.8)
+        speedIndicatorLabel.layer.cornerRadius = 20
+        speedIndicatorLabel.clipsToBounds = true
+        speedIndicatorLabel.alpha = 0.0
+        controlsContainer.addSubview(speedIndicatorLabel)
+        speedIndicatorLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            speedIndicatorLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            speedIndicatorLabel.centerXAnchor.constraint(equalTo: controlsContainer.centerXAnchor),
+            speedIndicatorLabel.widthAnchor.constraint(equalToConstant: 100),
+            speedIndicatorLabel.heightAnchor.constraint(equalToConstant: 40)
         ])
         
         // Bottom controls
@@ -277,50 +334,56 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate, UIGestureR
     }
     
     private func setupBottomControlButtons() {
-        let buttonsStackView = UIStackView()
-        buttonsStackView.axis = .horizontal
-        buttonsStackView.spacing = 12
-        buttonsStackView.alignment = .center
-        buttonsStackView.distribution = .fillEqually
-        bottomControlsView.addSubview(buttonsStackView)
-        buttonsStackView.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            buttonsStackView.leadingAnchor.constraint(equalTo: bottomControlsView.leadingAnchor, constant: 12),
-            buttonsStackView.trailingAnchor.constraint(equalTo: bottomControlsView.trailingAnchor, constant: -12),
-            buttonsStackView.topAnchor.constraint(equalTo: timeLabel.bottomAnchor, constant: 12),
-            buttonsStackView.bottomAnchor.constraint(equalTo: bottomControlsView.bottomAnchor, constant: -12),
-            buttonsStackView.heightAnchor.constraint(equalToConstant: 40)
-        ])
-        
-        // Audio track button
+        // Audio track button - positioned at bottom-right
         let audioButton = UIButton(type: .system)
-        audioButton.setImage(UIImage(systemName: "speaker.wave.2"), for: .normal)
+        let audioCfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        audioButton.setImage(UIImage(systemName: "speaker.wave.2", withConfiguration: audioCfg), for: .normal)
         audioButton.tintColor = .white
         audioButton.showsMenuAsPrimaryAction = true
         audioButton.menu = createAudioMenu()
-        audioButton.tag = 997  // Tag for finding button later
-        buttonsStackView.addArrangedSubview(audioButton)
+        audioButton.tag = 997
+        controlsContainer.addSubview(audioButton)
+        audioButton.translatesAutoresizingMaskIntoConstraints = false
         
-        // Subtitle button
-        let subtitleButton = UIButton(type: .system)
-        subtitleButton.setImage(UIImage(systemName: "captions.bubble"), for: .normal)
-        subtitleButton.tintColor = .white
-        subtitleButton.showsMenuAsPrimaryAction = true
-        subtitleButton.menu = createSubtitleMenu()
-        subtitleButton.tag = 998  // Tag for finding button later
-        buttonsStackView.addArrangedSubview(subtitleButton)
-        
-        // Speed button
+        // Speed button - next to audio button
         let speedButton = UIButton(type: .system)
-        let cfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
-        let img = UIImage(systemName: "hare.fill", withConfiguration: cfg)
-        speedButton.setImage(img, for: .normal)
+        let speedCfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        speedButton.setImage(UIImage(systemName: "hare.fill", withConfiguration: speedCfg), for: .normal)
         speedButton.tintColor = .white
         speedButton.showsMenuAsPrimaryAction = true
         speedButton.menu = createSpeedMenu()
-        speedButton.tag = 999  // Tag for finding button later
-        buttonsStackView.addArrangedSubview(speedButton)
+        speedButton.tag = 999
+        controlsContainer.addSubview(speedButton)
+        speedButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Subtitle button - rightmost
+        let subtitleButton = UIButton(type: .system)
+        let subCfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        subtitleButton.setImage(UIImage(systemName: "captions.bubble", withConfiguration: subCfg), for: .normal)
+        subtitleButton.tintColor = .white
+        subtitleButton.showsMenuAsPrimaryAction = true
+        subtitleButton.menu = createSubtitleMenu()
+        subtitleButton.tag = 998
+        controlsContainer.addSubview(subtitleButton)
+        subtitleButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Layout: subtitle (right), speed (middle), audio (left)
+        NSLayoutConstraint.activate([
+            subtitleButton.trailingAnchor.constraint(equalTo: bottomControlsView.trailingAnchor, constant: -12),
+            subtitleButton.bottomAnchor.constraint(equalTo: progressBar.topAnchor, constant: -8),
+            subtitleButton.widthAnchor.constraint(equalToConstant: 32),
+            subtitleButton.heightAnchor.constraint(equalToConstant: 32),
+            
+            speedButton.trailingAnchor.constraint(equalTo: subtitleButton.leadingAnchor, constant: -8),
+            speedButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
+            speedButton.widthAnchor.constraint(equalToConstant: 32),
+            speedButton.heightAnchor.constraint(equalToConstant: 32),
+            
+            audioButton.trailingAnchor.constraint(equalTo: speedButton.leadingAnchor, constant: -8),
+            audioButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
+            audioButton.widthAnchor.constraint(equalToConstant: 32),
+            audioButton.heightAnchor.constraint(equalToConstant: 32)
+        ])
     }
     
     private func setupGestureRecognizers() {
@@ -396,6 +459,9 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate, UIGestureR
         
         UIView.animate(withDuration: 0.3) {
             self.centerPlayButton.alpha = shouldShow ? 1.0 : 0.0
+            // Show skip buttons when controls are visible (not when just paused)
+            self.skipBackwardButton.alpha = (showControls && !isLoading) ? 1.0 : 0.0
+            self.skipForwardButton.alpha = (showControls && !isLoading) ? 1.0 : 0.0
         }
     }
     
@@ -415,16 +481,28 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate, UIGestureR
         if gesture.state == .began {
             vlcRenderer.setSpeed(2.0)
             playerState?.currentPlaybackSpeed = 2.0
+            showSpeedIndicator(speed: 2.0)
             Logger.shared.log("[VLCPlayer] Long press: 2x speed", type: "Stream")
         } else if gesture.state == .ended {
             vlcRenderer.setSpeed(1.0)
             playerState?.currentPlaybackSpeed = 1.0
+            showSpeedIndicator(speed: 1.0)
             Logger.shared.log("[VLCPlayer] Long press released: 1x speed", type: "Stream")
         }
     }
     
     @objc private func togglePlayPause() {
         vlcRenderer.togglePlayPause()
+        playerState?.scheduleHideControls()
+    }
+    
+    @objc private func skipBackward() {
+        vlcRenderer.seek(by: -10)
+        playerState?.scheduleHideControls()
+    }
+    
+    @objc private func skipForward() {
+        vlcRenderer.seek(by: 10)
         playerState?.scheduleHideControls()
     }
     
@@ -543,9 +621,26 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate, UIGestureR
                 if let speedButton = self?.view.viewWithTag(999) as? UIButton {
                     speedButton.menu = self?.createSpeedMenu()
                 }
+                // Show speed indicator
+                self?.showSpeedIndicator(speed: speed)
             }
         }
         return UIMenu(title: "Playback Speed", children: actions)
+    }
+    
+    private func showSpeedIndicator(speed: Double) {
+        speedIndicatorLabel.text = String(format: "%.2gx", speed)
+        
+        UIView.animate(withDuration: 0.2) {
+            self.speedIndicatorLabel.alpha = 1.0
+        }
+        
+        // Auto-hide after 2 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            UIView.animate(withDuration: 0.3) {
+                self.speedIndicatorLabel.alpha = 0.0
+            }
+        }
     }
     
     func load(url: URL, headers: [String: String]?, preset: PlayerPreset?) {
@@ -591,8 +686,9 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate, UIGestureR
     func renderer(_ renderer: VLCRenderer, didChangePause isPaused: Bool) {
         DispatchQueue.main.async {
             self.playerState?.isPlaying = !isPaused
+            let cfg = UIImage.SymbolConfiguration(pointSize: 32, weight: .semibold)
             let imageName = isPaused ? "play.fill" : "pause.fill"
-            self.centerPlayButton.setImage(UIImage(systemName: imageName), for: .normal)
+            self.centerPlayButton.setImage(UIImage(systemName: imageName, withConfiguration: cfg), for: .normal)
             self.updateCenterPlayButtonVisibility()
         }
     }
@@ -627,8 +723,20 @@ class VLCPlayerViewController: UIViewController, VLCRendererDelegate, UIGestureR
     func renderer(_ renderer: VLCRenderer, subtitleTrackDidChange trackId: Int) {}
     
     func rendererDidChangeTracks(_ renderer: VLCRenderer) {
-        playerState?.audioTracks = renderer.getAudioTracksDetailed()
-        playerState?.subtitleTracks = renderer.getSubtitleTracksDetailed()
+        DispatchQueue.main.async {
+            self.playerState?.audioTracks = renderer.getAudioTracksDetailed()
+            self.playerState?.subtitleTracks = renderer.getSubtitleTracksDetailed()
+            
+            // Update menus when tracks change
+            if let audioButton = self.view.viewWithTag(997) as? UIButton {
+                audioButton.menu = self.createAudioMenu()
+            }
+            if let subtitleButton = self.view.viewWithTag(998) as? UIButton {
+                subtitleButton.menu = self.createSubtitleMenu()
+            }
+            
+            Logger.shared.log("[VLCPlayer] Tracks updated - Audio: \\(renderer.getAudioTracksDetailed().count), Subtitles: \\(renderer.getSubtitleTracksDetailed().count)", type: "Stream")
+        }
     }
     
     // MARK: - Progress Tracking
