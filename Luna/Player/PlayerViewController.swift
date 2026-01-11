@@ -341,6 +341,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var userSelectedAudioTrack = false
     private var userSelectedSubtitleTrack = false
     
+    // Debounce timers for menu updates to avoid excessive rebuilds
+    private var audioMenuDebounceTimer: Timer?
+    private var subtitleMenuDebounceTimer: Timer?
+    
     // MARK: - Renderer Wrapper Methods
     // These methods abstract away differences between MPVSoftwareRenderer and VLCRenderer
     
@@ -735,6 +739,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     
     deinit {
         isClosing = true
+        audioMenuDebounceTimer?.invalidate()
+        subtitleMenuDebounceTimer?.invalidate()
         if let mpv = mpvRenderer {
             mpv.delegate = nil
         } else if let vlc = vlcRenderer {
@@ -1429,7 +1435,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             ) { [weak self] _ in
                 self?.userSelectedAudioTrack = true
                 self?.rendererSetAudioTrack(id: id)
-                self?.updateAudioTracksMenu()
+                // Debounce menu update to avoid lag - only update after 0.3s of no selection changes
+                self?.audioMenuDebounceTimer?.invalidate()
+                self?.audioMenuDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+                    DispatchQueue.main.async { [weak self] in
+                        self?.updateAudioTracksMenu()
+                    }
+                }
             }
         }
 
@@ -1438,6 +1450,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if isAnimeContent() && !userSelectedAudioTrack {
             let preferredLang = Settings.shared.preferredAnimeAudioLanguage.lowercased()
             let preferredLangName = languageName(for: preferredLang)
+            
+            Logger.shared.log("PlayerViewController: Auto anime audio - isAnime=true, preferredLang=\(preferredLang), preferredLangName=\(preferredLangName), detailedTracks=\(detailedTracks.count)", type: "Player")
 
             if let matching = detailedTracks.first(where: {
                 let langCode = $0.2.lowercased()
@@ -1448,9 +1462,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 if !preferredLangName.isEmpty && title.contains(preferredLangName.lowercased()) { return true }
                 return false
             }) {
+                Logger.shared.log("PlayerViewController: Auto-selected anime audio track: \(matching.1) (ID: \(matching.0))", type: "Player")
                 userSelectedAudioTrack = true
                 rendererSetAudioTrack(id: matching.0)
                 didAutoSelectPreferred = true
+            } else {
+                Logger.shared.log("PlayerViewController: No matching anime audio track found for lang=\(preferredLang)", type: "Player")
             }
         }
         // Per requirement: do not auto-select anime language without an AniList mapping
@@ -1550,7 +1567,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                     self?.userSelectedSubtitleTrack = true
                     self?.rendererSetSubtitleTrack(id: id)
                     self?.updateSubtitleButtonAppearance()
-                    self?.updateSubtitleTracksMenu()
+                    // Debounce menu update to avoid lag - only update after 0.3s of no selection changes
+                    self?.subtitleMenuDebounceTimer?.invalidate()
+                    self?.subtitleMenuDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+                        DispatchQueue.main.async { [weak self] in
+                            self?.updateSubtitleTracksMenu()
+                        }
+                    }
                 }
             }
             trackActions.append(contentsOf: subtitleActions)

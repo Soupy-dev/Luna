@@ -243,7 +243,7 @@ final class VLCRenderer: NSObject {
             media.addOption(":http-reconnect=true")
 
             // Reduce buffering to keep CPU/thermal lower while still smoothing HLS
-            media.addOption(":network-caching=30000")  // ~30s
+            media.addOption(":network-caching=20000")  // ~20s
 
             // Subtitle performance: spread libass work across threads without altering glyph styling
             media.addOption(":subsdec-threads=4")
@@ -391,16 +391,16 @@ final class VLCRenderer: NSObject {
     }
     
     func setAudioTrack(id: Int) {
-        eventQueue.async { [weak self] in
-            guard let self, let player = self.mediaPlayer else { return }
-            
-            // VLC audio track IDs must match exact values from audioTrackIndexes array
-            Logger.shared.log("VLCRenderer: Setting audio track to ID \(id)", type: "Player")
-            player.currentAudioTrackIndex = Int32(id)
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.delegate?.rendererDidChangeTracks(self)
-            }
+        guard let player = mediaPlayer else { return }
+        
+        // Set track immediately - VLC property setters are thread-safe
+        Logger.shared.log("VLCRenderer: Setting audio track to ID \(id)", type: "Player")
+        player.currentAudioTrackIndex = Int32(id)
+        
+        // Notify delegates on main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.rendererDidChangeTracks(self)
         }
     }
     
@@ -429,24 +429,24 @@ final class VLCRenderer: NSObject {
     }
     
     func setSubtitleTrack(id: Int) {
-        eventQueue.async { [weak self] in
-            guard let self, let player = self.mediaPlayer else { return }
-            
-            player.currentVideoSubTitleIndex = Int32(id)
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.delegate?.renderer(self, subtitleTrackDidChange: id)
-                self.delegate?.rendererDidChangeTracks(self)
-            }
+        guard let player = mediaPlayer else { return }
+        
+        // Set track immediately - VLC property setters are thread-safe
+        Logger.shared.log("VLCRenderer: Setting subtitle track to ID \(id)", type: "Player")
+        player.currentVideoSubTitleIndex = Int32(id)
+        
+        // Notify delegates on main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.renderer(self, subtitleTrackDidChange: id)
+            self.delegate?.rendererDidChangeTracks(self)
         }
     }
     
     func disableSubtitles() {
-        eventQueue.async { [weak self] in
-            guard let self, let player = self.mediaPlayer else { return }
-            // Disable subtitles by setting track index to -1
-            player.currentVideoSubTitleIndex = -1
-        }
+        guard let player = mediaPlayer else { return }
+        // Disable subtitles immediately by setting track index to -1
+        player.currentVideoSubTitleIndex = -1
     }
     
     func refreshSubtitleOverlay() {
