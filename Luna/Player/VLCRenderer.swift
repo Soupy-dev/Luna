@@ -239,10 +239,18 @@ final class VLCRenderer: NSObject {
                 Logger.shared.log("[VLCRenderer.load] Applied \(headerCount) additional headers plus User-Agent/Referer/Cookie", type: "Info")
             }
 
-            // 5-minute rolling buffer: VLC starts playback quickly, then maintains buffer for instant seeking
-            media.addOption(":network-caching=300000")  // 300 seconds (5 minutes)
             // Keep reconnect enabled for flaky hosts
             media.addOption(":http-reconnect=true")
+
+            // Reduce buffering to keep CPU/thermal lower while still smoothing HLS
+            media.addOption(":network-caching=30000")  // ~30s
+
+            // Subtitle performance: spread libass work across threads without altering glyph styling
+            media.addOption(":subsdec-threads=4")
+
+            // Playback at high speeds with subtitles: prefer dropping late frames over thermal spikes
+            media.addOption(":drop-late-frames")
+            media.addOption(":skip-frames")
 
             self.currentMedia = media
             

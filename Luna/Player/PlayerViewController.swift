@@ -1040,6 +1040,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         rightDoubleTapGesture = rightDoubleTap
         videoContainer.addGestureRecognizer(rightDoubleTap)
         
+        if let tap = containerTapGesture {
+            tap.require(toFail: leftDoubleTap)
+            tap.require(toFail: rightDoubleTap)
+        }
+        
         #if !os(tvOS)
         if isTwoFingerTapEnabled {
             let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(twoFingerTapped))
@@ -1056,7 +1061,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard isLeftSide else { return }
         rendererSeek(by: -10)
         animateButtonTap(skipBackwardButton)
-        showControlsTemporarily()
     }
 
     @objc private func rightSideDoubleTapped(_ gesture: UITapGestureRecognizer) {
@@ -1065,7 +1069,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard isRightSide else { return }
         rendererSeek(by: 10)
         animateButtonTap(skipForwardButton)
-        showControlsTemporarily()
     }
 
     @objc private func twoFingerTapped(_ gesture: UITapGestureRecognizer) {
@@ -1765,7 +1768,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         progressHostingController = host
     }
     
-    private func updatePlayPauseButton(isPaused: Bool) {
+    private func updatePlayPauseButton(isPaused: Bool, shouldShowControls: Bool = true) {
         DispatchQueue.main.async {
             let config = UIImage.SymbolConfiguration(pointSize: 32, weight: .semibold)
             let name = isPaused ? "play.fill" : "pause.fill"
@@ -1781,7 +1784,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 }
             }
             
-            self.showControlsTemporarily()
+            if shouldShowControls {
+                self.showControlsTemporarily()
+            }
         }
     }
     
@@ -2113,7 +2118,7 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
                 self.loadingIndicator.stopAnimating()
                 self.loadingIndicator.alpha = 0.0
                 self.centerPlayPauseButton.isHidden = false
-                self.updatePlayPauseButton(isPaused: self.rendererIsPausedState())
+                self.updatePlayPauseButton(isPaused: self.rendererIsPausedState(), shouldShowControls: false)
             }
         }
     }
@@ -2204,7 +2209,7 @@ extension PlayerViewController: VLCRendererDelegate {
                 self.loadingIndicator.stopAnimating()
                 self.loadingIndicator.alpha = 0.0
                 self.centerPlayPauseButton.isHidden = false
-                self.updatePlayPauseButton(isPaused: self.rendererIsPausedState())
+                self.updatePlayPauseButton(isPaused: self.rendererIsPausedState(), shouldShowControls: false)
             }
         }
     }

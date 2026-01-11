@@ -749,20 +749,23 @@ final class TrackerManager: NSObject, ObservableObject {
 
     private func getTraktIdFromTmdbId(_ tmdbId: Int) async -> Int? {
         do {
-            let url = URL(string: "https://api.trakt.tv/search/tmdb?type=show&id=\(tmdbId)")!
+            let url = URL(string: "https://api.trakt.tv/search/tmdb/\(tmdbId)?type=show")!
             var request = URLRequest(url: url)
             request.setValue(traktClientId, forHTTPHeaderField: "trakt-api-key")
             request.setValue("2", forHTTPHeaderField: "trakt-api-version")
 
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let status = (response as? HTTPURLResponse)?.statusCode, status != 200 {
+                let bodyPreview = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+                Logger.shared.log("Trakt tmdb lookup failed (HTTP \(status)): \(bodyPreview)", type: "Tracker")
+                return nil
+            }
 
             struct SearchResult: Codable {
                 let show: ShowData?
                 struct ShowData: Codable {
                     let ids: IDData
-                    struct IDData: Codable {
-                        let trakt: Int
-                    }
+                    struct IDData: Codable { let trakt: Int }
                 }
             }
 
@@ -781,12 +784,87 @@ final class TrackerManager: NSObject, ObservableObject {
     // MARK: - Helper Methods
 
     private func getAniListMediaId(tmdbId: Int) async -> Int? {
-        // Check cache first
-        var cachedId: Int? = nil
-        anilistIdCacheQueue.sync {
-            cachedId = anilistIdCache[tmdbId]
+        // Return cached mapping when available
+        if let cachedId = cachedAniListId(for: tmdbId) {
+            return cachedId
         }
-        return cachedId
+
+        // Fetch TMDB metadata to derive candidate titles for AniList search
+        var candidateTitles: [String] = []
+        var firstAirYear: Int?
+
+        if let detail = try? await TMDBService.shared.getTVShowDetails(id: tmdbId) {
+            candidateTitles.append(detail.name)
+            if let original = detail.originalName { candidateTitles.append(original) }
+
+            if let firstAirDate = detail.firstAirDate, let year = Int(firstAirDate.prefix(4)) {
+                firstAirYear = year
+            }
+
+            if let alt = try? await TMDBService.shared.getTVShowAlternativeTitles(id: tmdbId) {
+                candidateTitles.append(contentsOf: alt.results.map { $0.title })
+            }
+        }
+
+        // Remove empties and duplicates while preserving order
+        var seen = Set<String>()
+        let titles = candidateTitles.compactMap { title -> String? in
+            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !seen.contains(trimmed.lowercased()) else { return nil }
+            seen.insert(trimmed.lowercased())
+            return trimmed
+        }
+
+        for title in titles {
+            if let id = await searchAniListId(byTitle: title, seasonYear: firstAirYear) {
+                cacheAniListId(tmdbId: tmdbId, anilistId: id)
+                Logger.shared.log("Resolved AniList ID \(id) for TMDB \(tmdbId) using title '" + title + "'", type: "Tracker")
+                return id
+            }
+        }
+
+        Logger.shared.log("AniList lookup failed for TMDB ID \(tmdbId) after trying \(titles.count) title(s)", type: "Tracker")
+        return nil
+    }
+
+    private func searchAniListId(byTitle title: String, seasonYear: Int?) async -> Int? {
+        let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
+        let seasonFilter = seasonYear.map { ", seasonYear: \($0)" } ?? ""
+
+        let query = """
+        query {
+            Page(perPage: 1) {
+                media(search: \"\(escapedTitle)\", type: ANIME\(seasonFilter)) {
+                    id
+                }
+            }
+        }
+        """
+
+        struct Response: Codable {
+            let data: DataWrapper
+            struct DataWrapper: Codable {
+                let Page: PageData
+                struct PageData: Codable { let media: [Media] }
+                struct Media: Codable { let id: Int }
+            }
+        }
+
+        do {
+            var request = URLRequest(url: URL(string: "https://graphql.anilist.co")!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["query": query])
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+            return decoded.data.Page.media.first?.id
+        } catch {
+            Logger.shared.log("AniList title search failed for \(title): \(error.localizedDescription)", type: "Tracker")
+            return nil
+        }
     }
 
     private func getAniListMangaId(title: String) async -> Int? {
