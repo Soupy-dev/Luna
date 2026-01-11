@@ -1092,7 +1092,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     @objc private func twoFingerTapped(_ gesture: UITapGestureRecognizer) {
-        centerPlayPauseTapped()
+        // Two-finger tap: toggle play/pause without showing UI
+        if rendererIsPausedState() {
+            rendererPlay()
+            updatePlayPauseButton(isPaused: false, shouldShowControls: false)
+        } else {
+            rendererPausePlayback()
+            updatePlayPauseButton(isPaused: true, shouldShowControls: false)
+        }
     }
 
     private func setupBrightnessControls() {
@@ -1401,14 +1408,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             return
         }
         
-        // Tracks not ready yet for VLC - retry shortly
-        if vlcRenderer != nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                self?.updateAudioTracksMenuWhenReady()
-            }
-        } else {
-            // Not VLC - just update menu as-is
-            updateAudioTracksMenu()
+        // Tracks not ready yet - retry shortly (works for both VLC and MPV)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.updateAudioTracksMenuWhenReady()
         }
     }
     
@@ -2168,7 +2170,7 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
             guard let self else { return }
             
             // Update audio and subtitle tracks now that the video is ready
-            self.updateAudioTracksMenu()
+            self.updateAudioTracksMenuWhenReady()
             self.updateSubtitleTracksMenu()
             
             if let seekTime = self.pendingSeekTime {
