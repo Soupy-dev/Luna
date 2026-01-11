@@ -475,6 +475,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
     }
     
+    private func rendererGetCurrentAudioTrackId() -> Int {
+        if let vlc = vlcRenderer {
+            return vlc.getCurrentAudioTrackId()
+        }
+        return -1
+    }
+    
     private func rendererGetSubtitleTracks() -> [(Int, String)] {
         if let vlc = vlcRenderer {
             return vlc.getSubtitleTracks()
@@ -486,6 +493,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if let vlc = vlcRenderer {
             vlc.setSubtitleTrack(id: id)
         }
+    }
+    
+    private func rendererGetCurrentSubtitleTrackId() -> Int {
+        if let vlc = vlcRenderer {
+            return vlc.getCurrentSubtitleTrackId()
+        }
+        return -1
     }
     
     private func rendererDisableSubtitles() {
@@ -1407,10 +1421,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             return
         }
 
+        let currentAudioTrackId = rendererGetCurrentAudioTrackId()
         trackActions = tracks.map { (id, name) in
             UIAction(
                 title: name,
-                state: .off
+                state: id == currentAudioTrackId ? .on : .off
             ) { [weak self] _ in
                 self?.userSelectedAudioTrack = true
                 self?.rendererSetAudioTrack(id: id)
@@ -1524,11 +1539,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             let noTracksAction = UIAction(title: "No subtitles in stream", state: .off) { _ in }
             trackActions.append(noTracksAction)
         } else {
+            let currentSubtitleTrackId = rendererGetCurrentSubtitleTrackId()
             let subtitleActions = tracks.map { (id, name) in
                 UIAction(
                     title: name,
                     image: UIImage(systemName: "captions.bubble"),
-                    state: .off
+                    state: id == currentSubtitleTrackId ? .on : .off
                 ) { [weak self] _ in
                     self?.subtitleModel.isVisible = true
                     self?.userSelectedSubtitleTrack = true

@@ -394,6 +394,8 @@ final class VLCRenderer: NSObject {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             
+            // VLC audio track IDs must match exact values from audioTrackIndexes array
+            Logger.shared.log("VLCRenderer: Setting audio track to ID \(id)", type: "Player")
             player.currentAudioTrackIndex = Int32(id)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
