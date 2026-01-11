@@ -787,6 +787,10 @@ struct ContinueWatchingCard: View {
                             token: nil
                         )
                         
+                        // Register AniList season IDs with tracker for accurate syncing
+                        let seasonMappings = aniDetails.seasons.map { (seasonNumber: $0.seasonNumber, anilistId: $0.anilistId) }
+                        TrackerManager.shared.registerAniListAnimeData(tmdbId: item.tmdbId, seasons: seasonMappings)
+                        
                         if let animeSeason = aniDetails.seasons.first(where: { $0.seasonNumber == seasonNumber }) {
                             await MainActor.run {
                                 self.animeSeasonTitle = animeSeason.title

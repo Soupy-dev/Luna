@@ -462,6 +462,7 @@ final class AniListService {
             // Use AniList poster for proper season structure (don't mix with TMDB seasons)
             seasons.append(AniListSeasonWithPoster(
                 seasonNumber: seasonIndex,
+                anilistId: currentAnime.id,
                 title: seasonTitle,
                 episodes: seasonEpisodes,
                 posterUrl: posterUrl
@@ -1071,6 +1072,7 @@ struct AniListAiringScheduleEntry: Identifiable {
 
 struct AniListSeasonWithPoster {
     let seasonNumber: Int
+    let anilistId: Int             // AniList anime ID for this specific season
     let title: String              // Full AniList title for this season (e.g., "SPY×FAMILY Season 2")
     let episodes: [AniListEpisode]
     let posterUrl: String?

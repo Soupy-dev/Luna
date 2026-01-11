@@ -28,6 +28,10 @@ final class TrackerManager: NSObject, ObservableObject {
     // Cache for TMDB ID -> AniList ID mappings to support anime syncing
     private var anilistIdCache: [Int: Int] = [:]
     private let anilistIdCacheQueue = DispatchQueue(label: "com.luna.anilistIdCache")
+    
+    // Cache for (TMDB ID, season number) -> AniList ID for anime with multiple AniList entries per season
+    private var anilistSeasonIdCache: [String: Int] = [:] // key format: "tmdbId_seasonNumber"
+    private let anilistSeasonIdCacheQueue = DispatchQueue(label: "com.luna.anilistSeasonIdCache")
 
     // OAuth config (redirects can be overridden via Info.plist keys AniListRedirectUri / TraktRedirectUri)
     private let anilistClientId = "33908"
@@ -504,6 +508,31 @@ final class TrackerManager: NSObject, ObservableObject {
         }
         return id
     }
+    
+    // Season-specific AniList ID caching for anime with multiple entries
+    func cacheAniListSeasonId(tmdbId: Int, seasonNumber: Int, anilistId: Int) {
+        let key = "\(tmdbId)_\(seasonNumber)"
+        anilistSeasonIdCacheQueue.sync {
+            anilistSeasonIdCache[key] = anilistId
+        }
+    }
+    
+    func cachedAniListSeasonId(tmdbId: Int, seasonNumber: Int) -> Int? {
+        let key = "\(tmdbId)_\(seasonNumber)"
+        var id: Int? = nil
+        anilistSeasonIdCacheQueue.sync {
+            id = anilistSeasonIdCache[key]
+        }
+        return id
+    }
+    
+    // Register AniList anime data when a show page loads (for accurate season-based syncing)
+    func registerAniListAnimeData(tmdbId: Int, seasons: [(seasonNumber: Int, anilistId: Int)]) {
+        for season in seasons {
+            cacheAniListSeasonId(tmdbId: tmdbId, seasonNumber: season.seasonNumber, anilistId: season.anilistId)
+        }
+        Logger.shared.log("Registered \(seasons.count) AniList season mappings for TMDB \(tmdbId)", type: "Tracker")
+    }
 
     func syncMangaProgress(title: String, chapterNumber: Int) {
         guard trackerState.syncEnabled else {
@@ -597,8 +626,16 @@ final class TrackerManager: NSObject, ObservableObject {
     }
 
     private func syncToAniList(account: TrackerAccount, showId: Int, seasonNumber: Int, episodeNumber: Int, progress: Double) async {
-        guard let anilistId = await getAniListMediaId(tmdbId: showId) else {
-            Logger.shared.log("Could not find AniList ID for TMDB ID \(showId)", type: "Tracker")
+        // First check if we have a season-specific AniList ID (for anime with multiple AniList entries per season)
+        var anilistId: Int? = cachedAniListSeasonId(tmdbId: showId, seasonNumber: seasonNumber)
+        
+        // Fall back to show-level lookup if no season-specific mapping exists
+        if anilistId == nil {
+            anilistId = await getAniListMediaId(tmdbId: showId)
+        }
+        
+        guard let anilistId = anilistId else {
+            Logger.shared.log("Could not find AniList ID for TMDB ID \(showId) S\(seasonNumber)", type: "Tracker")
             return
         }
 
@@ -707,11 +744,18 @@ final class TrackerManager: NSObject, ObservableObject {
 
             request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if (response as? HTTPURLResponse)?.statusCode == 201 {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            
+            if statusCode == 201 {
+                // Log the response to see what was actually added
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    Logger.shared.log("Trakt sync response: \(json)", type: "Tracker")
+                }
                 Logger.shared.log("Synced to Trakt: S\(seasonNumber)E\(episodeNumber) (watched)", type: "Tracker")
             } else {
-                Logger.shared.log("Trakt sync returned status \((response as? HTTPURLResponse)?.statusCode ?? -1)", type: "Tracker")
+                let bodyPreview = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+                Logger.shared.log("Trakt sync returned status \(statusCode): \(bodyPreview)", type: "Tracker")
             }
         } catch {
             Logger.shared.log("Failed to sync to Trakt: \(error.localizedDescription)", type: "Error")

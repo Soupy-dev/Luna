@@ -488,6 +488,12 @@ struct MediaDetailView: View {
                                 token: nil
                             )
                             Logger.shared.log("MediaDetailView: Fetched AniList hybrid data for \(detail.name) with \(animeData?.seasons.count ?? 0) seasons", type: "AniList")
+                            
+                            // Register AniList season IDs with tracker for accurate syncing
+                            if let animeData = animeData {
+                                let seasonMappings = animeData.seasons.map { (seasonNumber: $0.seasonNumber, anilistId: $0.anilistId) }
+                                TrackerManager.shared.registerAniListAnimeData(tmdbId: detail.id, seasons: seasonMappings)
+                            }
                         } catch {
                             Logger.shared.log("MediaDetailView: Failed to fetch AniList data: \(error.localizedDescription)", type: "AniList")
                         }
