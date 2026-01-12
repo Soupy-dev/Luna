@@ -670,7 +670,8 @@ struct ContinueWatchingCard: View {
                         ),
                         tmdbId: item.tmdbId,
                         animeSeasonTitle: isAnime ? animeSeasonTitle : nil,
-                        posterPath: posterURL
+                        posterPath: posterURL,
+                        isFromContinueWatching: true
                     )
                 } else {
                     VStack(spacing: 12) {
