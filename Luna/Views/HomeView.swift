@@ -649,28 +649,39 @@ struct ContinueWatchingCard: View {
             }
         }
         .sheet(isPresented: $showingServices) {
-            if isLoaded {
-                ModulesSearchResultsSheet(
-                    mediaTitle: isAnime ? (animeSeasonTitle ?? title) : title,
-                    seasonTitleOverride: isAnime ? animeSeasonTitle : nil,
-                    originalTitle: nil,
-                    isMovie: item.isMovie,
-                    selectedEpisode: item.isMovie ? nil : TMDBEpisode(
-                        id: 0,
-                        name: "",
-                        overview: nil,
-                        stillPath: nil,
-                        episodeNumber: item.episodeNumber ?? 1,
-                        seasonNumber: item.seasonNumber ?? 1,
-                        airDate: nil,
-                        runtime: nil,
-                        voteAverage: 0,
-                        voteCount: 0
-                    ),
-                    tmdbId: item.tmdbId,
-                    animeSeasonTitle: isAnime ? animeSeasonTitle : nil,
-                    posterPath: posterURL
-                )
+            ZStack {
+                if isLoaded {
+                    ModulesSearchResultsSheet(
+                        mediaTitle: isAnime ? (animeSeasonTitle ?? title) : title,
+                        seasonTitleOverride: isAnime ? animeSeasonTitle : nil,
+                        originalTitle: nil,
+                        isMovie: item.isMovie,
+                        selectedEpisode: item.isMovie ? nil : TMDBEpisode(
+                            id: 0,
+                            name: "",
+                            overview: nil,
+                            stillPath: nil,
+                            episodeNumber: item.episodeNumber ?? 1,
+                            seasonNumber: item.seasonNumber ?? 1,
+                            airDate: nil,
+                            runtime: nil,
+                            voteAverage: 0,
+                            voteCount: 0
+                        ),
+                        tmdbId: item.tmdbId,
+                        animeSeasonTitle: isAnime ? animeSeasonTitle : nil,
+                        posterPath: posterURL
+                    )
+                } else {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading services...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemBackground))
+                }
             }
         }
         .sheet(isPresented: $showingDetails) {
@@ -717,25 +728,21 @@ struct ContinueWatchingCard: View {
     }
     
     private func loadMediaDetails() async {
-        // Only load if we don't have title or poster (or title is still the placeholder)
-        guard title == "Loading..." || posterURL == nil else {
-            isLoaded = true
-            return
+        // Always attempt to load full media details when requested
+        // This ensures anime season titles and posters are fetched
+        defer {
+            await MainActor.run {
+                self.isLoaded = true
+            }
         }
         
         do {
             if item.isMovie {
-                async let detailsTask = tmdbService.getMovieDetails(id: item.tmdbId)
-                let details = try await detailsTask
+                let details = try await tmdbService.getMovieDetails(id: item.tmdbId)
                 
                 await MainActor.run {
-                    if self.title.isEmpty {
-                        self.title = details.title
-                    }
-                    if self.posterURL == nil {
-                        self.posterURL = details.fullPosterURL
-                    }
-                    self.isLoaded = true
+                    self.title = details.title
+                    self.posterURL = details.fullPosterURL
                     
                     // Update progress manager with poster URL
                     if let posterURL = details.fullPosterURL {
@@ -743,8 +750,7 @@ struct ContinueWatchingCard: View {
                     }
                 }
             } else {
-                async let detailsTask = tmdbService.getTVShowDetails(id: item.tmdbId)
-                let details = try await detailsTask
+                let details = try await tmdbService.getTVShowDetails(id: item.tmdbId)
                 
                 // Check if this is anime
                 let animeFlag = detectAnime(from: details)
@@ -762,15 +768,9 @@ struct ContinueWatchingCard: View {
                 }
                 
                 await MainActor.run {
-                    if self.title.isEmpty {
-                        self.title = details.name
-                    }
-                    if self.posterURL == nil {
-                        // Use season poster if available, otherwise use show poster
-                        self.posterURL = seasonPosterURL ?? details.fullPosterURL
-                    }
+                    self.title = details.name
+                    self.posterURL = seasonPosterURL ?? details.fullPosterURL
                     self.isAnime = animeFlag
-                    self.isLoaded = true
                     
                     // Update progress manager with season poster if available
                     ProgressManager.shared.updateShowMetadata(showId: item.tmdbId, title: details.name, posterURL: seasonPosterURL ?? details.fullPosterURL)
@@ -808,7 +808,7 @@ struct ContinueWatchingCard: View {
         } catch {
             await MainActor.run {
                 self.title = item.isMovie ? "Movie" : "TV Show"
-                self.isLoaded = true
+                Logger.shared.log("Failed to load media details for \(item.tmdbId): \(error.localizedDescription)", type: "Error")
             }
         }
     }

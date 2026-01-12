@@ -1273,52 +1273,80 @@ struct ModulesSearchResultsSheet: View {
             if inAppPlayer == "mpv" {
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
+                
+                guard let preset = preset else {
+                    Logger.shared.log("No player preset available", type: "Error")
+                    viewModel.streamError = "Player configuration error. Please try again."
+                    viewModel.showingStreamError = true
+                    return
+                }
+                
+                // Prepare mediaInfo before creating player
+                var playerMediaInfo: MediaInfo? = nil
+                let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                if isMovie {
+                    playerMediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
+                } else if let episode = selectedEpisode {
+                    playerMediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
+                }
+                
                 let pvc = PlayerViewController(
                     url: streamURL,
-                    preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
+                    preset: preset,
                     headers: finalHeaders,
-                    subtitles: subtitleArray
+                    subtitles: subtitleArray,
+                    mediaInfo: playerMediaInfo
                 )
-                if isMovie {
-                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
-                    pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
-                } else if let episode = selectedEpisode {
-                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
-                    pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
-                }
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.topmostViewController().present(pvc, animated: true, completion: nil)
+                   let rootVC = windowScene.windows.first?.rootViewController,
+                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
+                    topmostVC.present(pvc, animated: true, completion: nil)
                 } else {
                     Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
+                    viewModel.streamError = "Failed to open player. Please try again."
+                    viewModel.showingStreamError = true
                 }
                 return
             } else if inAppPlayer == "VLC" {
                 // VLC uses same PlayerViewController as MPV
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
+                
+                guard let preset = preset else {
+                    Logger.shared.log("No player preset available", type: "Error")
+                    viewModel.streamError = "Player configuration error. Please try again."
+                    viewModel.showingStreamError = true
+                    return
+                }
+                
+                // Prepare mediaInfo before creating player
+                var playerMediaInfo: MediaInfo? = nil
+                let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                if isMovie {
+                    playerMediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
+                } else if let episode = selectedEpisode {
+                    playerMediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
+                }
+                
                 let pvc = PlayerViewController(
                     url: streamURL,
-                    preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
+                    preset: preset,
                     headers: finalHeaders,
-                    subtitles: subtitleArray
+                    subtitles: subtitleArray,
+                    mediaInfo: playerMediaInfo
                 )
-                if isMovie {
-                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
-                    pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
-                } else if let episode = selectedEpisode {
-                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
-                    pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
-                }
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.topmostViewController().present(pvc, animated: true, completion: nil)
+                   let rootVC = windowScene.windows.first?.rootViewController,
+                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
+                    topmostVC.present(pvc, animated: true, completion: nil)
                 } else {
                     Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
+                    viewModel.streamError = "Failed to open player. Please try again."
+                    viewModel.showingStreamError = true
                 }
                 return
             } else {
@@ -1336,13 +1364,15 @@ struct ModulesSearchResultsSheet: View {
                 playerVC.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.topmostViewController().present(playerVC, animated: true) {
+                   let rootVC = windowScene.windows.first?.rootViewController,
+                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
+                    topmostVC.present(playerVC, animated: true) {
                         playerVC.player?.play()
                     }
                 } else {
                     Logger.shared.log("Failed to find root view controller to present player", type: "Error")
-                    playerVC.player?.play()
+                    viewModel.streamError = "Failed to open player. Please try again."
+                    viewModel.showingStreamError = true
                 }
             }
         }
