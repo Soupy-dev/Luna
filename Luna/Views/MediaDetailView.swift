@@ -26,9 +26,15 @@ struct MediaDetailView: View {
     @State private var isBookmarked: Bool = false
     @State private var showingSearchResults = false
     @State private var showingAddToCollection = false
+    @State private var showingNoServicesAlert = false
     @State private var selectedEpisodeForSearch: TMDBEpisode?
     @State private var romajiTitle: String?
     @State private var logoURL: String?
+    @State private var isAnimeShow = false
+    @State private var anilistEpisodes: [AniListEpisode]? = nil
+    @State private var animeSeasonTitles: [Int: String]? = nil
+    
+    @State private var hasLoadedContent = false
     
     @StateObject private var serviceManager = ServiceManager.shared
     @ObservedObject private var libraryManager = LibraryManager.shared
@@ -103,7 +109,9 @@ struct MediaDetailView: View {
         }
 #endif
         .onAppear {
-            loadMediaDetails()
+            if !hasLoadedContent {
+                loadMediaDetails()
+            }
             updateBookmarkStatus()
         }
         .onChangeComp(of: libraryManager.collections) { _, _ in
@@ -111,15 +119,35 @@ struct MediaDetailView: View {
         }
         .sheet(isPresented: $showingSearchResults) {
             ModulesSearchResultsSheet(
-                mediaTitle: searchResult.displayTitle,
+                mediaTitle: {
+                    if isAnimeShow, let episode = selectedEpisodeForSearch,
+                       let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                        return seasonTitle
+                    }
+                    return searchResult.displayTitle
+                }(),
+                seasonTitleOverride: {
+                    if isAnimeShow, let episode = selectedEpisodeForSearch,
+                       let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                        return seasonTitle
+                    }
+                    return nil
+                }(),
                 originalTitle: romajiTitle,
                 isMovie: searchResult.isMovie,
                 selectedEpisode: selectedEpisodeForSearch,
-                tmdbId: searchResult.id
+                tmdbId: searchResult.id,
+                animeSeasonTitle: isAnimeShow ? "anime" : nil,
+                posterPath: searchResult.isMovie ? movieDetail?.posterPath : tvShowDetail?.posterPath
             )
         }
         .sheet(isPresented: $showingAddToCollection) {
             AddToCollectionView(searchResult: searchResult)
+        }
+        .alert("No Active Services", isPresented: $showingNoServicesAlert) {
+            Button("OK") { }
+        } message: {
+            Text("You don't have any active services. Please go to the Services tab to download and activate services.")
         }
     }
     
@@ -374,9 +402,12 @@ struct MediaDetailView: View {
         if !searchResult.isMovie {
             TVShowSeasonsSection(
                 tvShow: tvShowDetail,
+                isAnime: isAnimeShow,
                 selectedSeason: $selectedSeason,
                 seasonDetail: $seasonDetail,
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
+                animeEpisodes: anilistEpisodes,
+                animeSeasonTitles: animeSeasonTitles,
                 tmdbService: tmdbService
             )
         }
@@ -440,24 +471,129 @@ struct MediaDetailView: View {
                     
                     let (detail, images, romaji) = try await (detailTask, imagesTask, romajiTask)
                     
+                    // Detect anime for tracking/catalog, but structure remains TMDB-only
+                    let isJapanese = detail.originCountry?.contains("JP") ?? false
+                    let isAnimation = detail.genres.contains { $0.id == 16 }
+                    let detectedAsAnime = isJapanese && isAnimation
+                    
+                    // Fetch AniList hybrid seasons/episodes if anime
+                    var animeData: AniListAnimeWithSeasons? = nil
+                    if detectedAsAnime {
+                        do {
+                            animeData = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
+                                title: detail.name,
+                                tmdbShowId: detail.id,
+                                tmdbService: tmdbService,
+                                tmdbShowPoster: detail.fullPosterURL,
+                                token: nil
+                            )
+                            Logger.shared.log("MediaDetailView: Fetched AniList hybrid data for \(detail.name) with \(animeData?.seasons.count ?? 0) seasons", type: "AniList")
+                            
+                            // Register AniList season IDs with tracker for accurate syncing
+                            if let animeData = animeData {
+                                let seasonMappings = animeData.seasons.map { (seasonNumber: $0.seasonNumber, anilistId: $0.anilistId) }
+                                TrackerManager.shared.registerAniListAnimeData(tmdbId: detail.id, seasons: seasonMappings)
+                            }
+                        } catch {
+                            Logger.shared.log("MediaDetailView: Failed to fetch AniList data: \(error.localizedDescription)", type: "AniList")
+                        }
+                    }
+                    
                     await MainActor.run {
-                        self.tvShowDetail = detail
                         self.synopsis = detail.overview ?? ""
                         self.romajiTitle = romaji
+                        self.isAnimeShow = detectedAsAnime
+                        
+                        if let animeData = animeData {
+                            // Build AniList seasons list with TMDB-compatible fields
+                            let aniSeasons: [TMDBSeason] = animeData.seasons.map { aniSeason in
+                                var posterPath: String?
+                                if let posterUrl = aniSeason.posterUrl {
+                                    if posterUrl.contains("image.tmdb.org") {
+                                        if let range = posterUrl.range(of: "/original") {
+                                            posterPath = String(posterUrl[range.lowerBound...]).replacingOccurrences(of: "/original", with: "")
+                                        }
+                                    } else {
+                                        posterPath = posterUrl
+                                    }
+                                } else {
+                                    posterPath = detail.posterPath
+                                }
+                                
+                                return TMDBSeason(
+                                    id: detail.id * 1000 + aniSeason.seasonNumber,
+                                    name: aniSeason.title,
+                                    overview: "",
+                                    posterPath: posterPath,
+                                    seasonNumber: aniSeason.seasonNumber,
+                                    episodeCount: aniSeason.episodes.count,
+                                    airDate: nil
+                                )
+                            }
+                            
+                            let detailWithAniSeasons = TMDBTVShowWithSeasons(
+                                id: detail.id,
+                                name: detail.name,
+                                overview: detail.overview,
+                                posterPath: detail.posterPath,
+                                backdropPath: detail.backdropPath,
+                                firstAirDate: detail.firstAirDate,
+                                lastAirDate: detail.lastAirDate,
+                                voteAverage: detail.voteAverage,
+                                popularity: detail.popularity,
+                                genres: detail.genres,
+                                tagline: detail.tagline,
+                                status: detail.status,
+                                originalLanguage: detail.originalLanguage,
+                                originalName: detail.originalName,
+                                adult: detail.adult,
+                                voteCount: detail.voteCount,
+                                numberOfSeasons: animeData.seasons.count,
+                                numberOfEpisodes: animeData.totalEpisodes,
+                                episodeRunTime: detail.episodeRunTime,
+                                inProduction: detail.inProduction,
+                                languages: detail.languages,
+                                originCountry: detail.originCountry,
+                                type: detail.type,
+                                seasons: aniSeasons,
+                                contentRatings: detail.contentRatings
+                            )
+                            
+                            self.tvShowDetail = detailWithAniSeasons
+                            
+                            var seasonTitles: [Int: String] = [:]
+                            var allEpisodes: [AniListEpisode] = []
+                            for season in animeData.seasons {
+                                seasonTitles[season.seasonNumber] = season.title
+                                allEpisodes.append(contentsOf: season.episodes)
+                            }
+                            self.animeSeasonTitles = seasonTitles
+                            self.anilistEpisodes = allEpisodes
+                            
+                            if let firstSeason = aniSeasons.first {
+                                self.selectedSeason = firstSeason
+                            }
+                        } else {
+                            // Fallback to TMDB seasons
+                            self.tvShowDetail = detail
+                            if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
+                                self.selectedSeason = firstSeason
+                            }
+                        }
+                        
                         if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
                             self.logoURL = logo.fullURL
                         }
-                        if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
-                            self.selectedSeason = firstSeason
-                        }
                         self.selectedEpisodeForSearch = nil
                         self.isLoading = false
+                        self.hasLoadedContent = true
                     }
                 }
             } catch {
                 await MainActor.run {
                     self.errorMessage = error.localizedDescription
                     self.isLoading = false
+                    self.hasLoadedContent = true
                 }
             }
         }

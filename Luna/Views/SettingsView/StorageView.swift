@@ -14,6 +14,11 @@ struct StorageView: View {
     @State private var showConfirmClear: Bool = false
     @State private var errorMessage: String?
     
+    @AppStorage("autoClearCacheEnabled") private var autoClearCacheEnabled = false
+    @AppStorage("autoClearCacheThresholdMB") private var autoClearCacheThresholdMB: Double = 500
+    
+    private let cacheThresholdOptions: [Double] = [100, 250, 500, 1000, 2000, 5000]
+    
     var body: some View {
         List {
             Section(header: Text("APP CACHE"), footer: Text("Cache includes images and other temporary files that can be removed.")) {
@@ -43,6 +48,27 @@ struct StorageView: View {
                 .disabled(isClearing || (isLoading && cacheSizeBytes == 0))
             }
             
+            Section(header: Text("AUTO-CLEAR CACHE"), footer: Text("Automatically clear cache when it exceeds the specified size.")) {
+                Toggle("Enable Auto-Clear", isOn: $autoClearCacheEnabled)
+                
+                if autoClearCacheEnabled {
+                    HStack {
+                        Text("Threshold")
+                        Spacer()
+                        Picker("", selection: $autoClearCacheThresholdMB) {
+                            ForEach(cacheThresholdOptions, id: \.self) { value in
+                                Text(formatThreshold(value)).tag(value)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    
+                    Text("Cache will be cleared when size exceeds \(formatThreshold(autoClearCacheThresholdMB))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
             if let errorMessage {
                 Section(header: Text("ERROR")) {
                     Text(errorMessage).foregroundColor(.red)
@@ -62,6 +88,11 @@ struct StorageView: View {
         .onAppear {
             refreshCacheSize()
         }
+        .onChange(of: autoClearCacheEnabled) { enabled in
+            if enabled {
+                Logger.shared.log("Auto-clear cache enabled with threshold: \(formatThreshold(autoClearCacheThresholdMB))", type: "Storage")
+            }
+        }
         .alert("Clear Cache?", isPresented: $showConfirmClear) {
             Button("Cancel", role: .cancel) {}
             Button("Clear", role: .destructive) { clearCache() }
@@ -74,6 +105,13 @@ struct StorageView: View {
         ByteCountFormatter.string(fromByteCount: cacheSizeBytes, countStyle: .file)
     }
     
+    private func formatThreshold(_ mb: Double) -> String {
+        if mb >= 1000 {
+            return String(format: "%.1f GB", mb / 1000)
+        }
+        return String(format: "%.0f MB", mb)
+    }
+    
     private func refreshCacheSize() {
         errorMessage = nil
         isLoading = true
@@ -82,6 +120,15 @@ struct StorageView: View {
             DispatchQueue.main.async {
                 self.cacheSizeBytes = size
                 self.isLoading = false
+                
+                // Check if auto-clear should be triggered
+                if self.autoClearCacheEnabled {
+                    let thresholdBytes = Int64(self.autoClearCacheThresholdMB * 1_000_000)
+                    if size > thresholdBytes {
+                        Logger.shared.log("Cache size (\(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) exceeds threshold (\(self.formatThreshold(self.autoClearCacheThresholdMB))). Auto-clearing...", type: "Storage")
+                        self.autoClearCache()
+                    }
+                }
             }
         }
     }
@@ -89,6 +136,21 @@ struct StorageView: View {
     private func clearCache() {
         errorMessage = nil
         isClearing = true
+        performCacheClear { size in
+            self.cacheSizeBytes = size
+            self.isClearing = false
+            self.isLoading = false
+        }
+    }
+    
+    private func autoClearCache() {
+        performCacheClear { size in
+            self.cacheSizeBytes = size
+            Logger.shared.log("Auto-clear completed. New cache size: \(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))", type: "Storage")
+        }
+    }
+    
+    private func performCacheClear(completion: @escaping (Int64) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let dir = cachesDirectory()
@@ -102,9 +164,7 @@ struct StorageView: View {
                 
                 let size = calculateDirectorySize(at: dir)
                 DispatchQueue.main.async {
-                    self.cacheSizeBytes = size
-                    self.isClearing = false
-                    self.isLoading = false
+                    completion(size)
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -115,6 +175,7 @@ struct StorageView: View {
             }
         }
     }
+
     
     private func calculateDirectorySize(at url: URL) -> Int64 {
         let fileManager = FileManager.default

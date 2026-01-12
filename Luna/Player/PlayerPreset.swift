@@ -11,6 +11,7 @@ struct PlayerPreset: Identifiable, Hashable {
     enum Identifier: String, CaseIterable {
         case sdrRec709
         case hdr10
+        case hd1080
         case dolbyVisionP5
         case dolbyVisionP8
     }

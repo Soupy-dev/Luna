@@ -23,6 +23,10 @@ class JSController: NSObject, ObservableObject {
     }
     
     func loadScript(_ script: String) {
+        // Clean up old context
+        context.exception = nil
+        
+        // Create fresh context
         context = JSContext()
         context.setupJavaScriptEnvironment()
         context.evaluateScript(script)

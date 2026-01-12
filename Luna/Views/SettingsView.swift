@@ -137,14 +137,26 @@ struct SettingsView: View {
                     Text("Appearance")
                 }
                 
+                NavigationLink(destination: CatalogsSettingsView()) {
+                    Text("Catalogs")
+                }
+                
                 NavigationLink(destination: ServicesView()) {
                     Text("Services")
+                }
+                
+                NavigationLink(destination: TrackersSettingsView()) {
+                    Text("Trackers")
                 }
             }
 
             Section {
                 NavigationLink(destination: StorageView()) {
                     Text("Storage")
+                }
+                
+                NavigationLink(destination: BackupManagementView()) {
+                    Text("Backup & Restore")
                 }
                 
                 NavigationLink(destination: LoggerView()) {

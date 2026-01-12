@@ -23,23 +23,36 @@ class TMDBService: ObservableObject {
     }
     
     // MARK: - Multi Search (Movies and TV Shows)
-    func searchMulti(query: String) async throws -> [TMDBSearchResult] {
+    func searchMulti(query: String, maxPages: Int = 2) async throws -> [TMDBSearchResult] {
         guard !query.isEmpty else { return [] }
         
         let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = "\(baseURL)/search/multi?api_key=\(apiKey)&query=\(encodedQuery)&language=\(currentLanguage)&include_adult=false"
+        var allResults: [TMDBSearchResult] = []
         
-        guard let url = URL(string: urlString) else {
-            throw TMDBError.invalidURL
+        // TMDB returns 20 results per page; fetch up to maxPages to get more results
+        for page in 1...maxPages {
+            let urlString = "\(baseURL)/search/multi?api_key=\(apiKey)&query=\(encodedQuery)&language=\(currentLanguage)&include_adult=false&page=\(page)"
+            
+            guard let url = URL(string: urlString) else {
+                throw TMDBError.invalidURL
+            }
+            
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                let response = try JSONDecoder().decode(TMDBSearchResponse.self, from: data)
+                let filtered = response.results.filter { $0.mediaType == "movie" || $0.mediaType == "tv" }
+                allResults.append(contentsOf: filtered)
+                
+                // Stop if we get fewer results than expected (last page)
+                if filtered.count < 20 {
+                    break
+                }
+            } catch {
+                throw TMDBError.networkError(error)
+            }
         }
         
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let response = try JSONDecoder().decode(TMDBSearchResponse.self, from: data)
-            return response.results.filter { $0.mediaType == "movie" || $0.mediaType == "tv" }
-        } catch {
-            throw TMDBError.networkError(error)
-        }
+        return allResults
     }
     
     // MARK: - Search Movies
@@ -218,9 +231,77 @@ class TMDBService: ObservableObject {
         }
     }
     
+    // MARK: - Get Now Playing Movies
+    func getNowPlayingMovies(page: Int = 1) async throws -> [TMDBMovie] {
+        let urlString = "\(baseURL)/movie/now_playing?api_key=\(apiKey)&language=\(currentLanguage)&page=\(page)&include_adult=false"
+        
+        guard let url = URL(string: urlString) else {
+            throw TMDBError.invalidURL
+        }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(TMDBMovieSearchResponse.self, from: data)
+            return response.results
+        } catch {
+            throw TMDBError.networkError(error)
+        }
+    }
+    
+    // MARK: - Get Upcoming Movies
+    func getUpcomingMovies(page: Int = 1) async throws -> [TMDBMovie] {
+        let urlString = "\(baseURL)/movie/upcoming?api_key=\(apiKey)&language=\(currentLanguage)&page=\(page)&include_adult=false"
+        
+        guard let url = URL(string: urlString) else {
+            throw TMDBError.invalidURL
+        }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(TMDBMovieSearchResponse.self, from: data)
+            return response.results
+        } catch {
+            throw TMDBError.networkError(error)
+        }
+    }
+    
     // MARK: - Get Popular TV Shows
     func getPopularTVShows(page: Int = 1) async throws -> [TMDBTVShow] {
         let urlString = "\(baseURL)/tv/popular?api_key=\(apiKey)&language=\(currentLanguage)&page=\(page)&include_adult=false"
+        
+        guard let url = URL(string: urlString) else {
+            throw TMDBError.invalidURL
+        }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(TMDBTVSearchResponse.self, from: data)
+            return response.results
+        } catch {
+            throw TMDBError.networkError(error)
+        }
+    }
+    
+    // MARK: - Get On The Air TV Shows
+    func getOnTheAirTVShows(page: Int = 1) async throws -> [TMDBTVShow] {
+        let urlString = "\(baseURL)/tv/on_the_air?api_key=\(apiKey)&language=\(currentLanguage)&page=\(page)&include_adult=false"
+        
+        guard let url = URL(string: urlString) else {
+            throw TMDBError.invalidURL
+        }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(TMDBTVSearchResponse.self, from: data)
+            return response.results
+        } catch {
+            throw TMDBError.networkError(error)
+        }
+    }
+    
+    // MARK: - Get Airing Today TV Shows
+    func getAiringTodayTVShows(page: Int = 1) async throws -> [TMDBTVShow] {
+        let urlString = "\(baseURL)/tv/airing_today?api_key=\(apiKey)&language=\(currentLanguage)&page=\(page)&include_adult=false"
         
         guard let url = URL(string: urlString) else {
             throw TMDBError.invalidURL

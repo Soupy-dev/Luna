@@ -360,6 +360,8 @@ struct TMDBSeason: Codable, Identifiable {
     
     var fullPosterURL: String? {
         guard let posterPath = posterPath else { return nil }
+        // If we already have a full URL (e.g., AniList CDN), return it directly
+        if posterPath.hasPrefix("http") { return posterPath }
         return "\(TMDBService.tmdbImageBaseURL)\(posterPath)"
     }
 }

@@ -1,51 +1,25 @@
 //
 //  HomeView.swift
 //  Sora
-//
-//  Created by Francesco on 07/08/25.
-//
 
 import SwiftUI
 import Kingfisher
 
 struct HomeView: View {
     @State private var showingSettings = false
-    @State private var trendingContent: [TMDBSearchResult] = []
-    @State private var popularMovies: [TMDBMovie] = []
-    @State private var popularTVShows: [TMDBTVShow] = []
-    @State private var popularAnime: [TMDBTVShow] = []
-    @State private var topRatedMovies: [TMDBMovie] = []
-    @State private var topRatedTVShows: [TMDBTVShow] = []
-    @State private var topRatedAnime: [TMDBTVShow] = []
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @State private var heroContent: TMDBSearchResult?
-    @State private var ambientColor: Color = Color.black
     @State private var isHoveringWatchNow = false
     @State private var isHoveringWatchlist = false
     
-    @State private var hasLoadedContent = false
-    @State private var continueWatchingItems: [ContinueWatchingItem] = []
-    @State private var heroLogoURL: String?
-    
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
     
-    @AppStorage("homeSections") private var homeSectionsData: Data = {
-        if let data = try? JSONEncoder().encode(HomeSection.defaultSections) {
-            return data
-        }
-        return Data()
-    }()
-    
-    private var homeSections: [HomeSection] {
-        if let sections = try? JSONDecoder().decode([HomeSection].self, from: homeSectionsData) {
-            return sections.sorted { $0.order < $1.order }
-        }
-        return HomeSection.defaultSections
-    }
-    
+    @StateObject private var homeViewModel = HomeViewModel()
+    @ObservedObject private var catalogManager = CatalogManager.shared
     @StateObject private var tmdbService = TMDBService.shared
     @StateObject private var contentFilter = TMDBContentFilter.shared
+    
+    private var enabledCatalogs: [Catalog] {
+        return catalogManager.getEnabledCatalogs()
+    }
     
     private var heroHeight: CGFloat {
 #if os(tvOS)
@@ -54,6 +28,8 @@ struct HomeView: View {
         580
 #endif
     }
+
+    private var ambientColor: Color { homeViewModel.ambientColor }
     
     var body: some View {
         if #available(iOS 16.0, *) {
@@ -71,13 +47,13 @@ struct HomeView: View {
     private var homeContent: some View {
         ZStack {
             Group {
-                ambientColor
+                homeViewModel.ambientColor
             }
             .ignoresSafeArea(.all)
             
-            if isLoading {
+            if homeViewModel.isLoading {
                 loadingView
-            } else if let errorMessage = errorMessage {
+            } else if let errorMessage = homeViewModel.errorMessage {
                 errorView(errorMessage)
             } else {
                 mainScrollView
@@ -85,15 +61,13 @@ struct HomeView: View {
         }
         .navigationBarHidden(true)
         .onAppear {
-            if !hasLoadedContent {
-                loadContent()
-            } else {
-                continueWatchingItems = ProgressManager.shared.getContinueWatchingItems()
+            if !homeViewModel.hasLoadedContent {
+                homeViewModel.loadContent(tmdbService: tmdbService, catalogManager: catalogManager, contentFilter: contentFilter)
             }
         }
         .onChangeComp(of: contentFilter.filterHorror) { _, _ in
-            if hasLoadedContent {
-                loadContent()
+            if homeViewModel.hasLoadedContent {
+                homeViewModel.loadContent(tmdbService: tmdbService, catalogManager: catalogManager, contentFilter: contentFilter)
             }
         }
         .sheet(isPresented: $showingSettings) {
@@ -146,33 +120,23 @@ struct HomeView: View {
         ScrollView(showsIndicators: false) {
             LazyVStack(spacing: 0) {
                 heroSection
-                continueWatchingSection
                 contentSections
             }
         }
         .ignoresSafeArea(edges: [.top, .leading, .trailing])
     }
-    
-    @ViewBuilder
-    private var continueWatchingSection: some View {
-        if !continueWatchingItems.isEmpty {
-            ContinueWatchingSection(
-                items: continueWatchingItems,
-                tmdbService: tmdbService
-            )
-        }
-    }
+
     
     @ViewBuilder
     private var heroSection: some View {
         ZStack(alignment: .bottom) {
             StretchyHeaderView(
-                backdropURL: heroContent?.fullBackdropURL ?? heroContent?.fullPosterURL,
-                isMovie: heroContent?.isMovie ?? true,
+                backdropURL: homeViewModel.heroContent?.fullBackdropURL ?? homeViewModel.heroContent?.fullPosterURL,
+                isMovie: homeViewModel.heroContent?.mediaType == "movie",
                 headerHeight: heroHeight,
                 minHeaderHeight: 300,
                 onAmbientColorExtracted: { color in
-                    ambientColor = color
+                    homeViewModel.ambientColor = color
                 }
             )
             
@@ -199,7 +163,7 @@ struct HomeView: View {
     
     @ViewBuilder
     private var heroContentInfo: some View {
-        if let hero = heroContent {
+        if let hero = homeViewModel.heroContent {
             VStack(alignment: .center, spacing: isTvOS ? 30 : 12) {
                 HStack {
                     Text(hero.isMovie ? "Movie" : "TV Series")
@@ -227,7 +191,7 @@ struct HomeView: View {
                     }
                 }
                 
-                if let heroLogoURL = heroLogoURL {
+                if let heroLogoURL = homeViewModel.heroLogoURL {
                     KFImage(URL(string: heroLogoURL))
                         .placeholder {
                             heroTitleText(hero)
@@ -337,60 +301,18 @@ struct HomeView: View {
     @ViewBuilder
     private var contentSections: some View {
         VStack(spacing: 0) {
-            ForEach(homeSections.filter { $0.isEnabled }) { section in
-                switch section.id {
-                case "trending":
-                    if !trendingContent.isEmpty {
-                        let filteredTrending = trendingContent.filter { $0.id != heroContent?.id }
-                        MediaSection(
-                            title: section.title,
-                            items: Array(filteredTrending.prefix(15))
-                        )
-                    }
-                case "popularMovies":
-                    if !popularMovies.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: popularMovies.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                case "popularTVShows":
-                    if !popularTVShows.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: popularTVShows.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                case "popularAnime":
-                    if !popularAnime.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: popularAnime.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                case "topRatedMovies":
-                    if !topRatedMovies.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: topRatedMovies.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                case "topRatedTVShows":
-                    if !topRatedTVShows.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: topRatedTVShows.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                case "topRatedAnime":
-                    if !topRatedAnime.isEmpty {
-                        MediaSection(
-                            title: section.title,
-                            items: topRatedAnime.prefix(15).map { $0.asSearchResult }
-                        )
-                    }
-                default:
-                    EmptyView()
+            // Display all enabled catalogs
+            ForEach(enabledCatalogs) { catalog in
+                if let items = homeViewModel.catalogResults[catalog.id], !items.isEmpty {
+                    let limitedItems = Array(items.prefix(15))
+                    let displayItems = catalog.id == "trending"
+                        ? limitedItems.filter { $0.id != homeViewModel.heroContent?.id }
+                        : limitedItems
+                    
+                    MediaSection(
+                        title: catalog.name,
+                        items: displayItems
+                    )
                 }
             }
             
@@ -400,71 +322,13 @@ struct HomeView: View {
     }
     
     private func loadContent() {
-        isLoading = true
-        errorMessage = nil
-        continueWatchingItems = ProgressManager.shared.getContinueWatchingItems()
-        
-        Task {
-            do {
-                async let trending = tmdbService.getTrending()
-                async let popularM = tmdbService.getPopularMovies()
-                async let popularTV = tmdbService.getPopularTVShows()
-                async let popularA = tmdbService.getPopularAnime()
-                async let topRatedM = tmdbService.getTopRatedMovies()
-                async let topRatedTV = tmdbService.getTopRatedTVShows()
-                async let topRatedA = tmdbService.getTopRatedAnime()
-                
-                let (trendingResult, popularMoviesResult, popularTVResult, popularAnimeResult, topRatedMoviesResult, topRatedTVResult, topRatedAnimeResult) = try await (trending, popularM, popularTV, popularA, topRatedM, topRatedTV, topRatedA)
-                
-                await MainActor.run {
-                    withAnimation(.easeInOut(duration: 0.5)) {
-                        self.trendingContent = contentFilter.filterSearchResults(trendingResult)
-                        self.popularMovies = contentFilter.filterMovies(popularMoviesResult)
-                        self.popularTVShows = contentFilter.filterTVShows(popularTVResult)
-                        self.popularAnime = contentFilter.filterTVShows(popularAnimeResult)
-                        self.topRatedMovies = contentFilter.filterMovies(topRatedMoviesResult)
-                        self.topRatedTVShows = contentFilter.filterTVShows(topRatedTVResult)
-                        self.topRatedAnime = contentFilter.filterTVShows(topRatedAnimeResult)
-                        
-                        self.heroContent = self.trendingContent.first { $0.backdropPath != nil } ?? self.trendingContent.first
-                        self.isLoading = false
-                        self.hasLoadedContent = true
-                    }
-                }
-                
-                if let hero = await MainActor.run(body: { self.heroContent }) {
-                    await loadHeroLogo(for: hero)
-                }
-            } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.isLoading = false
-                    Logger.shared.log("Error loading content: \(error)", type: "Error")
-                }
-            }
-        }
+        homeViewModel.loadContent(
+            tmdbService: tmdbService,
+            catalogManager: catalogManager,
+            contentFilter: contentFilter
+        )
     }
-    
-    private func loadHeroLogo(for hero: TMDBSearchResult) async {
-        do {
-            let images: TMDBImagesResponse
-            if hero.isMovie {
-                images = try await tmdbService.getMovieImages(id: hero.id, preferredLanguage: selectedLanguage)
-            } else {
-                images = try await tmdbService.getTVShowImages(id: hero.id, preferredLanguage: selectedLanguage)
-            }
-            
-            if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
-                await MainActor.run {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        self.heroLogoURL = logo.fullURL
-                    }
-                }
-            }
-        } catch {
-            Logger.shared.log("Error loading hero logo: \(error)", type: "Warning")
-        }
-    }
+
 }
 
 struct MediaSection: View {
@@ -618,249 +482,6 @@ struct ContinuousHoverModifier: ViewModifier {
                 }
         } else {
             content
-        }
-    }
-}
-
-// MARK: - Continue Watching Section
-
-struct ContinueWatchingSection: View {
-    let items: [ContinueWatchingItem]
-    let tmdbService: TMDBService
-    
-    var gap: Double { isTvOS ? 50.0 : 16.0 }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Continue Watching")
-                    .font(isTvOS ? .headline : .title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                
-                Spacer()
-            }
-            .padding(.horizontal, isTvOS ? 40 : 16)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: gap) {
-                    ForEach(items) { item in
-                        ContinueWatchingCard(item: item, tmdbService: tmdbService)
-                    }
-                }
-                .padding(.horizontal, isTvOS ? 40 : 16)
-            }
-            .modifier(ScrollClipModifier())
-            .buttonStyle(.borderless)
-        }
-        .padding(.top, isTvOS ? 40 : 24)
-    }
-}
-
-struct ContinueWatchingCard: View {
-    let item: ContinueWatchingItem
-    let tmdbService: TMDBService
-    
-    @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
-    
-    @State private var backdropURL: String?
-    @State private var logoURL: String?
-    @State private var title: String = ""
-    @State private var isHovering: Bool = false
-    @State private var isLoaded: Bool = false
-    
-    private var cardWidth: CGFloat { isTvOS ? 380 : 260 }
-    private var cardHeight: CGFloat { isTvOS ? 220 : 146 }
-    private var logoMaxWidth: CGFloat { isTvOS ? 200 : 140 }
-    private var logoMaxHeight: CGFloat { isTvOS ? 60 : 40 }
-    
-    var body: some View {
-        NavigationLink(destination: destinationView) {
-            ZStack(alignment: .bottomLeading) {
-                ZStack {
-                    if let backdropURL = backdropURL {
-                        KFImage(URL(string: backdropURL))
-                            .placeholder {
-                                backdropPlaceholder
-                            }
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else {
-                        backdropPlaceholder
-                    }
-                }
-                .frame(width: cardWidth, height: cardHeight)
-                .clipped()
-                
-                LinearGradient(
-                    gradient: Gradient(stops: [
-                        .init(color: .clear, location: 0.0),
-                        .init(color: .black.opacity(0.3), location: 0.4),
-                        .init(color: .black.opacity(0.85), location: 1.0)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                
-                VStack(alignment: .leading, spacing: isTvOS ? 10 : 6) {
-                    Spacer()
-                    
-                    HStack(alignment: .bottom, spacing: isTvOS ? 12 : 8) {
-                        if let logoURL = logoURL {
-                            KFImage(URL(string: logoURL))
-                                .placeholder {
-                                    titleText
-                                }
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxWidth: logoMaxWidth, maxHeight: logoMaxHeight, alignment: .leading)
-                        } else {
-                            titleText
-                        }
-                        
-                        Spacer()
-                        
-                        if !item.isMovie, let season = item.seasonNumber, let episode = item.episodeNumber {
-                            Text("S\(season) E\(episode)")
-                                .font(isTvOS ? .subheadline : .caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.white.opacity(0.9))
-                        }
-                    }
-                    
-                    HStack(spacing: isTvOS ? 12 : 8) {
-                        GeometryReader { geometry in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.white.opacity(0.3))
-                                    .frame(height: isTvOS ? 6 : 4)
-                                
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.white)
-                                    .frame(width: geometry.size.width * item.progress, height: isTvOS ? 6 : 4)
-                            }
-                        }
-                        .frame(height: isTvOS ? 6 : 4)
-                        
-                        Text(item.remainingTime)
-                            .font(.caption2)
-                            .fontWeight(.medium)
-                            .foregroundColor(.white.opacity(0.8))
-                            .fixedSize()
-                    }
-                }
-                .padding(isTvOS ? 16 : 12)
-            }
-            .frame(width: cardWidth, height: cardHeight)
-            .clipShape(RoundedRectangle(cornerRadius: isTvOS ? 16 : 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: isTvOS ? 16 : 12)
-                    .stroke(Color.white.opacity(isHovering ? 0.5 : 0.2), lineWidth: isHovering ? 2 : 1)
-            )
-            .shadow(color: .black.opacity(0.3), radius: isHovering ? 12 : 6, x: 0, y: isHovering ? 8 : 4)
-            .scaleEffect(isHovering ? 1.02 : 1.0)
-            .animation(.easeInOut(duration: 0.2), value: isHovering)
-            .modifier(ContinuousHoverModifier(isHovering: $isHovering))
-        }
-        .tvos({ view in
-            view.buttonStyle(BorderlessButtonStyle())
-        }, else: { view in
-            view.buttonStyle(PlainButtonStyle())
-        })
-        .task {
-            await loadMediaDetails()
-        }
-    }
-    
-    @ViewBuilder
-    private var titleText: some View {
-        Text(title)
-            .font(isTvOS ? .title3 : .subheadline)
-            .fontWeight(.bold)
-            .foregroundColor(.white)
-            .lineLimit(2)
-            .multilineTextAlignment(.leading)
-            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-    }
-    
-    @ViewBuilder
-    private var backdropPlaceholder: some View {
-        Rectangle()
-            .fill(
-                LinearGradient(
-                    colors: [Color.gray.opacity(0.4), Color.gray.opacity(0.2)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
-                Image(systemName: item.isMovie ? "film" : "tv")
-                    .font(isTvOS ? .largeTitle : .title)
-                    .foregroundColor(.gray.opacity(0.5))
-            )
-    }
-    
-    @ViewBuilder
-    private var destinationView: some View {
-        if isLoaded {
-            MediaDetailView(searchResult: TMDBSearchResult(
-                id: item.tmdbId,
-                mediaType: item.isMovie ? "movie" : "tv",
-                title: item.isMovie ? title : nil,
-                name: item.isMovie ? nil : title,
-                overview: nil,
-                posterPath: nil,
-                backdropPath: nil,
-                releaseDate: nil,
-                firstAirDate: nil,
-                voteAverage: nil,
-                popularity: 0,
-                adult: false,
-                genreIds: nil
-            ))
-        } else {
-            ProgressView()
-        }
-    }
-    
-    private func loadMediaDetails() async {
-        guard !isLoaded else { return }
-        
-        do {
-            if item.isMovie {
-                async let detailsTask = tmdbService.getMovieDetails(id: item.tmdbId)
-                async let imagesTask = tmdbService.getMovieImages(id: item.tmdbId, preferredLanguage: selectedLanguage)
-                
-                let (details, images) = try await (detailsTask, imagesTask)
-                
-                await MainActor.run {
-                    self.title = details.title
-                    self.backdropURL = details.fullBackdropURL ?? details.fullPosterURL
-                    if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
-                        self.logoURL = logo.fullURL
-                    }
-                    self.isLoaded = true
-                }
-            } else {
-                async let detailsTask = tmdbService.getTVShowDetails(id: item.tmdbId)
-                async let imagesTask = tmdbService.getTVShowImages(id: item.tmdbId, preferredLanguage: selectedLanguage)
-                
-                let (details, images) = try await (detailsTask, imagesTask)
-                
-                await MainActor.run {
-                    self.title = details.name
-                    self.backdropURL = details.fullBackdropURL ?? details.fullPosterURL
-                    if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
-                        self.logoURL = logo.fullURL
-                    }
-                    self.isLoaded = true
-                }
-            }
-        } catch {
-            await MainActor.run {
-                self.title = item.isMovie ? "Movie" : "TV Show"
-                self.isLoaded = true
-            }
         }
     }
 }

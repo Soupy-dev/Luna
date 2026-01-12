@@ -20,12 +20,13 @@ class Logger: @unchecked Sendable {
     private var logs: [LogEntry] = []
     private let logFileURL: URL
     
-    private let maxFileSize = 1024 * 512
+    private let maxFileSize = 1024 * 1024 // 1MB cap
     private let maxLogEntries = 1000
     
     private init() {
-        let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        logFileURL = tmpDir.appendingPathComponent("logs.txt")
+        // Use Documents folder for persistent logs (easier to access)
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        logFileURL = documentsURL.appendingPathComponent("player-logs.txt")
     }
     
     func log(_ message: String, type: String = "General") {
@@ -38,7 +39,7 @@ class Logger: @unchecked Sendable {
                 self.logs.removeFirst(self.logs.count - self.maxLogEntries)
             }
             
-            self.saveLogToFile(entry)
+            // File writing disabled - logs only kept in memory
             self.debugLog(entry)
             
             DispatchQueue.main.async {
@@ -91,6 +92,14 @@ class Logger: @unchecked Sendable {
                 continuation.resume()
             }
         }
+    }
+    
+    func getLogFilePath() -> String {
+        return logFileURL.path
+    }
+    
+    func getLogFileURL() -> URL {
+        return logFileURL
     }
     
     private func saveLogToFile(_ log: LogEntry) {

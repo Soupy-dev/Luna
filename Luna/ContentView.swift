@@ -18,6 +18,10 @@ struct ContentView: View {
                     HomeView()
                 }
                 
+                Tab("Schedule", systemImage: "calendar") {
+                    ScheduleView()
+                }
+                
                 Tab("Library", systemImage: "books.vertical.fill") {
                     LibraryView()
                 }
@@ -31,7 +35,7 @@ struct ContentView: View {
                 }
             }
 #if !os(tvOS)
-            .tabBarMinimizeBehavior(.onScrollDown)
+            .tabBarMinimizeBehavior(.never)
 #endif
             .accentColor(accentColorManager.currentAccentColor)
             
@@ -49,6 +53,12 @@ struct ContentView: View {
                 .tabItem {
                     Image(systemName: "house.fill")
                     Text("Home")
+                }
+            
+            ScheduleView()
+                .tabItem {
+                    Image(systemName: "calendar")
+                    Text("Schedule")
                 }
             
             LibraryView()

@@ -12,6 +12,8 @@ enum Appearance: String, CaseIterable, Identifiable {
     var id: String { self.rawValue }
 }
 class Settings: ObservableObject {
+    static let shared = Settings()
+    
     @Published var accentColor: Color {
         didSet {
             saveAccentColor(accentColor)
@@ -21,6 +23,54 @@ class Settings: ObservableObject {
         didSet {
             UserDefaults.standard.set(selectedAppearance.rawValue, forKey: "selectedAppearance")
             updateAppearance()
+        }
+    }
+    
+    // VLC Player Settings
+    var enableSubtitlesByDefault: Bool {
+        get { UserDefaults.standard.bool(forKey: "enableSubtitlesByDefault") }
+        set { UserDefaults.standard.set(newValue, forKey: "enableSubtitlesByDefault") }
+    }
+    
+    var defaultSubtitleLanguage: String {
+        get { UserDefaults.standard.string(forKey: "defaultSubtitleLanguage") ?? "eng" }
+        set { UserDefaults.standard.set(newValue, forKey: "defaultSubtitleLanguage") }
+    }
+    
+    var preferredAnimeAudioLanguage: String {
+        get { UserDefaults.standard.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn" }
+        set { UserDefaults.standard.set(newValue, forKey: "preferredAnimeAudioLanguage") }
+    }
+    
+    enum PlayerChoice: String {
+        case mpv, vlc
+    }
+    
+    var playerChoice: PlayerChoice {
+        get {
+            // Read from inAppPlayer setting used in PlayerSettingsView
+            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
+            switch inAppRaw {
+            case "VLC":
+                return .vlc
+            case "mpv":
+                return .mpv
+            default:
+                // "Normal" uses native iOS player, not PlayerViewController
+                // This should not be called when Normal is selected
+                return .mpv  // Fallback
+            }
+        }
+        set {
+            // Sync back to inAppPlayer setting
+            let inAppValue: String
+            switch newValue {
+            case .vlc:
+                inAppValue = "VLC"
+            case .mpv:
+                inAppValue = "mpv"
+            }
+            UserDefaults.standard.set(inAppValue, forKey: "inAppPlayer")
         }
     }
     
