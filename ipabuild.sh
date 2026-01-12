@@ -43,14 +43,8 @@ if [ -d "DerivedData$PLATFORM" ]; then
     rm -rf "DerivedData$PLATFORM"
 fi
 
-# Use workspace if it exists (after pod install), otherwise use project
-if [ -f "$WORKING_LOCATION/$APPLICATION_NAME.xcworkspace/contents.xcworkspacedata" ]; then
-    echo "Building with workspace (CocoaPods detected)"
-    XCODE_PROJECT="-workspace $WORKING_LOCATION/$APPLICATION_NAME.xcworkspace"
-else
-    echo "Building with project"
-    XCODE_PROJECT="-project $WORKING_LOCATION/$APPLICATION_NAME.xcodeproj"
-fi
+# Build with Xcode project (no longer using CocoaPods workspace)
+XCODE_PROJECT="-project $WORKING_LOCATION/$APPLICATION_NAME.xcodeproj"
 
 # Create archive (required for proper IPA structure)
 ARCHIVE_PATH="$WORKING_LOCATION/build/$APPLICATION_NAME$OUTPUT_SUFFIX.xcarchive"

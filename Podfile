@@ -10,7 +10,8 @@ target 'Luna' do
   
   # VLC player framework - GPU-accelerated video playback (iOS only)
   # tvOS uses MPV renderer (conditional compilation in VLCRenderer.swift)
-  pod 'MobileVLCKit'
+  # Now using VLCKitSPM via Swift Package Manager instead of CocoaPods
+  # Add via Xcode: File → Add Package Dependencies → https://github.com/tylerjonesio/vlckit-spm
   
 end
 

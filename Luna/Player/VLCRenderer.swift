@@ -2,20 +2,20 @@
 //  VLCRenderer.swift
 //  Luna
 //
-//  VLC player renderer using MobileVLCKit for GPU-accelerated playback
+//  VLC player renderer using VLCKitSPM for GPU-accelerated playback
 //  Provides same interface as MPVSoftwareRenderer for thermal optimization
 //
-//  DEPENDENCY: Add MobileVLCKit via CocoaPods:
-//  pod 'MobileVLCKit'
+//  DEPENDENCY: Add VLCKitSPM via Swift Package Manager:
+//  File → Add Package Dependencies → https://github.com/tylerjonesio/vlckit-spm
 //  
-//  Or via Xcode: Project → Targets → Build Phases → Link Binary With Libraries → Add MobileVLCKit.xcframework
+//  Package: VLCKitSPM (version 3.6.0+)
 
 import UIKit
 import AVFoundation
 
 // MARK: - Compatibility: VLC renderer is iOS-only (tvOS uses MPV)
-#if canImport(MobileVLCKit) && os(iOS)
-import MobileVLCKit
+#if canImport(VLCKitSPM) && os(iOS)
+import VLCKitSPM
 
 protocol VLCRendererDelegate: AnyObject {
     func renderer(_ renderer: VLCRenderer, didUpdatePosition position: Double, duration: Double)
@@ -353,7 +353,7 @@ final class VLCRenderer: NSObject {
         // VLC provides audio track info through the media player
         if let audioTrackIndexes = player.audioTrackIndexes as? [Int],
            let audioTrackNames = player.audioTrackNames as? [String] {
-            // MobileVLCKit doesn't expose language codes publicly; rely on name parsing
+            // VLCKitSPM doesn't expose language codes publicly; rely on name parsing
             for (index, name) in zip(audioTrackIndexes, audioTrackNames) {
                 let code = guessLanguageCode(from: name)
                 result.append((index, name, code))
@@ -639,9 +639,9 @@ final class VLCRenderer: NSObject {
     }
 }
 
-#else  // Stub when MobileVLCKit is not available
+#else  // Stub when VLCKitSPM is not available
 
-// Minimal stub to allow compilation when MobileVLCKit is not installed
+// Minimal stub to allow compilation when VLCKitSPM is not installed
 protocol VLCRendererDelegate: AnyObject {
     func renderer(_ renderer: VLCRenderer, didUpdatePosition position: Double, duration: Double)
     func renderer(_ renderer: VLCRenderer, didChangePause isPaused: Bool)
@@ -693,5 +693,5 @@ final class VLCRenderer {
     weak var delegate: VLCRendererDelegate?
 }
 
-#endif  // canImport(MobileVLCKit)
+#endif  // canImport(VLCKitSPM)
 

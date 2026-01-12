@@ -13,7 +13,3 @@ CODE_SIGN_ENTITLEMENTS = Luna/Luna.entitlements
 
 // Optional local overrides (ignored in Git)
 #include? "Build.local.xcconfig"
-
-// CocoaPods integration
-#include? "Pods/Target Support Files/Pods-Luna/Pods-Luna.debug.xcconfig"
-#include? "Pods/Target Support Files/Pods-Luna/Pods-Luna.release.xcconfig"

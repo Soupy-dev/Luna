@@ -30,6 +30,7 @@
 		13830AF42E55F5FF00B3CDE4 /* AccentColorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13830AF32E55F5FF00B3CDE4 /* AccentColorManager.swift */; };
 		139509A22E7DDAE100CB60D4 /* PlayerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139509A12E7DDAE100CB60D4 /* PlayerSettingsView.swift */; };
 		BB7777912F20000000BB7791 /* VLCLanguageSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7777902F20000000BB7790 /* VLCLanguageSelectionView.swift */; };
+		BB7777972F20000001BB7797 /* VLCKitSPM in Frameworks */ = {isa = PBXBuildFile; productRef = BB7777982F20000001BB7798 /* VLCKitSPM */; };
 		13A46CFD2EF5943400423BC6 /* FakeWebKit in Frameworks */ = {isa = PBXBuildFile; productRef = 13A46CFC2EF5943400423BC6 /* FakeWebKit */; };
 		13A46D002EF5944C00423BC6 /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 13A46CFF2EF5944C00423BC6 /* Kingfisher */; };
 		13A46D032EF5945700423BC6 /* SoraCore in Frameworks */ = {isa = PBXBuildFile; productRef = 13A46D022EF5945700423BC6 /* SoraCore */; };
@@ -279,6 +280,7 @@
 				13A46D032EF5945700423BC6 /* SoraCore in Frameworks */,
 				13A46CFD2EF5943400423BC6 /* FakeWebKit in Frameworks */,
 				136C25C62EFE950300E37A6E /* MPVKit-GPL in Frameworks */,
+				BB7777972F20000001BB7797 /* VLCKitSPM in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -855,6 +857,7 @@
 				13A46CFE2EF5944C00423BC6 /* XCRemoteSwiftPackageReference "Kingfisher" */,
 				13A46D012EF5945700423BC6 /* XCRemoteSwiftPackageReference "SoraCore" */,
 				136C25C42EFE950300E37A6E /* XCRemoteSwiftPackageReference "MPVKit" */,
+				BB7777992F20000001BB7799 /* XCRemoteSwiftPackageReference "vlckit-spm" */,
 			);
 			productRefGroup = 13F0725C2E4B2D3300EF90EB /* Products */;
 			projectDirPath = "";
@@ -1314,6 +1317,14 @@
 				kind = branch;
 			};
 		};
+		BB7777992F20000001BB7799 /* XCRemoteSwiftPackageReference "vlckit-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tylerjonesio/vlckit-spm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.6.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1340,6 +1351,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 13A46D012EF5945700423BC6 /* XCRemoteSwiftPackageReference "SoraCore" */;
 			productName = SoraCore;
+		};
+		BB7777982F20000001BB7798 /* VLCKitSPM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BB7777992F20000001BB7799 /* XCRemoteSwiftPackageReference "vlckit-spm" */;
+			productName = VLCKitSPM;
 		};
 /* End XCSwiftPackageProductDependency section */
 
