@@ -1274,13 +1274,6 @@ struct ModulesSearchResultsSheet: View {
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
                 
-                guard let preset = preset else {
-                    Logger.shared.log("No player preset available", type: "Error")
-                    viewModel.streamError = "Player configuration error. Please try again."
-                    viewModel.showingStreamError = true
-                    return
-                }
-                
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil
                 let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
@@ -1292,7 +1285,7 @@ struct ModulesSearchResultsSheet: View {
                 
                 let pvc = PlayerViewController(
                     url: streamURL,
-                    preset: preset,
+                    preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
                     headers: finalHeaders,
                     subtitles: subtitleArray,
                     mediaInfo: playerMediaInfo
@@ -1314,13 +1307,6 @@ struct ModulesSearchResultsSheet: View {
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
                 
-                guard let preset = preset else {
-                    Logger.shared.log("No player preset available", type: "Error")
-                    viewModel.streamError = "Player configuration error. Please try again."
-                    viewModel.showingStreamError = true
-                    return
-                }
-                
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil
                 let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
@@ -1332,7 +1318,7 @@ struct ModulesSearchResultsSheet: View {
                 
                 let pvc = PlayerViewController(
                     url: streamURL,
-                    preset: preset,
+                    preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
                     headers: finalHeaders,
                     subtitles: subtitleArray,
                     mediaInfo: playerMediaInfo
