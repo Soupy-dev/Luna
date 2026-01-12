@@ -54,6 +54,7 @@ final class ModulesSearchResultsViewModel: ObservableObject {
     var pendingStreamURL: String?
     var pendingHeaders: [String: String]?
     var pendingDefaultSubtitle: String?
+    var pendingServiceHref: String?
     
     init() {
         highQualityThreshold = UserDefaults.standard.object(forKey: "highQualityThreshold") as? Double ?? 0.9
@@ -66,6 +67,7 @@ final class ModulesSearchResultsViewModel: ObservableObject {
         pendingJSController = nil
         selectedSeasonIndex = 0
         isFetchingStreams = false
+        pendingServiceHref = nil
     }
     
     func resetStreamState() {
@@ -73,26 +75,45 @@ final class ModulesSearchResultsViewModel: ObservableObject {
         showingStreamMenu = false
         pendingSubtitles = nil
         pendingService = nil
+        pendingServiceHref = nil
     }
 }
 
 struct ModulesSearchResultsSheet: View {
+    /// Base title from caller (TMDB or season-specific)
     let mediaTitle: String
+    /// Optional season-specific override (AniList season title)
+    let seasonTitleOverride: String?
     let originalTitle: String?
     let isMovie: Bool
     let selectedEpisode: TMDBEpisode?
     let tmdbId: Int
+    /// Non-nil for anime to force E## format
+    let animeSeasonTitle: String?
+    let posterPath: String?
     
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var viewModel = ModulesSearchResultsViewModel()
     @StateObject private var serviceManager = ServiceManager.shared
     @StateObject private var algorithmManager = AlgorithmManager.shared
-    
+
+    private var effectiveTitle: String { seasonTitleOverride ?? mediaTitle }
+    private var animeEffectiveTitle: String {
+        guard animeSeasonTitle != nil else { return effectiveTitle }
+        let stripped = effectiveTitle
+            .replacingOccurrences(of: "(?i)season\\s+\\d+", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stripped.isEmpty ? effectiveTitle : stripped
+    }
+
     private var displayTitle: String {
         if let episode = selectedEpisode {
-            return "\(mediaTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
+            if animeSeasonTitle != nil {
+                return "\(animeEffectiveTitle) E\(episode.episodeNumber)"
+            }
+            return "\(effectiveTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
         }
-        return mediaTitle
+        return effectiveTitle
     }
     
     private var episodeSeasonInfo: String {
@@ -130,16 +151,24 @@ struct ModulesSearchResultsSheet: View {
                     .fontWeight(.semibold)
                 
                 if let episode = selectedEpisode, !episode.name.isEmpty {
-                    HStack {
-                        Text(episode.name)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(episodeSeasonInfo)
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .cornerRadius(8)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(episode.name)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Spacer()
+                            Text(episodeSeasonInfo)
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .cornerRadius(8)
+                        }
+                        
+                        if let overview = episode.overview, !overview.isEmpty {
+                            Text(overview)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 
@@ -275,7 +304,7 @@ struct ModulesSearchResultsSheet: View {
         ForEach(filteredResults.highQuality, id: \.id) { searchResult in
             EnhancedMediaResultRow(
                 result: searchResult,
-                originalTitle: mediaTitle,
+                originalTitle: effectiveTitle,
                 alternativeTitle: originalTitle,
                 episode: selectedEpisode,
                 onTap: {
@@ -325,7 +354,7 @@ struct ModulesSearchResultsSheet: View {
             ForEach(filteredResults.lowQuality, id: \.id) { searchResult in
                 CompactMediaResultRow(
                     result: searchResult,
-                    originalTitle: mediaTitle,
+                    originalTitle: effectiveTitle,
                     alternativeTitle: originalTitle,
                     episode: selectedEpisode,
                     onTap: {
@@ -431,7 +460,8 @@ struct ModulesSearchResultsSheet: View {
                         defaultSubtitle: option.subtitle,
                         service: service,
                         streamURL: option.url,
-                        headers: option.headers
+                        headers: option.headers,
+                        serviceHref: viewModel.pendingServiceHref
                     )
                 }
             }
@@ -492,7 +522,7 @@ struct ModulesSearchResultsSheet: View {
                 viewModel.showingSubtitlePicker = false
                 if let service = viewModel.pendingService,
                    let streamURL = viewModel.pendingStreamURL {
-                    playStreamURL(streamURL, service: service, subtitle: option.url, headers: viewModel.pendingHeaders)
+                    playStreamURL(streamURL, service: service, subtitle: option.url, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
                 }
             }
         }
@@ -500,13 +530,14 @@ struct ModulesSearchResultsSheet: View {
             viewModel.showingSubtitlePicker = false
             if let service = viewModel.pendingService,
                let streamURL = viewModel.pendingStreamURL {
-                playStreamURL(streamURL, service: service, subtitle: nil, headers: viewModel.pendingHeaders)
+                playStreamURL(streamURL, service: service, subtitle: nil, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
             }
         }
         Button("Cancel", role: .cancel) {
             viewModel.subtitleOptions = []
             viewModel.pendingStreamURL = nil
             viewModel.pendingHeaders = nil
+            viewModel.pendingServiceHref = nil
         }
     }
     
@@ -642,8 +673,30 @@ struct ModulesSearchResultsSheet: View {
             return
         }
         
-        let searchQuery = mediaTitle
-        let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != mediaTitle.lowercased() } ?? false
+        // Check if anime via TrackerManager (for logging)
+        let isAnime = TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
+        
+        // Build search query
+        let searchQuery: String
+        if let ep = selectedEpisode {
+            if animeSeasonTitle != nil {
+                searchQuery = "\(animeEffectiveTitle) E\(ep.episodeNumber)"
+            } else {
+                searchQuery = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
+            }
+        } else {
+            searchQuery = effectiveTitle
+        }
+        
+        // Debug logging
+        Logger.shared.log("[ServicesResultsSheet] mediaTitle: '\(mediaTitle)'", type: "Debug")
+        Logger.shared.log("[ServicesResultsSheet] seasonTitleOverride: '\(seasonTitleOverride ?? "nil")'", type: "Debug")
+        Logger.shared.log("[ServicesResultsSheet] effectiveTitle: '\(effectiveTitle)'", type: "Debug")
+        Logger.shared.log("[ServicesResultsSheet] searchQuery: '\(searchQuery)'", type: "Debug")
+        Logger.shared.log("[ServicesResultsSheet] isAnime: \(isAnime)", type: "Debug")
+        
+        let baseTitleQuery = searchQuery.caseInsensitiveCompare(effectiveTitle) == .orderedSame ? nil : effectiveTitle
+        let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != effectiveTitle.lowercased() } ?? false
         
         Task {
             await serviceManager.searchInActiveServicesProgressively(
@@ -661,7 +714,60 @@ struct ModulesSearchResultsSheet: View {
                     }
                 },
                 onComplete: {
-                    if hasAlternativeTitle, let altTitle = self.originalTitle {
+                    // Second tier: search with base title if different from primary query
+                    if let baseTitleQuery = baseTitleQuery {
+                        Task {
+                            await self.serviceManager.searchInActiveServicesProgressively(
+                                query: baseTitleQuery,
+                                onResult: { service, additionalResults in
+                                    Task { @MainActor in
+                                        let additional = additionalResults ?? []
+                                        let existing = self.viewModel.moduleResults[service.id] ?? []
+                                        let existingHrefs = Set(existing.map { $0.href })
+                                        let newResults = additional.filter { !existingHrefs.contains($0.href) }
+                                        self.viewModel.moduleResults[service.id] = existing + newResults
+                                        
+                                        if additionalResults == nil {
+                                            self.viewModel.failedServices.insert(service.id)
+                                        }
+                                    }
+                                },
+                                onComplete: {
+                                    // Third tier: search with romaji/original title
+                                    if hasAlternativeTitle, let altTitle = self.originalTitle {
+                                        Task {
+                                            await self.serviceManager.searchInActiveServicesProgressively(
+                                                query: altTitle,
+                                                onResult: { service, additionalResults in
+                                                    Task { @MainActor in
+                                                        let additional = additionalResults ?? []
+                                                        let existing = self.viewModel.moduleResults[service.id] ?? []
+                                                        let existingHrefs = Set(existing.map { $0.href })
+                                                        let newResults = additional.filter { !existingHrefs.contains($0.href) }
+                                                        self.viewModel.moduleResults[service.id] = existing + newResults
+                                                        
+                                                        if additionalResults == nil {
+                                                            self.viewModel.failedServices.insert(service.id)
+                                                        }
+                                                    }
+                                                },
+                                                onComplete: {
+                                                    Task { @MainActor in
+                                                        self.viewModel.isSearching = false
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    } else {
+                                        Task { @MainActor in
+                                            self.viewModel.isSearching = false
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    } else if hasAlternativeTitle, let altTitle = self.originalTitle {
+                        // No base title query, go straight to romaji
                         Task {
                             await self.serviceManager.searchInActiveServicesProgressively(
                                 query: altTitle,
@@ -781,6 +887,7 @@ struct ModulesSearchResultsSheet: View {
                 Logger.shared.log("Stream fetch result - Streams: \(streams?.count ?? 0), Sources: \(sources?.count ?? 0)", type: "Stream")
                 self.viewModel.streamFetchProgress = "Processing stream data..."
                 
+                self.viewModel.pendingServiceHref = episodeHref
                 self.processStreamResult(streams: streams, subtitles: subtitles, sources: sources, service: service)
                 self.viewModel.resetPickerState()
             }
@@ -957,7 +1064,8 @@ struct ModulesSearchResultsSheet: View {
                 defaultSubtitle: firstStream.subtitle,
                 service: service,
                 streamURL: firstStream.url,
-                headers: firstStream.headers
+                headers: firstStream.headers,
+                serviceHref: viewModel.pendingServiceHref
             )
         } else if let streamURL = extractSingleStreamURL(streams: streams, sources: sources) {
             resolveSubtitleSelection(
@@ -965,7 +1073,8 @@ struct ModulesSearchResultsSheet: View {
                 defaultSubtitle: nil,
                 service: service,
                 streamURL: streamURL.url,
-                headers: streamURL.headers
+                headers: streamURL.headers,
+                serviceHref: viewModel.pendingServiceHref
             )
         } else {
             Logger.shared.log("Failed to create URL from stream string", type: "Error")
@@ -1048,20 +1157,20 @@ struct ModulesSearchResultsSheet: View {
     }
     
     @MainActor
-    private func resolveSubtitleSelection(subtitles: [String]?, defaultSubtitle: String?, service: Service, streamURL: String, headers: [String: String]?) {
+    private func resolveSubtitleSelection(subtitles: [String]?, defaultSubtitle: String?, service: Service, streamURL: String, headers: [String: String]?, serviceHref: String? = nil) {
         guard let subtitles = subtitles, !subtitles.isEmpty else {
-            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers)
+            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
             return
         }
         
         let options = parseSubtitleOptions(from: subtitles)
         guard !options.isEmpty else {
-            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers)
+            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
             return
         }
         
         if options.count == 1 {
-            playStreamURL(streamURL, service: service, subtitle: options[0].url, headers: headers)
+            playStreamURL(streamURL, service: service, subtitle: options[0].url, headers: headers, serviceHref: serviceHref)
             return
         }
         
@@ -1069,6 +1178,7 @@ struct ModulesSearchResultsSheet: View {
         viewModel.pendingStreamURL = streamURL
         viewModel.pendingHeaders = headers
         viewModel.pendingService = service
+        viewModel.pendingServiceHref = serviceHref
         viewModel.pendingDefaultSubtitle = defaultSubtitle
         viewModel.isFetchingStreams = false
         viewModel.showingSubtitlePicker = true
@@ -1099,7 +1209,7 @@ struct ModulesSearchResultsSheet: View {
         return options
     }
     
-    private func playStreamURL(_ url: String, service: Service, subtitle: String?, headers: [String: String]?) {
+    private func playStreamURL(_ url: String, service: Service, subtitle: String?, headers: [String: String]?, serviceHref: String? = nil) {
         viewModel.resetStreamState()
         
         Task { @MainActor in
@@ -1143,29 +1253,82 @@ struct ModulesSearchResultsSheet: View {
             Logger.shared.log("Final headers: \(finalHeaders)", type: "Stream")
             
             let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
-            let inAppPlayer = (inAppRaw == "mpv") ? "mpv" : "Normal"
+            let inAppPlayer = inAppRaw
+            
+            // Record service usage (async to avoid blocking player launch)
+            Task {
+                if self.isMovie {
+                    ProgressManager.shared.recordMovieServiceInfo(movieId: self.tmdbId, serviceId: service.id, href: serviceHref)
+                } else if let episode = self.selectedEpisode {
+                    ProgressManager.shared.recordEpisodeServiceInfo(
+                        showId: self.tmdbId,
+                        seasonNumber: episode.seasonNumber,
+                        episodeNumber: episode.episodeNumber,
+                        serviceId: service.id,
+                        href: serviceHref
+                    )
+                }
+            }
             
             if inAppPlayer == "mpv" {
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
+                
+                // Prepare mediaInfo before creating player
+                var playerMediaInfo: MediaInfo? = nil
+                let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                if isMovie {
+                    playerMediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
+                } else if let episode = selectedEpisode {
+                    playerMediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
+                }
+                
                 let pvc = PlayerViewController(
                     url: streamURL,
                     preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
                     headers: finalHeaders,
-                    subtitles: subtitleArray
+                    subtitles: subtitleArray,
+                    mediaInfo: playerMediaInfo
                 )
-                if isMovie {
-                    pvc.mediaInfo = .movie(id: tmdbId, title: mediaTitle)
-                } else if let episode = selectedEpisode {
-                    pvc.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber)
-                }
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.topmostViewController().present(pvc, animated: true, completion: nil)
+                   let rootVC = windowScene.windows.first?.rootViewController,
+                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
+                    topmostVC.present(pvc, animated: true, completion: nil)
                 } else {
                     Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
+                }
+                return
+            } else if inAppPlayer == "VLC" {
+                // VLC uses same PlayerViewController as MPV
+                let preset = PlayerPreset.presets.first
+                let subtitleArray: [String]? = subtitle.map { [$0] }
+                
+                // Prepare mediaInfo before creating player
+                var playerMediaInfo: MediaInfo? = nil
+                let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                if isMovie {
+                    playerMediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
+                } else if let episode = selectedEpisode {
+                    playerMediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
+                }
+                
+                let pvc = PlayerViewController(
+                    url: streamURL,
+                    preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
+                    headers: finalHeaders,
+                    subtitles: subtitleArray,
+                    mediaInfo: playerMediaInfo
+                )
+                pvc.modalPresentationStyle = .fullScreen
+                
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let rootVC = windowScene.windows.first?.rootViewController,
+                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
+                    topmostVC.present(pvc, animated: true, completion: nil)
+                } else {
+                    Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
                 }
                 return
             } else {
@@ -1174,20 +1337,24 @@ struct ModulesSearchResultsSheet: View {
                 let item = AVPlayerItem(asset: asset)
                 playerVC.player = AVPlayer(playerItem: item)
                 if isMovie {
-                    playerVC.mediaInfo = .movie(id: tmdbId, title: mediaTitle)
+                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                    playerVC.mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
                 } else if let episode = selectedEpisode {
-                    playerVC.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber)
+                    let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+                    playerVC.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
                 }
                 playerVC.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.topmostViewController().present(playerVC, animated: true) {
+                   let rootVC = windowScene.windows.first?.rootViewController,
+                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
+                    topmostVC.present(playerVC, animated: true) {
                         playerVC.player?.play()
                     }
                 } else {
                     Logger.shared.log("Failed to find root view controller to present player", type: "Error")
-                    playerVC.player?.play()
+                    viewModel.streamError = "Failed to open player. Please try again."
+                    viewModel.showingStreamError = true
                 }
             }
         }
