@@ -35,6 +35,7 @@
 		13A46D032EF5945700423BC6 /* SoraCore in Frameworks */ = {isa = PBXBuildFile; productRef = 13A46D022EF5945700423BC6 /* SoraCore */; };
 		13B2E5742E7597B9009F3271 /* JSController-NetworkFetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13B2E5732E7597B9009F3271 /* JSController-NetworkFetch.swift */; };
 		13B6F3452EA4C6BC00DECD2B /* ProgressManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13B6F3442EA4C6BC00DECD2B /* ProgressManager.swift */; };
+		13C6F3462EA4C6BC00DECD2B /* CacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13C6F3452EA4C6BC00DECD2B /* CacheManager.swift */; };
 		13DCC4F62E58B40F0028AE91 /* HybridSimilarity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DCC4F52E58B40F0028AE91 /* HybridSimilarity.swift */; };
 		13E1EDD12ED9E65F00087629 /* Module.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E1ED9C2ED9E65F00087629 /* Module.swift */; };
 		13E1EDD22ED9E65F00087629 /* ModuleManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E1ED9E2ED9E65F00087629 /* ModuleManager.swift */; };
@@ -169,6 +170,7 @@
 		BB7777902F20000000BB7790 /* VLCLanguageSelectionView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VLCLanguageSelectionView.swift; sourceTree = "<group>"; };
 		13B2E5732E7597B9009F3271 /* JSController-NetworkFetch.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "JSController-NetworkFetch.swift"; sourceTree = "<group>"; };
 		13B6F3442EA4C6BC00DECD2B /* ProgressManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ProgressManager.swift; sourceTree = "<group>"; };
+		13C6F3452EA4C6BC00DECD2B /* CacheManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CacheManager.swift; sourceTree = "<group>"; };
 		13B6F3472EA4C82600DECD2B /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		13DCC4F52E58B40F0028AE91 /* HybridSimilarity.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HybridSimilarity.swift; sourceTree = "<group>"; };
 		13E1ED9C2ED9E65F00087629 /* Module.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Module.swift; sourceTree = "<group>"; };
@@ -778,6 +780,7 @@
 				13F5B5932E730B0200565E75 /* Library */,
 				13F5B5912E73090000565E75 /* HomeSection.swift */,
 				14BBB0063FFF111100AAAAAA /* BackupManager.swift */,
+				13C6F3452EA4C6BC00DECD2B /* CacheManager.swift */,
 				AA5555502F10000000AA5550 /* CatalogManager.swift */,
 				AA7777702F10000000AA7770 /* HomeViewModel.swift */,
 				AA8888802F10000000AA8880 /* ScheduleViewModel.swift */,
