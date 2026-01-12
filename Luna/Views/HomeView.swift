@@ -680,7 +680,11 @@ struct ContinueWatchingCard: View {
                             .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+#if os(tvOS)
+                    .background(Color.black)
+#else
                     .background(Color(.systemBackground))
+#endif
                 }
             }
         }
