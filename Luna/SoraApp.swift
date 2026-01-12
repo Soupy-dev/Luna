@@ -19,6 +19,13 @@ struct SoraApp: App {
     let kanzen = KanzenEngine();
 #endif
 
+    init() {
+        // Check and auto-clear cache on app startup if threshold exceeded
+        DispatchQueue.global(qos: .background).async {
+            CacheManager.shared.checkAndAutoClearIfNeeded()
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
 #if os(tvOS)
