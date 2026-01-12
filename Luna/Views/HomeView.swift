@@ -730,11 +730,6 @@ struct ContinueWatchingCard: View {
     private func loadMediaDetails() async {
         // Always attempt to load full media details when requested
         // This ensures anime season titles and posters are fetched
-        defer {
-            await MainActor.run {
-                self.isLoaded = true
-            }
-        }
         
         do {
             if item.isMovie {
@@ -805,9 +800,15 @@ struct ContinueWatchingCard: View {
                     }
                 }
             }
+            
+            // Mark as loaded after all operations complete
+            await MainActor.run {
+                self.isLoaded = true
+            }
         } catch {
             await MainActor.run {
                 self.title = item.isMovie ? "Movie" : "TV Show"
+                self.isLoaded = true
                 Logger.shared.log("Failed to load media details for \(item.tmdbId): \(error.localizedDescription)", type: "Error")
             }
         }
