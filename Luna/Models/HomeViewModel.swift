@@ -16,26 +16,12 @@ final class HomeViewModel: ObservableObject {
     @Published var heroContent: TMDBSearchResult?
     @Published var ambientColor: Color = Color.black
     @Published var heroLogoURL: String?
-    @Published var continueWatchingItems: [ContinueWatchingItem] = []
     @Published var hasLoadedContent = false
     
     private var cancellables = Set<AnyCancellable>()
     
     init() {
-        // Monitor progress manager for continue watching updates
-        ProgressManager.shared.$episodeProgressList
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.updateContinueWatchingItems()
-            }
-            .store(in: &cancellables)
-        
-        ProgressManager.shared.$movieProgressList
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.updateContinueWatchingItems()
-            }
-            .store(in: &cancellables)
+        // Init body can be simplified if needed
     }
     
     func loadContent(
@@ -45,13 +31,11 @@ final class HomeViewModel: ObservableObject {
     ) {
         // Don't reload if we already have content
         guard !hasLoadedContent else {
-            updateContinueWatchingItems()
             return
         }
         
         isLoading = true
         errorMessage = nil
-        continueWatchingItems = ProgressManager.shared.getContinueWatchingItems()
         
         Task {
             do {
@@ -238,10 +222,7 @@ final class HomeViewModel: ObservableObject {
             }
         }
     }
-    
-    func updateContinueWatchingItems() {
-        continueWatchingItems = ProgressManager.shared.getContinueWatchingItems()
-    }
+
     
     func resetContent() {
         catalogResults = [:]
@@ -250,6 +231,5 @@ final class HomeViewModel: ObservableObject {
         heroContent = nil
         heroLogoURL = nil
         hasLoadedContent = false
-        continueWatchingItems = []
     }
 }

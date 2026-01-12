@@ -91,8 +91,6 @@ struct ModulesSearchResultsSheet: View {
     /// Non-nil for anime to force E## format
     let animeSeasonTitle: String?
     let posterPath: String?
-    /// Whether this sheet is presented from continue watching (needs special dismissal)
-    let isFromContinueWatching: Bool = false
     
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var viewModel = ModulesSearchResultsViewModel()
@@ -1294,19 +1292,11 @@ struct ModulesSearchResultsSheet: View {
                 )
                 pvc.modalPresentationStyle = .fullScreen
                 
-                // Only dismiss sheet if we're coming from continue watching
-                if isFromContinueWatching {
-                    presentationMode.wrappedValue.dismiss()
-                }
-                
-                // Small delay to allow sheet dismissal to complete if needed
-                DispatchQueue.main.asyncAfter(deadline: .now() + (isFromContinueWatching ? 0.3 : 0)) {
-                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let rootVC = windowScene.windows.first?.rootViewController {
-                        rootVC.present(pvc, animated: true, completion: nil)
-                    } else {
-                        Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
-                    }
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let rootVC = windowScene.windows.first?.rootViewController {
+                    rootVC.present(pvc, animated: true, completion: nil)
+                } else {
+                    Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
                 }
                 return
             } else if inAppPlayer == "VLC" {
@@ -1332,19 +1322,11 @@ struct ModulesSearchResultsSheet: View {
                 )
                 pvc.modalPresentationStyle = .fullScreen
                 
-                // Only dismiss sheet if we're coming from continue watching
-                if isFromContinueWatching {
-                    presentationMode.wrappedValue.dismiss()
-                }
-                
-                // Small delay to allow sheet dismissal to complete if needed
-                DispatchQueue.main.asyncAfter(deadline: .now() + (isFromContinueWatching ? 0.3 : 0)) {
-                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let rootVC = windowScene.windows.first?.rootViewController {
-                        rootVC.present(pvc, animated: true, completion: nil)
-                    } else {
-                        Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
-                    }
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let rootVC = windowScene.windows.first?.rootViewController {
+                    rootVC.present(pvc, animated: true, completion: nil)
+                } else {
+                    Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
                 }
                 return
             } else {
