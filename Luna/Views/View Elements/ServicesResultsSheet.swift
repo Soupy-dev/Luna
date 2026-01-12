@@ -1293,8 +1293,9 @@ struct ModulesSearchResultsSheet: View {
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.present(pvc, animated: true, completion: nil)
+                   let rootVC = windowScene.windows.first?.rootViewController,
+                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
+                    topmostVC.present(pvc, animated: true, completion: nil)
                 } else {
                     Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
                 }
@@ -1323,8 +1324,9 @@ struct ModulesSearchResultsSheet: View {
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.present(pvc, animated: true, completion: nil)
+                   let rootVC = windowScene.windows.first?.rootViewController,
+                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
+                    topmostVC.present(pvc, animated: true, completion: nil)
                 } else {
                     Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
                 }
