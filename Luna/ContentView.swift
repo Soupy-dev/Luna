@@ -60,7 +60,6 @@ struct ContentView: View {
 #if !os(tvOS)
             .tabBarMinimizeBehavior(.never)
 #endif
-            .accentColor(accentColorManager.currentAccentColor)
             
         } else {
             olderTabView
