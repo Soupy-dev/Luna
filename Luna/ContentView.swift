@@ -35,7 +35,7 @@ struct ContentView: View {
     
     private var mainContent: some View {
 #if compiler(>=6.0)
-        if #available(iOS 26.0, tvOS 26.0, *) {
+        if #available(iOS 18.0, tvOS 18.0, *) {
             modernTabView
         } else {
             olderTabView
@@ -47,7 +47,7 @@ struct ContentView: View {
     
     @ViewBuilder
     private var modernTabView: some View {
-        TabView {
+        let tabView = TabView {
             Tab("Home", systemImage: "house.fill") {
                 HomeView()
             }
@@ -68,8 +68,15 @@ struct ContentView: View {
                 SettingsView()
             }
         }
+        
 #if !os(tvOS)
-        .tabBarMinimizeBehavior(.never)
+        if #available(iOS 26.0, *) {
+            tabView.tabBarMinimizeBehavior(.never)
+        } else {
+            tabView
+        }
+#else
+        tabView
 #endif
     }
     
