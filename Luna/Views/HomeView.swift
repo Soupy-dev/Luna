@@ -48,6 +48,17 @@ struct HomeView: View {
         ZStack {
             Group {
                 homeViewModel.ambientColor
+                    .overlay(
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(red: 0.05, green: 0.05, blue: 0.15).opacity(0.2),
+                                Color.clear,
+                                Color(red: 0.1, green: 0.05, blue: 0.2).opacity(0.3)
+                            ]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             }
             .ignoresSafeArea(.all)
             
@@ -170,9 +181,10 @@ struct HomeView: View {
                         .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundColor(.white)
-                        .padding(.horizontal, isTvOS ? 16 : 8)
-                        .padding(.vertical, isTvOS ? 10 : 4)
+                        .padding(.horizontal, isTvOS ? 16 : 10)
+                        .padding(.vertical, isTvOS ? 10 : 6)
                         .applyLiquidGlassBackground(cornerRadius: 12)
+                        .moonShadow(intensity: 0.8)
                     
                     if (hero.voteAverage ?? 0.0) > 0 {
                         HStack(alignment: .firstTextBaseline, spacing: 2) {
@@ -185,9 +197,10 @@ struct HomeView: View {
                         }
                         .font(.caption)
                         .foregroundColor(.white)
-                        .padding(.horizontal, isTvOS ? 16 : 8)
-                        .padding(.vertical, isTvOS ? 10 : 4)
+                        .padding(.horizontal, isTvOS ? 16 : 10)
+                        .padding(.vertical, isTvOS ? 10 : 6)
                         .applyLiquidGlassBackground(cornerRadius: 12)
+                        .moonShadow(intensity: 0.8)
                     }
                 }
                 
@@ -240,7 +253,13 @@ struct HomeView: View {
                             view
                                 .frame(width: 140, height: 42)
                                 .buttonStyle(PlainButtonStyle())
-                                .applyLiquidGlassBackground(cornerRadius: 12)
+                                .applyLiquidGlassBackground(
+                                    cornerRadius: 14,
+                                    glassTint: Color.white.opacity(0.05)
+                                )
+                                .moonShadow(intensity: 1.2)
+                                .scaleEffect(isHoveringWatchNow ? 1.05 : 1.0)
+                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isHoveringWatchNow)
                         })
                     }
                     
@@ -269,16 +288,18 @@ struct HomeView: View {
 #endif
                         }, else: { view in
                             view.frame(width: 140, height: 42)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.black.opacity(0.3))
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(.white.opacity(0.3), lineWidth: 1)
-                                        )
+                                .applyLiquidGlassBackground(
+                                    cornerRadius: 14,
+                                    glassTint: Color.white.opacity(0.03)
                                 )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                )
+                                .moonShadow(intensity: 1.0)
+                                .scaleEffect(isHoveringWatchlist ? 1.05 : 1.0)
+                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isHoveringWatchlist)
                         })
-                        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
                     }
                 }
             }

@@ -262,12 +262,16 @@ struct EpisodeCell: View {
                     }
                 }
             }
-            .padding(12)
-            .applyLiquidGlassBackground(cornerRadius: 12)
+            .padding(14)
+            .applyLiquidGlassBackground(
+                cornerRadius: 14,
+                glassTint: Color.white.opacity(0.02)
+            )
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 14)
                     .stroke(Color.white.opacity(0.1), lineWidth: 1)
             )
+            .moonShadow(intensity: 0.8)
         }
         .buttonStyle(PlainButtonStyle())
         .contextMenu {

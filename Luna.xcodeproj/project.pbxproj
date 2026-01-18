@@ -23,6 +23,9 @@
 		13631B322E4F1A200035C39F /* ServiceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13631B312E4F1A200035C39F /* ServiceSettingsView.swift */; };
 		136C25C62EFE950300E37A6E /* MPVKit-GPL in Frameworks */ = {isa = PBXBuildFile; productRef = 136C25C52EFE950300E37A6E /* MPVKit-GPL */; };
 		136D3E5C2EB75D7E0094210C /* LiquidGlassBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 136D3E5B2EB75D7E0094210C /* LiquidGlassBackground.swift */; };
+		BB8888812F30000000BB8881 /* View+Elevation.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8888802F30000000BB8880 /* View+Elevation.swift */; };
+		CC7777712F30000000CC7771 /* MoonSplashScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC7777702F30000000CC7770 /* MoonSplashScreen.swift */; };
+		DD6666612F30000000DD6661 /* MoonIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6666602F30000000DD6660 /* MoonIconView.swift */; };
 		13830AEC2E55BD9200B3CDE4 /* AlgorithmManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13830AEB2E55BD9200B3CDE4 /* AlgorithmManager.swift */; };
 		13830AEE2E55BEDD00B3CDE4 /* JaroWinklerSimilarity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13830AED2E55BEDD00B3CDE4 /* JaroWinklerSimilarity.swift */; };
 		13830AF02E55C04F00B3CDE4 /* AlgorithmSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13830AEF2E55C04F00B3CDE4 /* AlgorithmSelectionView.swift */; };
@@ -107,6 +110,7 @@
 		13F072B92E4B2D9200EF90EB /* TMDBModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F072992E4B2D9200EF90EB /* TMDBModels.swift */; };
 		13F072BA2E4B2D9200EF90EB /* TMDBService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F0729A2E4B2D9200EF90EB /* TMDBService.swift */; };
 		13F072C22E4B2D9200EF90EB /* AniListService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F072C12E4B2D9200EF90EB /* AniListService.swift */; };
+		AA9999912F30000000AA9991 /* AniSkipService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA9999902F30000000AA9990 /* AniSkipService.swift */; };
 		13F187AC2E6F38CE00747F7E /* LibraryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F187A42E6F38CE00747F7E /* LibraryManager.swift */; };
 		13F187AD2E6F38CE00747F7E /* LibraryItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F187A62E6F38CE00747F7E /* LibraryItem.swift */; };
 		13F187AE2E6F38CE00747F7E /* LibraryCollection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F187A72E6F38CE00747F7E /* LibraryCollection.swift */; };
@@ -162,6 +166,9 @@
 		1324E7BA2E940BD70036B5F5 /* PiPController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PiPController.swift; sourceTree = "<group>"; };
 		13631B312E4F1A200035C39F /* ServiceSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ServiceSettingsView.swift; sourceTree = "<group>"; };
 		136D3E5B2EB75D7E0094210C /* LiquidGlassBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiquidGlassBackground.swift; sourceTree = "<group>"; };
+		BB8888802F30000000BB8880 /* View+Elevation.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "View+Elevation.swift"; sourceTree = "<group>"; };
+		CC7777702F30000000CC7770 /* MoonSplashScreen.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MoonSplashScreen.swift; sourceTree = "<group>"; };
+		DD6666602F30000000DD6660 /* MoonIconView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MoonIconView.swift; sourceTree = "<group>"; };
 		13830AEB2E55BD9200B3CDE4 /* AlgorithmManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AlgorithmManager.swift; sourceTree = "<group>"; };
 		13830AED2E55BEDD00B3CDE4 /* JaroWinklerSimilarity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JaroWinklerSimilarity.swift; sourceTree = "<group>"; };
 		13830AEF2E55C04F00B3CDE4 /* AlgorithmSelectionView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AlgorithmSelectionView.swift; sourceTree = "<group>"; };
@@ -245,6 +252,7 @@
 		13F072992E4B2D9200EF90EB /* TMDBModels.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBModels.swift; sourceTree = "<group>"; };
 		13F0729A2E4B2D9200EF90EB /* TMDBService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBService.swift; sourceTree = "<group>"; };
 		13F072C12E4B2D9200EF90EB /* AniListService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AniListService.swift; sourceTree = "<group>"; };
+		AA9999902F30000000AA9990 /* AniSkipService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AniSkipService.swift; sourceTree = "<group>"; };
 		13F187A42E6F38CE00747F7E /* LibraryManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LibraryManager.swift; sourceTree = "<group>"; };
 		13F187A62E6F38CE00747F7E /* LibraryItem.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LibraryItem.swift; sourceTree = "<group>"; };
 		13F187A72E6F38CE00747F7E /* LibraryCollection.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LibraryCollection.swift; sourceTree = "<group>"; };
@@ -607,6 +615,7 @@
 				13F072782E4B2D9000EF90EB /* SearchView.swift */,
 				13F0727A2E4B2D9000EF90EB /* HomeView.swift */,
 				13F0727B2E4B2D9000EF90EB /* LibraryView.swift */,
+				CC7777702F30000000CC7770 /* MoonSplashScreen.swift */,
 				13F0727C2E4B2D9000EF90EB /* MediaDetailView.swift */,
 				AA4444402F10000000AA4440 /* ScheduleView.swift */,
 				13F072C42E4B364B00EF90EB /* SettingsView */,
@@ -619,6 +628,7 @@
 			isa = PBXGroup;
 			children = (
 				12DF1FC12F040D6500E80375 /* AdaptiveConfirmationDialog.swift */,
+				DD6666602F30000000DD6660 /* MoonIconView.swift */,
 				13F187A32E6F38CE00747F7E /* Library */,
 				13F072802E4B2D9000EF90EB /* MediaInfo */,
 				13F072882E4B2D9000EF90EB /* SearchResultCard.swift */,
@@ -658,6 +668,7 @@
 				13F0728D2E4B2D9100EF90EB /* UIImage */,
 				13F072912E4B2D9100EF90EB /* Color */,
 				136D3E5B2EB75D7E0094210C /* LiquidGlassBackground.swift */,
+				BB8888802F30000000BB8880 /* View+Elevation.swift */,
 				12E7AF5F2EB80771003B7664 /* Platform.swift */,
 			);
 			path = Extensions;
@@ -713,6 +724,7 @@
 				13F072982E4B2D9200EF90EB /* Models */,
 				13F0729A2E4B2D9200EF90EB /* TMDBService.swift */,
 				13F072C12E4B2D9200EF90EB /* AniListService.swift */,
+				AA9999902F30000000AA9990 /* AniSkipService.swift */,
 				13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */,
 			);
 			path = TMDB;
@@ -921,6 +933,9 @@
 				13E1EDDB2ED9E65F00087629 /* ErrorDefinitions.swift in Sources */,
 				13F072B02E4B2D9200EF90EB /* SearchResultCard.swift in Sources */,
 				136D3E5C2EB75D7E0094210C /* LiquidGlassBackground.swift in Sources */,
+				BB8888812F30000000BB8881 /* View+Elevation.swift in Sources */,
+				CC7777712F30000000CC7771 /* MoonSplashScreen.swift in Sources */,
+				DD6666612F30000000DD6661 /* MoonIconView.swift in Sources */,
 				13B6F3452EA4C6BC00DECD2B /* ProgressManager.swift in Sources */,
 				13E1EDF42ED9E67000087629 /* ContentModel.xcdatamodeld in Sources */,
 				13F072B42E4B2D9200EF90EB /* resized.swift in Sources */,
@@ -938,6 +953,7 @@
 				13830AF22E55F51300B3CDE4 /* AlternativeUIView.swift in Sources */,
 				13F072BA2E4B2D9200EF90EB /* TMDBService.swift in Sources */,
 				13F072C22E4B2D9200EF90EB /* AniListService.swift in Sources */,
+				AA9999912F30000000AA9991 /* AniSkipService.swift in Sources */,
 				13E1EDE82ED9E66000087629 /* MainMenu.swift in Sources */,
 				13E1EDE32ED9E66000087629 /* readerSettingsView.swift in Sources */,
 				13F0725F2E4B2D3300EF90EB /* SoraApp.swift in Sources */,

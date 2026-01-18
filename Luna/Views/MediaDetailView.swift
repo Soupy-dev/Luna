@@ -199,8 +199,9 @@ struct MediaDetailView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.white)
-                        .frame(width: 32, height: 32)
-                        .applyLiquidGlassBackground(cornerRadius: 16)
+                        .frame(width: 36, height: 36)
+                        .applyLiquidGlassBackground(cornerRadius: 18)
+                        .moonShadow(intensity: 1.0)
                 }
                 
                 Spacer()
@@ -261,7 +262,17 @@ struct MediaDetailView: View {
                 
                 Spacer(minLength: 50)
             }
-            .background(Color.clear)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.clear,
+                        Color(red: 0.05, green: 0.05, blue: 0.15).opacity(0.15),
+                        Color(red: 0.1, green: 0.05, blue: 0.2).opacity(0.25)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
         }
     }
     
@@ -348,7 +359,7 @@ struct MediaDetailView: View {
     
     @ViewBuilder
     private var playAndBookmarkSection: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Button(action: {
                 searchInServices()
             }) {
@@ -359,16 +370,16 @@ struct MediaDetailView: View {
                         .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, 14)
                 .padding(.horizontal, 25)
                 .applyLiquidGlassBackground(
-                    cornerRadius: 12,
+                    cornerRadius: 14,
                     fallbackFill: serviceManager.activeServices.isEmpty ? Color.gray.opacity(0.3) : Color.black.opacity(0.2),
                     fallbackMaterial: serviceManager.activeServices.isEmpty ? .thinMaterial : .ultraThinMaterial,
-                    glassTint: serviceManager.activeServices.isEmpty ? Color.gray.opacity(0.3) : nil
+                    glassTint: serviceManager.activeServices.isEmpty ? Color.gray.opacity(0.3) : Color.white.opacity(0.05)
                 )
                 .foregroundColor(serviceManager.activeServices.isEmpty ? .secondary : .white)
-                .cornerRadius(8)
+                .moonShadow(intensity: serviceManager.activeServices.isEmpty ? 0.5 : 1.2)
             }
             .disabled(serviceManager.activeServices.isEmpty)
             
@@ -377,10 +388,12 @@ struct MediaDetailView: View {
             }) {
                 Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                     .font(.title2)
-                    .frame(width: 42, height: 42)
-                    .applyLiquidGlassBackground(cornerRadius: 12)
+                    .frame(width: 48, height: 48)
+                    .applyLiquidGlassBackground(cornerRadius: 14)
                     .foregroundColor(isBookmarked ? .yellow : .white)
-                    .cornerRadius(8)
+                    .moonShadow(intensity: isBookmarked ? 1.2 : 0.8)
+                    .scaleEffect(isBookmarked ? 1.05 : 1.0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isBookmarked)
             }
             
             Button(action: {
@@ -388,10 +401,10 @@ struct MediaDetailView: View {
             }) {
                 Image(systemName: "plus")
                     .font(.title2)
-                    .frame(width: 42, height: 42)
-                    .applyLiquidGlassBackground(cornerRadius: 12)
+                    .frame(width: 48, height: 48)
+                    .applyLiquidGlassBackground(cornerRadius: 14)
                     .foregroundColor(.white)
-                    .cornerRadius(8)
+                    .moonShadow(intensity: 0.8)
             }
         }
         .padding(.horizontal)

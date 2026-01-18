@@ -164,8 +164,8 @@ struct BookmarkItemCard: View {
                 .resizable()
                 .aspectRatio(2/3, contentMode: .fill)
                 .frame(width: 120, height: 180)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .shadow(color: .black.opacity(0.1), radius: 3, x: 0, y: 1)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .moonShadow(intensity: 1.0)
             
             Text(item.searchResult.displayTitle)
                 .font(.caption)
@@ -182,13 +182,14 @@ struct CollectionCard: View {
     
     var body: some View {
         VStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.gray.opacity(0.2))
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.gray.opacity(0.15))
                 .frame(width: 160, height: 160)
                 .overlay(
                     collectionPreview
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .moonShadow(intensity: 1.0)
             
             VStack(spacing: 4) {
                 Text(collection.name)
