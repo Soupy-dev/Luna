@@ -9,6 +9,12 @@
 
 import SwiftUI
 
+struct SkipSegment {
+    let startTime: Double
+    let endTime: Double
+    let type: String
+}
+
 struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
     @Binding var value: T
     let inRange: ClosedRange<T>
@@ -17,6 +23,7 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
     let textColor: Color
     let emptyColor: Color
     let height: CGFloat
+    let skipSegments: [SkipSegment]
     let onEditingChanged: (Bool) -> Void
     
     @State private var localRealProgress: T = 0
@@ -32,6 +39,7 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
         textColor: Color,
         emptyColor: Color,
         height: CGFloat,
+        skipSegments: [SkipSegment] = [],
         onEditingChanged: @escaping (Bool) -> Void
     ) {
         self._value = value
@@ -41,6 +49,7 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
         self.textColor = textColor
         self.emptyColor = emptyColor
         self.height = height
+        self.skipSegments = skipSegments
         self.onEditingChanged = onEditingChanged
     }
     
@@ -56,6 +65,25 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
                                 .fill(.ultraThinMaterial)
                         }
                         .clipShape(Capsule())
+                        
+                        // Yellow skip segments
+                        if !skipSegments.isEmpty {
+                            GeometryReader { segmentBounds in
+                                ForEach(0..<skipSegments.count, id: \.self) { index in
+                                    let segment = skipSegments[index]
+                                    let duration = Double(inRange.upperBound)
+                                    let startPercent = segment.startTime / duration
+                                    let endPercent = segment.endTime / duration
+                                    let width = (endPercent - startPercent) * Double(segmentBounds.size.width)
+                                    let xOffset = startPercent * Double(segmentBounds.size.width)
+                                    
+                                    Capsule()
+                                        .fill(Color.yellow.opacity(0.6))
+                                        .frame(width: max(CGFloat(width), 2))
+                                        .offset(x: CGFloat(xOffset) - segmentBounds.size.width / 2 + CGFloat(width) / 2)
+                                }
+                            }
+                        }
 
                         Capsule()
                             .fill(isActive ? activeFillColor : fillColor)

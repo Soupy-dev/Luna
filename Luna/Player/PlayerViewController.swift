@@ -229,6 +229,20 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         b.showsMenuAsPrimaryAction = true
         return b
     }()
+    
+    private let skipButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        b.backgroundColor = UIColor(white: 0.15, alpha: 0.85)
+        b.layer.cornerRadius = 8
+        b.clipsToBounds = true
+        b.tintColor = .white
+        b.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        b.contentEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+        b.alpha = 0.0
+        b.isHidden = true
+        return b
+    }()
 
     private let dimmingView: UIView = {
         let v = UIView()
@@ -344,6 +358,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     // Debounce timers for menu updates to avoid excessive rebuilds
     private var audioMenuDebounceTimer: Timer?
     private var subtitleMenuDebounceTimer: Timer?
+    
+    // AniSkip integration
+    private var skipSegments: [AniSkipSegment] = []
+    private var currentSkipSegment: AniSkipSegment?
+    private let aniSkipService = AniSkipService.shared
     
     // MARK: - Renderer Wrapper Methods
     // These methods abstract away differences between MPVSoftwareRenderer and VLCRenderer
@@ -885,6 +904,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         videoContainer.addSubview(subtitleButton)
         videoContainer.addSubview(speedButton)
         videoContainer.addSubview(audioButton)
+        videoContainer.addSubview(skipButton)
     #if !os(tvOS)
         videoContainer.addSubview(brightnessContainer)
         brightnessContainer.contentView.addSubview(brightnessSlider)
@@ -968,7 +988,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             audioButton.trailingAnchor.constraint(equalTo: speedButton.leadingAnchor, constant: -8),
             audioButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
             audioButton.widthAnchor.constraint(equalToConstant: 32),
-            audioButton.heightAnchor.constraint(equalToConstant: 32)
+            audioButton.heightAnchor.constraint(equalToConstant: 32),
+            
+            skipButton.leadingAnchor.constraint(equalTo: progressContainer.leadingAnchor, constant: 4),
+            skipButton.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: -12),
+            skipButton.heightAnchor.constraint(equalToConstant: 36)
         ])
 #if !os(tvOS)
         NSLayoutConstraint.activate([
@@ -1017,11 +1041,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         skipBackwardButton.addTarget(self, action: #selector(skipBackwardTapped), for: .touchUpInside)
         skipForwardButton.addTarget(self, action: #selector(skipForwardTapped), for: .touchUpInside)
         subtitleButton.addTarget(self, action: #selector(subtitleButtonTapped), for: .touchUpInside)
+        skipButton.addTarget(self, action: #selector(skipButtonTapped), for: .touchUpInside)
         
         // Ensure buttons work with VLC
         if vlcRenderer != nil {
             [centerPlayPauseButton, closeButton, pipButton, skipBackwardButton, 
-             skipForwardButton, subtitleButton, speedButton, audioButton].forEach {
+             skipForwardButton, subtitleButton, speedButton, audioButton, skipButton].forEach {
                 $0.isUserInteractionEnabled = true
             }
         }
@@ -1211,6 +1236,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         animateButtonTap(skipForwardButton)
         showControlsTemporarily()
     }
+    
+    @objc private func skipButtonTapped() {
+        guard let segment = currentSkipSegment else { return }
+        Logger.shared.log("[AniSkip] Skipping \(segment.skipType.displayName) to \(segment.endTime)s", type: "AniSkip")
+        rendererSeek(to: segment.endTime)
+        animateButtonTap(skipButton)
+    }
+    
     private func updateSubtitleMenu() {
         var trackActions: [UIAction] = []
         
@@ -1779,9 +1812,20 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func updateProgressHostingController() {
         struct ProgressHostView: View {
             @ObservedObject var model: ProgressModel
+            var skipSegments: [SkipSegment]
             var onEditingChanged: (Bool) -> Void
             var body: some View {
-                MusicProgressSlider(value: Binding(get: { model.position }, set: { model.position = $0 }), inRange: 0...max(model.duration, 1.0), activeFillColor: .white, fillColor: .white, textColor: .white.opacity(0.7), emptyColor: .white.opacity(0.3), height: 33, onEditingChanged: onEditingChanged)
+                MusicProgressSlider(
+                    value: Binding(get: { model.position }, set: { model.position = $0 }),
+                    inRange: 0...max(model.duration, 1.0),
+                    activeFillColor: .white,
+                    fillColor: .white,
+                    textColor: .white.opacity(0.7),
+                    emptyColor: .white.opacity(0.3),
+                    height: 33,
+                    skipSegments: skipSegments,
+                    onEditingChanged: onEditingChanged
+                )
             }
         }
         
@@ -1789,13 +1833,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             return
         }
         
-        let host = UIHostingController(rootView: AnyView(ProgressHostView(model: progressModel, onEditingChanged: { [weak self] editing in
-            guard let self = self else { return }
-            self.isSeeking = editing
-            if !editing {
-                self.rendererSeek(to: max(0, self.progressModel.position))
+        let host = UIHostingController(rootView: AnyView(ProgressHostView(
+            model: progressModel,
+            skipSegments: convertSkipSegments(),
+            onEditingChanged: { [weak self] editing in
+                guard let self = self else { return }
+                self.isSeeking = editing
+                if !editing {
+                    self.rendererSeek(to: max(0, self.progressModel.position))
+                }
             }
-        })))
+        )))
 
         addChild(host)
         host.view.translatesAutoresizingMaskIntoConstraints = false
@@ -1808,6 +1856,26 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         ])
         host.didMove(toParent: self)
         progressHostingController = host
+    }
+    
+    private func convertSkipSegments() -> [SkipSegment] {
+        return skipSegments.map { segment in
+            SkipSegment(
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                type: segment.skipType.rawValue
+            )
+        }
+    }
+    
+    private func refreshProgressSliderSegments() {
+        // Remove old hosting controller and recreate with new segments
+        progressHostingController?.willMove(toParent: nil)
+        progressHostingController?.view.removeFromSuperview()
+        progressHostingController?.removeFromParent()
+        progressHostingController = nil
+        
+        updateProgressHostingController()
     }
     
     private func updatePlayPauseButton(isPaused: Bool, shouldShowControls: Bool = true) {
@@ -2109,6 +2177,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 self.loadingIndicator.alpha = 0.0
                 self.centerPlayPauseButton.isHidden = false
             }
+            
+            // Update AniSkip button visibility
+            self.updateSkipButtonVisibility(for: position)
         }
         
         guard effectiveDuration.isFinite, effectiveDuration > 0, position >= 0, let info = mediaInfo else { return }
@@ -2131,6 +2202,89 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             return String(format: "%d:%02d:%02d", h, m, s)
         } else {
             return String(format: "%02d:%02d", m, s)
+        }
+    }
+    
+    // MARK: - AniSkip Integration
+    
+    private func fetchAniSkipData() {
+        // Only fetch for anime content with episode info
+        guard isAnimeContent() else { return }
+        guard case .episode(let showId, _, let episodeNumber, _, _) = mediaInfo else { return }
+        
+        // Get AniList ID from tracker
+        guard let anilistId = trackerManager.cachedAniListId(for: showId) else {
+            Logger.shared.log("[AniSkip] No AniList ID found for TMDB ID \(showId)", type: "AniSkip")
+            return
+        }
+        
+        Logger.shared.log("[AniSkip] Fetching skip times for AniList ID \(anilistId) Episode \(episodeNumber)", type: "AniSkip")
+        
+        Task {
+            do {
+                let segments = try await aniSkipService.fetchSkipTimes(
+                    anilistId: anilistId,
+                    episodeNumber: episodeNumber,
+                    episodeLength: cachedDuration > 0 ? cachedDuration : nil
+                )
+                
+                await MainActor.run {
+                    self.skipSegments = segments
+                    if !segments.isEmpty {
+                        Logger.shared.log("[AniSkip] Loaded \(segments.count) skip segments", type: "AniSkip")
+                        self.refreshProgressSliderSegments()
+                    }
+                }
+            } catch {
+                Logger.shared.log("[AniSkip] Failed to fetch skip times: \(error)", type: "Error")
+            }
+        }
+    }
+    
+    private func updateSkipButtonVisibility(for position: Double) {
+        guard !skipSegments.isEmpty else {
+            if !skipButton.isHidden {
+                hideSkipButton()
+            }
+            return
+        }
+        
+        let activeSegment = aniSkipService.activeSkipSegment(at: position, in: skipSegments)
+        
+        if let segment = activeSegment {
+            if currentSkipSegment?.skipId != segment.skipId {
+                currentSkipSegment = segment
+                showSkipButton(for: segment)
+            }
+        } else {
+            if currentSkipSegment != nil {
+                currentSkipSegment = nil
+                hideSkipButton()
+            }
+        }
+    }
+    
+    private func showSkipButton(for segment: AniSkipSegment) {
+        DispatchQueue.main.async {
+            let title = "Skip \(segment.skipType.displayName)"
+            self.skipButton.setTitle(title, for: .normal)
+            self.skipButton.isHidden = false
+            
+            if self.skipButton.alpha == 0.0 {
+                UIView.animate(withDuration: 0.2) {
+                    self.skipButton.alpha = 1.0
+                }
+            }
+        }
+    }
+    
+    private func hideSkipButton() {
+        DispatchQueue.main.async {
+            UIView.animate(withDuration: 0.2) {
+                self.skipButton.alpha = 0.0
+            } completion: { _ in
+                self.skipButton.isHidden = true
+            }
         }
     }
 }
@@ -2173,6 +2327,9 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
             // Update audio and subtitle tracks now that the video is ready
             self.updateAudioTracksMenuWhenReady()
             self.updateSubtitleTracksMenu()
+            
+            // Fetch AniSkip data for anime content
+            self.fetchAniSkipData()
             
             if let seekTime = self.pendingSeekTime {
                 self.rendererSeek(to: seekTime)
@@ -2264,6 +2421,9 @@ extension PlayerViewController: VLCRendererDelegate {
             // Update audio and subtitle tracks now that the video is ready
             self.updateAudioTracksMenuWhenReady()
             self.updateSubtitleTracksMenu()
+            
+            // Fetch AniSkip data for anime content
+            self.fetchAniSkipData()
             
             if let seekTime = self.pendingSeekTime {
                 self.rendererSeek(to: seekTime)
