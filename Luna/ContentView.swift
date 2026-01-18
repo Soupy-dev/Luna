@@ -33,54 +33,40 @@ struct ContentView: View {
         }
     }
     
+    @ViewBuilder
     private var mainContent: some View {
 #if compiler(>=6.0)
         if #available(iOS 18.0, tvOS 18.0, *) {
-            modernTabView
+            TabView {
+                Tab("Home", systemImage: "house.fill") {
+                    HomeView()
+                }
+                
+                Tab("Schedule", systemImage: "calendar") {
+                    ScheduleView()
+                }
+                
+                Tab("Library", systemImage: "books.vertical.fill") {
+                    LibraryView()
+                }
+                
+                Tab("Search", systemImage: "magnifyingglass", role: .search) {
+                    SearchView()
+                }
+                
+                Tab("Settings", systemImage: "gear") {
+                    SettingsView()
+                }
+            }
         } else {
-            olderTabView
+            fallbackTabView
         }
 #else
-        olderTabView
+        fallbackTabView
 #endif
     }
     
-    @ViewBuilder
-    private var modernTabView: some View {
-        let tabView = TabView {
-            Tab("Home", systemImage: "house.fill") {
-                HomeView()
-            }
-            
-            Tab("Schedule", systemImage: "calendar") {
-                ScheduleView()
-            }
-            
-            Tab("Library", systemImage: "books.vertical.fill") {
-                LibraryView()
-            }
-            
-            Tab("Search", systemImage: "magnifyingglass", role: .search) {
-                SearchView()
-            }
-            
-            Tab("Settings", systemImage: "gear") {
-                SettingsView()
-            }
-        }
-        
-#if !os(tvOS)
-        if #available(iOS 26.0, *) {
-            tabView.tabBarMinimizeBehavior(.never)
-        } else {
-            tabView
-        }
-#else
-        tabView
-#endif
-    }
-    
-    private var olderTabView: some View {
+    private var fallbackTabView: some View {
         TabView {
             HomeView()
                 .tabItem {
