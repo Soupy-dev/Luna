@@ -93,7 +93,8 @@ struct SearchView: View {
             if #available(iOS 16.0, *) {
                 NavigationStack {
                     searchContent
-                }\n            } else {
+                }
+            } else {
                 NavigationView {
                     searchContent
                 }
