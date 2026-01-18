@@ -2208,24 +2208,45 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     // MARK: - AniSkip Integration
     
     private func fetchAniSkipData() {
-        // Only fetch for anime content with episode info
-        guard isAnimeContent() else { return }
-        guard case .episode(let showId, _, let episodeNumber, _, _) = mediaInfo else { return }
+        guard case .episode(let showId, _, let episodeNumber, let showTitle, _) = mediaInfo else { return }
         
-        // Get AniList ID from tracker
-        guard let anilistId = trackerManager.cachedAniListId(for: showId) else {
-            Logger.shared.log("[AniSkip] No AniList ID found for TMDB ID \(showId)", type: "AniSkip")
-            return
+        // Try to get AniList ID - first check cache
+        var anilistId = trackerManager.cachedAniListId(for: showId)
+        
+        // If we have an anilistId or it's marked as anime, fetch skip data
+        if anilistId != nil {
+            performAniSkipFetch(anilistId: anilistId!, episodeNumber: episodeNumber)
+        } else if isAnimeHint == true {
+            // If marked as anime, try to search for it
+            Task {
+                do {
+                    Logger.shared.log("[AniSkip] Searching for anime '\(showTitle)' on AniList", type: "AniSkip")
+                    let results = try await AniListService.shared.searchAnime(query: showTitle, token: nil)
+                    
+                    if let firstResult = results.first {
+                        Logger.shared.log("[AniSkip] Found AniList ID \(firstResult.id) for '\(showTitle)'", type: "AniSkip")
+                        // Cache it for future use
+                        self.trackerManager.cacheAniListId(tmdbId: showId, anilistId: firstResult.id)
+                        self.performAniSkipFetch(anilistId: firstResult.id, episodeNumber: episodeNumber)
+                    } else {
+                        Logger.shared.log("[AniSkip] No AniList results found for '\(showTitle)'", type: "AniSkip")
+                    }
+                } catch {
+                    Logger.shared.log("[AniSkip] Search failed: \(error)", type: "Error")
+                }
+            }
         }
-        
+    }
+    
+    private func performAniSkipFetch(anilistId: Int, episodeNumber: Int) {
         Logger.shared.log("[AniSkip] Fetching skip times for AniList ID \(anilistId) Episode \(episodeNumber)", type: "AniSkip")
         
         Task {
             do {
-                let segments = try await aniSkipService.fetchSkipTimes(
+                let segments = try await self.aniSkipService.fetchSkipTimes(
                     anilistId: anilistId,
                     episodeNumber: episodeNumber,
-                    episodeLength: cachedDuration > 0 ? cachedDuration : nil
+                    episodeLength: self.cachedDuration > 0 ? self.cachedDuration : nil
                 )
                 
                 await MainActor.run {
