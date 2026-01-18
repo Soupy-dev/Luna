@@ -36,36 +36,40 @@ struct ContentView: View {
     private var mainContent: some View {
 #if compiler(>=6.0)
         if #available(iOS 26.0, tvOS 26.0, *) {
-            TabView {
-                Tab("Home", systemImage: "house.fill") {
-                    HomeView()
-                }
-                
-                Tab("Schedule", systemImage: "calendar") {
-                    ScheduleView()
-                }
-                
-                Tab("Library", systemImage: "books.vertical.fill") {
-                    LibraryView()
-                }
-                
-                Tab("Search", systemImage: "magnifyingglass", role: .search) {
-                    SearchView()
-                }
-                
-                Tab("Settings", systemImage: "gear") {
-                    SettingsView()
-                }
-            }
-#if !os(tvOS)
-            .tabBarMinimizeBehavior(.never)
-#endif
-            
+            modernTabView
         } else {
             olderTabView
         }
 #else
         olderTabView
+#endif
+    }
+    
+    @ViewBuilder
+    private var modernTabView: some View {
+        TabView {
+            Tab("Home", systemImage: "house.fill") {
+                HomeView()
+            }
+            
+            Tab("Schedule", systemImage: "calendar") {
+                ScheduleView()
+            }
+            
+            Tab("Library", systemImage: "books.vertical.fill") {
+                LibraryView()
+            }
+            
+            Tab("Search", systemImage: "magnifyingglass", role: .search) {
+                SearchView()
+            }
+            
+            Tab("Settings", systemImage: "gear") {
+                SettingsView()
+            }
+        }
+#if !os(tvOS)
+        .tabBarMinimizeBehavior(.never)
 #endif
     }
     
