@@ -10,6 +10,7 @@ import Kingfisher
 
 struct SearchResultCard: View {
     let result: TMDBSearchResult
+    @Namespace private var animation
     
     var body: some View {
         NavigationLink(destination: MediaDetailView(searchResult: result)) {
@@ -24,8 +25,8 @@ struct SearchResultCard: View {
                     .resizable()
                     .aspectRatio(2/3, contentMode: .fill)
                     .frame(height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .moonShadow(intensity: 1.0)
                 
                 Text(result.displayTitle)
                     .font(.caption)

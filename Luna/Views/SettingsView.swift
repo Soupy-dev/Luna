@@ -71,15 +71,29 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         #else
-            if #available(iOS 16.0, *) {
-                NavigationStack {
-                    settingsContent
+            ZStack {
+                // Moon-themed background
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 0.02, green: 0.02, blue: 0.08),
+                        Color(red: 0.05, green: 0.05, blue: 0.15),
+                        Color(red: 0.08, green: 0.05, blue: 0.18)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+                
+                if #available(iOS 16.0, *) {
+                    NavigationStack {
+                        settingsContent
+                    }
+                } else {
+                    NavigationView {
+                        settingsContent
+                    }
+                    .navigationViewStyle(StackNavigationViewStyle())
                 }
-            } else {
-                NavigationView {
-                    settingsContent
-                }
-                .navigationViewStyle(StackNavigationViewStyle())
             }
         #endif
     }

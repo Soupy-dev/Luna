@@ -96,8 +96,13 @@ struct MediaDetailView: View {
         .navigationBarHidden(true)
 #if !os(tvOS)
         .gesture(
-            DragGesture()
+            DragGesture(minimumDistance: 30, coordinateSpace: .local)
                 .onEnded { value in
+                    // Swipe right to dismiss (only from left edge)
+                    if value.translation.width > 100 && value.startLocation.x < 50 {
+                        presentationMode.wrappedValue.dismiss()
+                    } else if value.translation.height > 100 {
+                        // Original vertical swipe behavior
                     if value.translation.width > 100 && abs(value.translation.height) < 50 {
                         presentationMode.wrappedValue.dismiss()
                     }

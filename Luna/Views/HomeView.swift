@@ -421,15 +421,15 @@ struct MediaCard: View {
                     .tvos({ view in
                         view
                             .frame(width: 280, height: 380)
-                            .clipShape(RoundedRectangle(cornerRadius: 20))
+                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                             .hoverEffect(.highlight)
                             .modifier(ContinuousHoverModifier(isHovering: $isHovering))
                             .padding(.vertical, 30)
                     }, else: { view in
                         view
                             .frame(width: 120, height: 180)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .shadow(color: .black.opacity(0.1), radius: 3, x: 0, y: 1)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .moonShadow(intensity: 1.0)
                     })
                 
                 VStack(alignment: .leading, spacing: isTvOS ? 10 : 3) {

@@ -15,15 +15,29 @@ struct LibraryView: View {
     @ObservedObject private var libraryManager = LibraryManager.shared
     
     var body: some View {
-        if #available(iOS 16.0, *) {
-            NavigationStack {
-                libraryContent
+        ZStack {
+            // Moon-themed background
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.02, green: 0.02, blue: 0.08),
+                    Color(red: 0.05, green: 0.05, blue: 0.15),
+                    Color(red: 0.08, green: 0.05, blue: 0.18)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+            
+            if #available(iOS 16.0, *) {
+                NavigationStack {
+                    libraryContent
+                }
+            } else {
+                NavigationView {
+                    libraryContent
+                }
+                .navigationViewStyle(StackNavigationViewStyle())
             }
-        } else {
-            NavigationView {
-                libraryContent
-            }
-            .navigationViewStyle(StackNavigationViewStyle())
         }
     }
     
