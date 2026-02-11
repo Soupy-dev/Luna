@@ -1307,12 +1307,17 @@ struct ModulesSearchResultsSheet: View {
 
             #if !os(tvOS)
                 let proxyEnabled = UserDefaults.standard.object(forKey: "vlcHeaderProxyEnabled") as? Bool ?? true
-                let useProxy = proxyEnabled && !finalHeaders.isEmpty
-                let vlcURL = useProxy ? (VLCHeaderProxy.shared.makeProxyURL(for: streamURL, headers: finalHeaders) ?? streamURL) : streamURL
+                let proxyURL = proxyEnabled && !finalHeaders.isEmpty
+                    ? VLCHeaderProxy.shared.makeProxyURL(for: streamURL, headers: finalHeaders)
+                    : nil
+                let useProxy = proxyEnabled && !finalHeaders.isEmpty && proxyURL != nil
+                let vlcURL = useProxy ? (proxyURL ?? streamURL) : streamURL
                 let vlcHeaders: [String: String]? = useProxy ? nil : finalHeaders
 
                 if useProxy {
                     Logger.shared.log("VLC proxy enabled: headers=\(finalHeaders.count) url=\(vlcURL.absoluteString)", type: "Stream")
+                } else if proxyEnabled && !finalHeaders.isEmpty {
+                    Logger.shared.log("VLC proxy unavailable; using direct headers", type: "Stream")
                 }
             #else
                 let vlcURL = streamURL

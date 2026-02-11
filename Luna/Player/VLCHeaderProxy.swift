@@ -32,7 +32,16 @@ final class VLCHeaderProxy {
 
     func makeProxyURL(for targetURL: URL, headers: [String: String]) -> URL? {
         guard ensureStarted() else { return nil }
-        guard let port else { return nil }
+
+        var activePort = port
+        if (activePort ?? 0) == 0 {
+            activePort = waitForPort(timeout: 0.25)
+        }
+
+        guard let activePort, activePort > 0 else {
+            Logger.shared.log("VLCHeaderProxy: listener port unavailable", type: "Error")
+            return nil
+        }
 
         cleanupExpiredSessions()
 
@@ -49,7 +58,7 @@ final class VLCHeaderProxy {
         sessions[sessionId] = Session(headers: headers, createdAt: Date())
         sessionLock.unlock()
 
-        return buildProxyURL(port: port, sessionId: sessionId, targetURL: targetURL)
+        return buildProxyURL(port: activePort, sessionId: sessionId, targetURL: targetURL)
     }
 
     private func ensureStarted() -> Bool {
@@ -62,15 +71,31 @@ final class VLCHeaderProxy {
             listener.newConnectionHandler = { [weak self] connection in
                 self?.handleConnection(connection)
             }
-            listener.stateUpdateHandler = { state in
-                if case .failed(let error) = state {
+            listener.stateUpdateHandler = { [weak self] state in
+                guard let self else { return }
+                switch state {
+                case .ready:
+                    let readyPort = listener.port?.rawValue ?? 0
+                    if readyPort > 0 {
+                        self.port = readyPort
+                    } else {
+                        Logger.shared.log("VLCHeaderProxy: listener ready without a valid port", type: "Error")
+                    }
+                case .failed(let error):
                     Logger.shared.log("VLCHeaderProxy: listener failed: \(error)", type: "Error")
+                default:
+                    break
                 }
             }
             listener.start(queue: queue)
             self.listener = listener
-            self.port = listener.port?.rawValue
-            Logger.shared.log("VLCHeaderProxy: started on 127.0.0.1:\(self.port ?? 0)", type: "Info")
+            let initialPort = listener.port?.rawValue ?? 0
+            if initialPort > 0 {
+                self.port = initialPort
+                Logger.shared.log("VLCHeaderProxy: started on 127.0.0.1:\(initialPort)", type: "Info")
+            } else {
+                Logger.shared.log("VLCHeaderProxy: started without a valid port", type: "Error")
+            }
             return true
         } catch {
             Logger.shared.log("VLCHeaderProxy: failed to start listener: \(error)", type: "Error")
@@ -343,7 +368,7 @@ final class VLCHeaderProxy {
     }
 
     private func buildProxyURL(port: UInt16?, sessionId: String, targetURL: URL) -> URL? {
-        guard let port else { return nil }
+        guard let port, port > 0 else { return nil }
         let encoded = encodeTargetURL(targetURL)
         var components = URLComponents()
         components.scheme = "http"
@@ -379,6 +404,18 @@ final class VLCHeaderProxy {
         guard let data = Data(base64Encoded: base64) else { return nil }
         guard let string = String(data: data, encoding: .utf8) else { return nil }
         return URL(string: string)
+    }
+
+    private func waitForPort(timeout: TimeInterval) -> UInt16? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let readyPort = listener?.port?.rawValue, readyPort > 0 {
+                port = readyPort
+                return readyPort
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return nil
     }
 
     private func cleanupExpiredSessions() {
