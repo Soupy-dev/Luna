@@ -54,6 +54,8 @@ struct LoggerView: View {
     @State private var searchText = ""
     @State private var isAutoScrollEnabled = true
     @State private var showingFilterSheet = false
+    @State private var exportItem: ExportItem?
+    @State private var exportErrorMessage: String?
     
     private var filteredLogs: [LogEntry] {
         var logs = loggerManager.logs
@@ -106,6 +108,20 @@ struct LoggerView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
+                #if !os(tvOS)
+                    Button(action: {
+                        Task {
+                            do {
+                                let url = try await Logger.shared.exportLogsToTempFile()
+                                exportItem = ExportItem(url: url)
+                            } catch {
+                                exportErrorMessage = "Failed to export logs."
+                            }
+                        }
+                    }) {
+                        Label("Export Logs", systemImage: "square.and.arrow.up")
+                    }
+                #endif
                     Button(action: {
                         loggerManager.clearLogs()
                     }) {
@@ -116,8 +132,38 @@ struct LoggerView: View {
                 }
             }
         }
+        .alert("Export Failed", isPresented: Binding(
+            get: { exportErrorMessage != nil },
+            set: { _ in exportErrorMessage = nil }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(exportErrorMessage ?? "")
+        }
+    #if !os(tvOS)
+        .sheet(item: $exportItem) { item in
+            ActivityView(items: [item.url])
+        }
+    #endif
     }
 }
+
+#if !os(tvOS)
+struct ExportItem: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+#endif
 
 struct LogEntryRow: View {
     let log: LogEntry
