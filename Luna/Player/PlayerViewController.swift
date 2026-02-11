@@ -1524,6 +1524,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
     }
 
+    #if !os(tvOS)
     private func buildProxyHeaders(for url: URL, baseHeaders: [String: String]) -> [String: String] {
         var headers = baseHeaders
         if headers["User-Agent"] == nil {
@@ -1595,6 +1596,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         load(url: proxyURL, preset: preset, headers: nil)
         return true
     }
+    #else
+    private func attemptVlcProxyFallbackIfNeeded() -> Bool {
+        return false
+    }
+    #endif
     
     private func updateSubtitleTracksMenu() {
         let useExternalMenu = !subtitleURLs.isEmpty && vlcRenderer == nil
