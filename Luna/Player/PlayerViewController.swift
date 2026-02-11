@@ -230,17 +230,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         return b
     }()
 
-    private let settingsButton: UIButton = {
-        let b = UIButton(type: .system)
-        b.translatesAutoresizingMaskIntoConstraints = false
-        let cfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
-        let img = UIImage(systemName: "gearshape", withConfiguration: cfg)
-        b.setImage(img, for: .normal)
-        b.tintColor = .white
-        b.alpha = 0.0
-        return b
-    }()
-
     private let dimmingView: UIView = {
         let v = UIView()
         v.translatesAutoresizingMaskIntoConstraints = false
@@ -912,7 +901,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         videoContainer.addSubview(subtitleButton)
         videoContainer.addSubview(speedButton)
         videoContainer.addSubview(audioButton)
-        videoContainer.addSubview(settingsButton)
     #if !os(tvOS)
         videoContainer.addSubview(brightnessContainer)
         brightnessContainer.contentView.addSubview(brightnessSlider)
@@ -921,7 +909,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
         // Hide PiP control when VLC is active (PiP remains MPV-only)
         pipButton.isHidden = (vlcRenderer != nil)
-        settingsButton.isHidden = (vlcRenderer == nil)
         
         NSLayoutConstraint.activate([
             videoContainer.topAnchor.constraint(equalTo: view.topAnchor),
@@ -999,10 +986,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             audioButton.widthAnchor.constraint(equalToConstant: 32),
             audioButton.heightAnchor.constraint(equalToConstant: 32),
 
-            settingsButton.trailingAnchor.constraint(equalTo: audioButton.leadingAnchor, constant: -8),
-            settingsButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
-            settingsButton.widthAnchor.constraint(equalToConstant: 32),
-            settingsButton.heightAnchor.constraint(equalToConstant: 32)
+            audioButton.trailingAnchor.constraint(equalTo: subtitleButton.leadingAnchor, constant: -8),
+            audioButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor)
         ])
 #if !os(tvOS)
         NSLayoutConstraint.activate([
@@ -1051,12 +1036,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         skipBackwardButton.addTarget(self, action: #selector(skipBackwardTapped), for: .touchUpInside)
         skipForwardButton.addTarget(self, action: #selector(skipForwardTapped), for: .touchUpInside)
         subtitleButton.addTarget(self, action: #selector(subtitleButtonTapped), for: .touchUpInside)
-        settingsButton.addTarget(self, action: #selector(settingsTapped), for: .touchUpInside)
         
         // Ensure buttons work with VLC
         if vlcRenderer != nil {
             [centerPlayPauseButton, closeButton, pipButton, skipBackwardButton,
-             skipForwardButton, subtitleButton, speedButton, audioButton, settingsButton].forEach {
+             skipForwardButton, subtitleButton, speedButton, audioButton].forEach {
                 $0.isUserInteractionEnabled = true
             }
         }
@@ -2006,7 +1990,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         videoContainer.bringSubviewToFront(subtitleButton)
         videoContainer.bringSubviewToFront(speedButton)
         videoContainer.bringSubviewToFront(audioButton)
-        videoContainer.bringSubviewToFront(settingsButton)
 #if !os(tvOS)
         videoContainer.bringSubviewToFront(brightnessContainer)
 #endif
@@ -2027,9 +2010,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 self.speedButton.alpha = 1.0
                 if !self.audioButton.isHidden {
                     self.audioButton.alpha = 1.0
-                }
-                if !self.settingsButton.isHidden {
-                    self.settingsButton.alpha = 1.0
                 }
 #if !os(tvOS)
                 if self.isBrightnessControlEnabled {
@@ -2063,7 +2043,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 self.subtitleButton.alpha = 0.0
                 self.speedButton.alpha = 0.0
                 self.audioButton.alpha = 0.0
-                self.settingsButton.alpha = 0.0
 #if !os(tvOS)
                 self.brightnessContainer.alpha = 0.0
 #endif
@@ -2132,17 +2111,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
     }
 
-    @objc private func settingsTapped() {
-        guard vlcRenderer != nil else { return }
-
-        let root = NavigationView {
-            PlayerSettingsView()
-        }
-        let host = UIHostingController(rootView: root)
-        host.modalPresentationStyle = .pageSheet
-        present(host, animated: true, completion: nil)
-    }
-    
     private func updatePosition(_ position: Double, duration: Double) {
         // Some VLC/HLS sources report 0 duration for a while; keep the last good duration so progress persists.
         let effectiveDuration: Double
