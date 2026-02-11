@@ -195,6 +195,31 @@ struct PlayerSettingsView: View {
                         ))
                         .tint(accentColorManager.currentAccentColor)
                     }
+
+                    if store.inAppPlayer == .vlc {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("VLC Header Proxy")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+
+                                Text("Route VLC streams through a local proxy to apply all headers.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+
+                            Spacer()
+
+                            Toggle("", isOn: Binding(
+                                get: {
+                                    UserDefaults.standard.object(forKey: "vlcHeaderProxyEnabled") as? Bool ?? true
+                                },
+                                set: { UserDefaults.standard.set($0, forKey: "vlcHeaderProxyEnabled") }
+                            ))
+                            .tint(accentColorManager.currentAccentColor)
+                        }
+                    }
                     
                     NavigationLink(destination: VLCLanguageSelectionView(
                         title: "Default Subtitle Language",

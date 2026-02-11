@@ -1304,6 +1304,15 @@ struct ModulesSearchResultsSheet: View {
                 // VLC uses same PlayerViewController as MPV
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
+
+                let proxyEnabled = UserDefaults.standard.object(forKey: "vlcHeaderProxyEnabled") as? Bool ?? true
+                let useProxy = proxyEnabled && !finalHeaders.isEmpty
+                let vlcURL = useProxy ? (VLCHeaderProxy.shared.makeProxyURL(for: streamURL, headers: finalHeaders) ?? streamURL) : streamURL
+                let vlcHeaders: [String: String]? = useProxy ? nil : finalHeaders
+
+                if useProxy {
+                    Logger.shared.log("VLC proxy enabled: headers=\(finalHeaders.count) url=\(vlcURL.absoluteString)", type: "Stream")
+                }
                 
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil
@@ -1315,9 +1324,9 @@ struct ModulesSearchResultsSheet: View {
                 }
                 
                 let pvc = PlayerViewController(
-                    url: streamURL,
+                    url: vlcURL,
                     preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
-                    headers: finalHeaders,
+                    headers: vlcHeaders,
                     subtitles: subtitleArray,
                     mediaInfo: playerMediaInfo
                 )

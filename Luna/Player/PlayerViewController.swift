@@ -230,6 +230,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         return b
     }()
 
+    private let settingsButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        let cfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        let img = UIImage(systemName: "gearshape", withConfiguration: cfg)
+        b.setImage(img, for: .normal)
+        b.tintColor = .white
+        b.alpha = 0.0
+        return b
+    }()
+
     private let dimmingView: UIView = {
         let v = UIView()
         v.translatesAutoresizingMaskIntoConstraints = false
@@ -462,6 +473,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererGetAudioTracksDetailed() -> [(Int, String, String)] {
         if let vlc = vlcRenderer {
             return vlc.getAudioTracksDetailed()
+        } else if let mpv = mpvRenderer {
+            return mpv.getAudioTracksDetailed()
         }
         return []
     }
@@ -469,6 +482,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererGetAudioTracks() -> [(Int, String)] {
         if let vlc = vlcRenderer {
             return vlc.getAudioTracks()
+        } else if let mpv = mpvRenderer {
+            return mpv.getAudioTracks()
         }
         return []
     }
@@ -476,12 +491,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererSetAudioTrack(id: Int) {
         if let vlc = vlcRenderer {
             vlc.setAudioTrack(id: id)
+        } else if let mpv = mpvRenderer {
+            mpv.setAudioTrack(id: id)
         }
     }
     
     private func rendererGetCurrentAudioTrackId() -> Int {
         if let vlc = vlcRenderer {
             return vlc.getCurrentAudioTrackId()
+        } else if let mpv = mpvRenderer {
+            return mpv.getCurrentAudioTrackId()
         }
         return -1
     }
@@ -489,6 +508,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererGetSubtitleTracks() -> [(Int, String)] {
         if let vlc = vlcRenderer {
             return vlc.getSubtitleTracks()
+        } else if let mpv = mpvRenderer {
+            return mpv.getSubtitleTracks()
         }
         return []
     }
@@ -496,12 +517,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererSetSubtitleTrack(id: Int) {
         if let vlc = vlcRenderer {
             vlc.setSubtitleTrack(id: id)
+        } else if let mpv = mpvRenderer {
+            mpv.setSubtitleTrack(id: id)
         }
     }
     
     private func rendererGetCurrentSubtitleTrackId() -> Int {
         if let vlc = vlcRenderer {
             return vlc.getCurrentSubtitleTrackId()
+        } else if let mpv = mpvRenderer {
+            return mpv.getCurrentSubtitleTrackId()
         }
         return -1
     }
@@ -509,6 +534,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererDisableSubtitles() {
         if let vlc = vlcRenderer {
             vlc.disableSubtitles()
+        } else if let mpv = mpvRenderer {
+            mpv.disableSubtitles()
         }
     }
     
@@ -885,6 +912,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         videoContainer.addSubview(subtitleButton)
         videoContainer.addSubview(speedButton)
         videoContainer.addSubview(audioButton)
+        videoContainer.addSubview(settingsButton)
     #if !os(tvOS)
         videoContainer.addSubview(brightnessContainer)
         brightnessContainer.contentView.addSubview(brightnessSlider)
@@ -893,6 +921,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
         // Hide PiP control when VLC is active (PiP remains MPV-only)
         pipButton.isHidden = (vlcRenderer != nil)
+        settingsButton.isHidden = (vlcRenderer == nil)
         
         NSLayoutConstraint.activate([
             videoContainer.topAnchor.constraint(equalTo: view.topAnchor),
@@ -968,7 +997,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             audioButton.trailingAnchor.constraint(equalTo: speedButton.leadingAnchor, constant: -8),
             audioButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
             audioButton.widthAnchor.constraint(equalToConstant: 32),
-            audioButton.heightAnchor.constraint(equalToConstant: 32)
+            audioButton.heightAnchor.constraint(equalToConstant: 32),
+
+            settingsButton.trailingAnchor.constraint(equalTo: audioButton.leadingAnchor, constant: -8),
+            settingsButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
+            settingsButton.widthAnchor.constraint(equalToConstant: 32),
+            settingsButton.heightAnchor.constraint(equalToConstant: 32)
         ])
 #if !os(tvOS)
         NSLayoutConstraint.activate([
@@ -1017,11 +1051,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         skipBackwardButton.addTarget(self, action: #selector(skipBackwardTapped), for: .touchUpInside)
         skipForwardButton.addTarget(self, action: #selector(skipForwardTapped), for: .touchUpInside)
         subtitleButton.addTarget(self, action: #selector(subtitleButtonTapped), for: .touchUpInside)
+        settingsButton.addTarget(self, action: #selector(settingsTapped), for: .touchUpInside)
         
         // Ensure buttons work with VLC
         if vlcRenderer != nil {
-            [centerPlayPauseButton, closeButton, pipButton, skipBackwardButton, 
-             skipForwardButton, subtitleButton, speedButton, audioButton].forEach {
+            [centerPlayPauseButton, closeButton, pipButton, skipBackwardButton,
+             skipForwardButton, subtitleButton, speedButton, audioButton, settingsButton].forEach {
                 $0.isUserInteractionEnabled = true
             }
         }
@@ -1511,21 +1546,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func updateSubtitleTracksMenu() {
-        // Always allow subtitle UI; for VLC we still surface tracks even if external URLs were supplied
-        if !subtitleURLs.isEmpty && vlcRenderer == nil {
-            return
-        }
-
-        let tracks = rendererGetSubtitleTracks()
+        let useExternalMenu = !subtitleURLs.isEmpty && vlcRenderer == nil
+        let tracks: [(Int, String)] = useExternalMenu
+            ? subtitleURLs.enumerated().map { ($0.offset, "Subtitle \($0.offset + 1)") }
+            : rendererGetSubtitleTracks()
 
         // Always show the subtitle button so the user can view the menu even when empty
         subtitleButton.isHidden = false
-        
-        // VLC uses menu-only approach to avoid presentation conflicts
-        subtitleButton.showsMenuAsPrimaryAction = (vlcRenderer != nil)
 
-        // Apply default subtitle settings if enabled and tracks exist
-        if !tracks.isEmpty && !userSelectedSubtitleTrack {
+        // Use menu-only behavior for both VLC and MPV so the UI looks consistent
+        subtitleButton.showsMenuAsPrimaryAction = true
+
+        // Apply default subtitle settings if enabled and tracks exist (embedded only)
+        if !useExternalMenu, !tracks.isEmpty && !userSelectedSubtitleTrack {
             let settings = Settings.shared
             if settings.enableSubtitlesByDefault {
                 let preferredLang = settings.defaultSubtitleLanguage
@@ -1548,7 +1581,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         ) { [weak self] _ in
             self?.subtitleModel.isVisible = false
             self?.userSelectedSubtitleTrack = true
-            self?.rendererDisableSubtitles()
+            if useExternalMenu {
+                self?.rendererRefreshSubtitleOverlay()
+            } else {
+                self?.rendererDisableSubtitles()
+            }
             self?.updateSubtitleButtonAppearance()
             self?.updateSubtitleTracksMenu()
         }
@@ -1559,20 +1596,26 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             let noTracksAction = UIAction(title: "No subtitles in stream", state: .off) { _ in }
             trackActions.append(noTracksAction)
         } else {
-            let currentSubtitleTrackId = rendererGetCurrentSubtitleTrackId()
+            let currentSubtitleTrackId = useExternalMenu ? currentSubtitleIndex : rendererGetCurrentSubtitleTrackId()
             let subtitleActions = tracks.map { (id, name) in
                 UIAction(
                     title: name,
                     image: UIImage(systemName: "captions.bubble"),
                     state: id == currentSubtitleTrackId ? .on : .off
                 ) { [weak self] _ in
-                    self?.subtitleModel.isVisible = true
-                    self?.userSelectedSubtitleTrack = true
-                    self?.rendererSetSubtitleTrack(id: id)
-                    self?.updateSubtitleButtonAppearance()
+                    guard let self else { return }
+                    self.subtitleModel.isVisible = true
+                    self.userSelectedSubtitleTrack = true
+                    if useExternalMenu {
+                        self.currentSubtitleIndex = id
+                        self.loadCurrentSubtitle()
+                    } else {
+                        self.rendererSetSubtitleTrack(id: id)
+                    }
+                    self.updateSubtitleButtonAppearance()
                     // Debounce menu update to avoid lag - only update after 0.3s of no selection changes
-                    self?.subtitleMenuDebounceTimer?.invalidate()
-                    self?.subtitleMenuDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+                    self.subtitleMenuDebounceTimer?.invalidate()
+                    self.subtitleMenuDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
                         DispatchQueue.main.async { [weak self] in
                             self?.updateSubtitleTracksMenu()
                         }
@@ -1607,7 +1650,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }
             
             updateSubtitleButtonAppearance()
-            updateSubtitleMenu()
+            updateSubtitleTracksMenu()
         } else {
             Logger.shared.log("No subtitle URLs to load", type: "Info")
         }
@@ -1676,6 +1719,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func subtitleButtonTapped() {
+        // Menu-first UI (VLC + MPV). When menu is primary, do not show action sheets.
+        if subtitleButton.showsMenuAsPrimaryAction {
+            return
+        }
+
         // VLC uses menu system directly; this handler is for MPV only
         if vlcRenderer != nil {
             return
@@ -1958,6 +2006,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         videoContainer.bringSubviewToFront(subtitleButton)
         videoContainer.bringSubviewToFront(speedButton)
         videoContainer.bringSubviewToFront(audioButton)
+        videoContainer.bringSubviewToFront(settingsButton)
 #if !os(tvOS)
         videoContainer.bringSubviewToFront(brightnessContainer)
 #endif
@@ -1978,6 +2027,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 self.speedButton.alpha = 1.0
                 if !self.audioButton.isHidden {
                     self.audioButton.alpha = 1.0
+                }
+                if !self.settingsButton.isHidden {
+                    self.settingsButton.alpha = 1.0
                 }
 #if !os(tvOS)
                 if self.isBrightnessControlEnabled {
@@ -2011,6 +2063,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 self.subtitleButton.alpha = 0.0
                 self.speedButton.alpha = 0.0
                 self.audioButton.alpha = 0.0
+                self.settingsButton.alpha = 0.0
 #if !os(tvOS)
                 self.brightnessContainer.alpha = 0.0
 #endif
@@ -2077,6 +2130,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         } else if pip.isPictureInPicturePossible {
             pip.startPictureInPicture()
         }
+    }
+
+    @objc private func settingsTapped() {
+        guard vlcRenderer != nil else { return }
+
+        let root = NavigationView {
+            PlayerSettingsView()
+        }
+        let host = UIHostingController(rootView: root)
+        host.modalPresentationStyle = .pageSheet
+        present(host, animated: true, completion: nil)
     }
     
     private func updatePosition(_ position: Double, duration: Double) {
@@ -2187,6 +2251,7 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.updateAudioTracksMenu()
+            self.updateSubtitleTracksMenu()
         }
     }
     
