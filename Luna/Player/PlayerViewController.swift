@@ -1543,15 +1543,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             guard let url = URL(string: urlString),
                   let scheme = url.scheme?.lowercased(),
                   scheme == "http" || scheme == "https" else {
+                Logger.shared.log("PlayerViewController: subtitle proxy skipped (invalid URL or scheme)", type: "Stream")
                 return nil
             }
 
             let proxyHeaders = buildProxyHeaders(for: url, baseHeaders: headers)
             guard let proxiedURL = VLCHeaderProxy.shared.makeProxyURL(for: url, headers: proxyHeaders) else {
+                Logger.shared.log("PlayerViewController: subtitle proxy URL creation failed", type: "Stream")
                 return nil
             }
             return proxiedURL.absoluteString
         }
+        Logger.shared.log("PlayerViewController: subtitle proxy result count=\(proxied.count) of \(urls.count)", type: "Stream")
         return proxied
     }
 
@@ -1572,8 +1575,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
         let fallbackSubtitles: [String]?
         if let subs = initialSubtitles, !subs.isEmpty {
+            Logger.shared.log("PlayerViewController: proxy fallback subtitle count=\(subs.count)", type: "Stream")
             let proxiedSubs = proxySubtitleURLs(subs, headers: headers)
-            fallbackSubtitles = proxiedSubs.count == subs.count ? proxiedSubs : subs
+            if proxiedSubs.count == subs.count {
+                Logger.shared.log("PlayerViewController: proxy fallback subtitles ready", type: "Stream")
+                fallbackSubtitles = proxiedSubs
+            } else {
+                Logger.shared.log("PlayerViewController: proxy fallback subtitles incomplete; using direct URLs", type: "Stream")
+                fallbackSubtitles = subs
+            }
         } else {
             fallbackSubtitles = nil
         }
@@ -1674,6 +1684,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         userSelectedSubtitleTrack = false
         
         if !urls.isEmpty {
+            Logger.shared.log("PlayerViewController: loadSubtitles count=\(urls.count) renderer=\(vlcRenderer != nil ? "VLC" : "MPV")", type: "Stream")
             subtitleButton.isHidden = false
             currentSubtitleIndex = 0
             subtitleModel.isVisible = Settings.shared.enableSubtitlesByDefault
@@ -1684,6 +1695,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 // Update subtitle menu after VLC loads the external subs
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                     self?.updateSubtitleTracksMenu()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self else { return }
+                    let tracks = self.rendererGetSubtitleTracks()
+                    if tracks.isEmpty {
+                        Logger.shared.log("PlayerViewController: VLC external subtitles not detected after load", type: "Stream")
+                    } else {
+                        Logger.shared.log("PlayerViewController: VLC subtitle tracks available count=\(tracks.count)", type: "Stream")
+                    }
                 }
             } else {
                 // MPV: manually download and parse subtitles
