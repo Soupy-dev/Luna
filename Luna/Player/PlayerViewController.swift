@@ -340,6 +340,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var initialSubtitles: [String]?
     private var userSelectedAudioTrack = false
     private var userSelectedSubtitleTrack = false
+    private var vlcProxyFallbackTried = false
     
     // Debounce timers for menu updates to avoid excessive rebuilds
     private var audioMenuDebounceTimer: Timer?
@@ -676,15 +677,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         setupBrightnessControls()
     #endif
         
-        NotificationCenter.default.addObserver(self, selector: #selector(handleLoggerNotification(_:)), name: NSNotification.Name("LoggerNotification"), object: nil)
-        
         do {
             try rendererStart()
             logMPV("renderer.start succeeded")
         } catch {
             let rendererName = vlcRenderer != nil ? "VLC" : "MPV"
             Logger.shared.log("Failed to start \(rendererName) renderer: \(error)", type: "Error")
-            presentErrorAlert(title: "Playback Error", message: "Failed to start \(rendererName) renderer: \(error)")
         }
         
         // PiP is only supported with MPV renderer
@@ -984,10 +982,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             audioButton.trailingAnchor.constraint(equalTo: speedButton.leadingAnchor, constant: -8),
             audioButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor),
             audioButton.widthAnchor.constraint(equalToConstant: 32),
-            audioButton.heightAnchor.constraint(equalToConstant: 32),
-
-            audioButton.trailingAnchor.constraint(equalTo: subtitleButton.leadingAnchor, constant: -8),
-            audioButton.centerYAnchor.constraint(equalTo: subtitleButton.centerYAnchor)
+            audioButton.heightAnchor.constraint(equalToConstant: 32)
         ])
 #if !os(tvOS)
         NSLayoutConstraint.activate([
@@ -1528,6 +1523,68 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         default: return ""
         }
     }
+
+    private func buildProxyHeaders(for url: URL, baseHeaders: [String: String]) -> [String: String] {
+        var headers = baseHeaders
+        if headers["User-Agent"] == nil {
+            headers["User-Agent"] = URLSession.randomUserAgent
+        }
+        if headers["Origin"] == nil, let host = url.host, let scheme = url.scheme {
+            headers["Origin"] = "\(scheme)://\(host)"
+        }
+        if headers["Referer"] == nil {
+            headers["Referer"] = url.absoluteString
+        }
+        return headers
+    }
+
+    private func proxySubtitleURLs(_ urls: [String], headers: [String: String]) -> [String] {
+        let proxied = urls.compactMap { urlString -> String? in
+            guard let url = URL(string: urlString),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else {
+                return nil
+            }
+
+            let proxyHeaders = buildProxyHeaders(for: url, baseHeaders: headers)
+            guard let proxiedURL = VLCHeaderProxy.shared.makeProxyURL(for: url, headers: proxyHeaders) else {
+                return nil
+            }
+            return proxiedURL.absoluteString
+        }
+        return proxied
+    }
+
+    private func attemptVlcProxyFallbackIfNeeded() -> Bool {
+        guard vlcRenderer != nil else { return false }
+        guard !vlcProxyFallbackTried else { return false }
+        guard let originalURL = initialURL, originalURL.host != "127.0.0.1" else { return false }
+        guard let headers = initialHeaders, !headers.isEmpty else { return false }
+
+        let proxyEnabled = UserDefaults.standard.object(forKey: "vlcHeaderProxyEnabled") as? Bool ?? true
+        guard proxyEnabled else { return false }
+        guard let preset = initialPreset else { return false }
+
+        let proxyHeaders = buildProxyHeaders(for: originalURL, baseHeaders: headers)
+        guard let proxyURL = VLCHeaderProxy.shared.makeProxyURL(for: originalURL, headers: proxyHeaders) else {
+            return false
+        }
+
+        let fallbackSubtitles: [String]?
+        if let subs = initialSubtitles, !subs.isEmpty {
+            let proxiedSubs = proxySubtitleURLs(subs, headers: headers)
+            fallbackSubtitles = proxiedSubs.count == subs.count ? proxiedSubs : subs
+        } else {
+            fallbackSubtitles = nil
+        }
+
+        vlcProxyFallbackTried = true
+        initialSubtitles = fallbackSubtitles
+
+        Logger.shared.log("PlayerViewController: VLC proxy fallback activated", type: "Stream")
+        load(url: proxyURL, preset: preset, headers: nil)
+        return true
+    }
     
     private func updateSubtitleTracksMenu() {
         let useExternalMenu = !subtitleURLs.isEmpty && vlcRenderer == nil
@@ -1619,7 +1676,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if !urls.isEmpty {
             subtitleButton.isHidden = false
             currentSubtitleIndex = 0
-            subtitleModel.isVisible = true
+            subtitleModel.isVisible = Settings.shared.enableSubtitlesByDefault
             
             // VLC can load external subtitles natively; MPV uses manual parsing
             if vlcRenderer != nil {
@@ -1866,17 +1923,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     
     // MARK: - Error display helpers
     private func presentErrorAlert(title: String, message: String) {
-        DispatchQueue.main.async {
-            let ac = UIAlertController(title: title, message: message, preferredStyle: .alert)
-            ac.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
-            ac.addAction(UIAlertAction(title: "View Logs", style: .default, handler: { _ in
-                self.viewLogsTapped()
-            }))
-            self.showErrorBanner(message)
-            if self.presentedViewController == nil {
-                self.present(ac, animated: true, completion: nil)
-            }
-        }
+        Logger.shared.log("PlayerViewController: \(title) - \(message)", type: "Error")
     }
     
     private func showTransientErrorBanner(_ message: String, duration: TimeInterval = 4.0) {
@@ -1896,14 +1943,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func handleLoggerNotification(_ note: Notification) {
-        guard let info = note.userInfo,
-              let message = info["message"] as? String,
-              let type = info["type"] as? String else { return }
-        
-        let lower = type.lowercased()
-        if lower == "error" || lower == "warn" || message.lowercased().contains("error") || message.lowercased().contains("warn") {
-            showTransientErrorBanner(message)
-        }
+        return
     }
     
     private func showErrorBanner(_ message: String) {
@@ -2304,6 +2344,14 @@ extension PlayerViewController: VLCRendererDelegate {
                 self.pendingSeekTime = nil
             }
         }
+    }
+
+    func renderer(_ renderer: VLCRenderer, didFailWithError message: String) {
+        if isClosing { return }
+        if attemptVlcProxyFallbackIfNeeded() {
+            return
+        }
+        Logger.shared.log("PlayerViewController: VLC error: \(message)", type: "Error")
     }
 
     func rendererDidChangeTracks(_ renderer: VLCRenderer) {

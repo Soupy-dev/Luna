@@ -94,7 +94,7 @@ final class VLCHeaderProxy {
                 self.port = initialPort
                 Logger.shared.log("VLCHeaderProxy: started on 127.0.0.1:\(initialPort)", type: "Info")
             } else {
-                Logger.shared.log("VLCHeaderProxy: started without a valid port", type: "Error")
+                Logger.shared.log("VLCHeaderProxy: started; awaiting port assignment", type: "Info")
             }
             return true
         } catch {

@@ -1304,49 +1304,10 @@ struct ModulesSearchResultsSheet: View {
             } else if inAppPlayer == "VLC" {
                 // VLC uses same PlayerViewController as MPV
                 let preset = PlayerPreset.presets.first
-                let rawSubtitles: [String]? = subtitle.map { [$0] }
-                var subtitleArray = rawSubtitles
+                let subtitleArray: [String]? = subtitle.map { [$0] }
 
-            #if !os(tvOS)
-                let proxyEnabled = UserDefaults.standard.object(forKey: "vlcHeaderProxyEnabled") as? Bool ?? true
-                let proxyURL = proxyEnabled && !finalHeaders.isEmpty
-                    ? VLCHeaderProxy.shared.makeProxyURL(for: streamURL, headers: finalHeaders)
-                    : nil
-                let useProxy = proxyEnabled && !finalHeaders.isEmpty && proxyURL != nil
-                let vlcURL = useProxy ? (proxyURL ?? streamURL) : streamURL
-                let vlcHeaders: [String: String]? = useProxy ? nil : finalHeaders
-
-                if useProxy {
-                    Logger.shared.log("VLC proxy enabled: headers=\(finalHeaders.count) url=\(vlcURL.absoluteString)", type: "Stream")
-                } else if proxyEnabled && !finalHeaders.isEmpty {
-                    Logger.shared.log("VLC proxy unavailable; using direct headers for stream", type: "Stream")
-                }
-
-                if let rawSubs = rawSubtitles, !rawSubs.isEmpty, proxyEnabled, !finalHeaders.isEmpty {
-                    let proxiedSubs = rawSubs.compactMap { urlString -> String? in
-                        guard let url = URL(string: urlString),
-                              let scheme = url.scheme?.lowercased(),
-                              scheme == "http" || scheme == "https",
-                              let proxied = VLCHeaderProxy.shared.makeProxyURL(for: url, headers: finalHeaders) else {
-                            return nil
-                        }
-                        return proxied.absoluteString
-                    }
-
-                    if proxiedSubs.count == rawSubs.count {
-                        subtitleArray = proxiedSubs
-                        Logger.shared.log("VLC proxy subtitles enabled: count=\(proxiedSubs.count)", type: "Stream")
-                    } else if !proxiedSubs.isEmpty {
-                        Logger.shared.log("VLC proxy subtitles partial; using direct subtitle URLs", type: "Stream")
-                        subtitleArray = rawSubs
-                    } else {
-                        Logger.shared.log("VLC proxy subtitles unavailable; using direct subtitle URLs", type: "Stream")
-                    }
-                }
-            #else
                 let vlcURL = streamURL
                 let vlcHeaders: [String: String]? = finalHeaders
-            #endif
                 
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil
