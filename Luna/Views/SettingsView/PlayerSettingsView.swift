@@ -196,6 +196,7 @@ struct PlayerSettingsView: View {
                         .tint(accentColorManager.currentAccentColor)
                     }
 
+                #if !os(tvOS)
                     if store.inAppPlayer == .vlc {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -220,6 +221,7 @@ struct PlayerSettingsView: View {
                             .tint(accentColorManager.currentAccentColor)
                         }
                     }
+                #endif
                     
                     NavigationLink(destination: VLCLanguageSelectionView(
                         title: "Default Subtitle Language",

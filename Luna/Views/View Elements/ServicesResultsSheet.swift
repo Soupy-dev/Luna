@@ -1305,6 +1305,7 @@ struct ModulesSearchResultsSheet: View {
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
 
+            #if !os(tvOS)
                 let proxyEnabled = UserDefaults.standard.object(forKey: "vlcHeaderProxyEnabled") as? Bool ?? true
                 let useProxy = proxyEnabled && !finalHeaders.isEmpty
                 let vlcURL = useProxy ? (VLCHeaderProxy.shared.makeProxyURL(for: streamURL, headers: finalHeaders) ?? streamURL) : streamURL
@@ -1313,6 +1314,10 @@ struct ModulesSearchResultsSheet: View {
                 if useProxy {
                     Logger.shared.log("VLC proxy enabled: headers=\(finalHeaders.count) url=\(vlcURL.absoluteString)", type: "Stream")
                 }
+            #else
+                let vlcURL = streamURL
+                let vlcHeaders: [String: String]? = finalHeaders
+            #endif
                 
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil

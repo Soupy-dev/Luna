@@ -8,6 +8,7 @@
 import Foundation
 import Network
 
+#if !os(tvOS)
 final class VLCHeaderProxy {
     static let shared = VLCHeaderProxy()
 
@@ -402,3 +403,4 @@ final class VLCHeaderProxy {
         sessionLock.unlock()
     }
 }
+#endif
