@@ -1304,7 +1304,8 @@ struct ModulesSearchResultsSheet: View {
             } else if inAppPlayer == "VLC" {
                 // VLC uses same PlayerViewController as MPV
                 let preset = PlayerPreset.presets.first
-                let subtitleArray: [String]? = subtitle.map { [$0] }
+                let rawSubtitles: [String]? = subtitle.map { [$0] }
+                var subtitleArray = rawSubtitles
 
             #if !os(tvOS)
                 let proxyEnabled = UserDefaults.standard.object(forKey: "vlcHeaderProxyEnabled") as? Bool ?? true
