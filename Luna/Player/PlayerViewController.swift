@@ -1462,32 +1462,31 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }
         }
 
-        // Auto-select preferred anime audio language when applicable
-        var didAutoSelectPreferred = false
+        // Auto-select preferred anime audio language when applicable and user hasn't picked a track yet
         if isAnimeContent() && !userSelectedAudioTrack {
             let preferredLang = Settings.shared.preferredAnimeAudioLanguage.lowercased()
             let preferredLangName = languageName(for: preferredLang)
-            
-            Logger.shared.log("PlayerViewController: Auto anime audio - isAnime=true, preferredLang=\(preferredLang), preferredLangName=\(preferredLangName), detailedTracks=\(detailedTracks.count)", type: "Player")
 
-            if let matching = detailedTracks.first(where: {
-                let langCode = $0.2.lowercased()
-                let title = $0.1.lowercased()
-                if !preferredLang.isEmpty && langCode.contains(preferredLang) { return true }
-                if !preferredLangName.isEmpty && langCode.contains(preferredLangName.lowercased()) { return true }
-                if !preferredLang.isEmpty && title.contains(preferredLang) { return true }
-                if !preferredLangName.isEmpty && title.contains(preferredLangName.lowercased()) { return true }
-                return false
-            }) {
-                Logger.shared.log("PlayerViewController: Auto-selected anime audio track: \(matching.1) (ID: \(matching.0))", type: "Player")
-                userSelectedAudioTrack = true
-                rendererSetAudioTrack(id: matching.0)
-                didAutoSelectPreferred = true
-            } else {
-                Logger.shared.log("PlayerViewController: No matching anime audio track found for lang=\(preferredLang)", type: "Player")
+            if !preferredLang.isEmpty {
+                Logger.shared.log("PlayerViewController: Auto anime audio - preferredLang=\(preferredLang), preferredLangName=\(preferredLangName), detailedTracks=\(detailedTracks.count)", type: "Player")
+
+                if let matching = detailedTracks.first(where: {
+                    let langCode = $0.2.lowercased()
+                    let title = $0.1.lowercased()
+                    if !preferredLang.isEmpty && langCode.contains(preferredLang) { return true }
+                    if !preferredLangName.isEmpty && langCode.contains(preferredLangName.lowercased()) { return true }
+                    if !preferredLang.isEmpty && title.contains(preferredLang) { return true }
+                    if !preferredLangName.isEmpty && title.contains(preferredLangName.lowercased()) { return true }
+                    return false
+                }) {
+                    Logger.shared.log("PlayerViewController: Auto-selected anime audio track: \(matching.1) (ID: \(matching.0))", type: "Player")
+                    userSelectedAudioTrack = true
+                    rendererSetAudioTrack(id: matching.0)
+                } else {
+                    Logger.shared.log("PlayerViewController: No matching anime audio track found for lang=\(preferredLang)", type: "Player")
+                }
             }
         }
-        // Per requirement: do not auto-select anime language without an AniList mapping
         
         let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: trackActions)
         audioButton.menu = audioMenu
@@ -1614,15 +1613,21 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         // Use menu-only behavior for both VLC and MPV so the UI looks consistent
         subtitleButton.showsMenuAsPrimaryAction = true
 
-        // Apply default subtitle settings if enabled and tracks exist (embedded only)
-        if !useExternalMenu, !tracks.isEmpty && !userSelectedSubtitleTrack {
+        // Apply default subtitle settings if enabled and tracks exist
+        if !tracks.isEmpty && !userSelectedSubtitleTrack {
             let settings = Settings.shared
             if settings.enableSubtitlesByDefault {
                 let preferredLang = settings.defaultSubtitleLanguage
-                if let matchingTrack = tracks.first(where: { $0.1.lowercased().contains(preferredLang.lowercased()) }) {
-                    rendererSetSubtitleTrack(id: matchingTrack.0)
+                let matchingTrack = tracks.first(where: { $0.1.lowercased().contains(preferredLang.lowercased()) })
+                let selectedTrack = matchingTrack ?? tracks.first
+                if let selectedTrack {
+                    if useExternalMenu {
+                        currentSubtitleIndex = selectedTrack.0
+                        loadCurrentSubtitle()
+                    } else {
+                        rendererSetSubtitleTrack(id: selectedTrack.0)
+                    }
                     userSelectedSubtitleTrack = true
-                    // Ensure visibility when selecting programmatically (especially for MPV path)
                     subtitleModel.isVisible = true
                     updateSubtitleButtonAppearance()
                 }
@@ -1693,7 +1698,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             Logger.shared.log("PlayerViewController: loadSubtitles count=\(urls.count) renderer=\(vlcRenderer != nil ? "VLC" : "MPV")", type: "Stream")
             subtitleButton.isHidden = false
             currentSubtitleIndex = 0
-            subtitleModel.isVisible = Settings.shared.enableSubtitlesByDefault
+            let enableByDefault = Settings.shared.enableSubtitlesByDefault
+            subtitleModel.isVisible = enableByDefault
             
             // VLC can load external subtitles natively; MPV uses manual parsing
             if vlcRenderer != nil {
@@ -1709,11 +1715,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                         Logger.shared.log("PlayerViewController: VLC external subtitles not detected after load", type: "Stream")
                     } else {
                         Logger.shared.log("PlayerViewController: VLC subtitle tracks available count=\(tracks.count)", type: "Stream")
+                        if enableByDefault, !self.userSelectedSubtitleTrack, self.rendererGetCurrentSubtitleTrackId() == -1 {
+                            self.rendererSetSubtitleTrack(id: tracks[0].0)
+                            self.subtitleModel.isVisible = true
+                            self.userSelectedSubtitleTrack = true
+                            self.updateSubtitleButtonAppearance()
+                        }
                     }
                 }
             } else {
                 // MPV: manually download and parse subtitles
-                loadCurrentSubtitle()
+                if enableByDefault {
+                    loadCurrentSubtitle()
+                }
             }
             
             updateSubtitleButtonAppearance()

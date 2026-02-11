@@ -1291,6 +1291,8 @@ struct ModulesSearchResultsSheet: View {
                     subtitles: subtitleArray,
                     mediaInfo: playerMediaInfo
                 )
+                let isAnimeHint = animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
+                pvc.isAnimeHint = isAnimeHint
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -1325,6 +1327,8 @@ struct ModulesSearchResultsSheet: View {
                     subtitles: subtitleArray,
                     mediaInfo: playerMediaInfo
                 )
+                let isAnimeHint = animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
+                pvc.isAnimeHint = isAnimeHint
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
