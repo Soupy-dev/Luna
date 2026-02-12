@@ -138,6 +138,7 @@ struct TVShowSeasonsSection: View {
                 seasonTitleOverride: currentSeasonTitle,
                 originalTitle: romajiTitle,
                 isMovie: false,
+                isAnimeContent: isAnime,
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: tvShow?.id ?? 0,
                 animeSeasonTitle: isAnime ? currentSeasonTitle : nil,
