@@ -54,7 +54,9 @@ struct LoggerView: View {
     @State private var searchText = ""
     @State private var isAutoScrollEnabled = true
     @State private var showingFilterSheet = false
+    #if !os(tvOS)
     @State private var exportItem: ExportItem?
+    #endif
     @State private var exportErrorMessage: String?
     
     private var filteredLogs: [LogEntry] {
