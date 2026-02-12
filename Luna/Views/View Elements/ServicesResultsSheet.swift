@@ -1293,6 +1293,16 @@ struct ModulesSearchResultsSheet: View {
                 )
                 let isAnimeHint = animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
                 pvc.isAnimeHint = isAnimeHint
+                let mediaInfoLabel: String = {
+                    guard let info = playerMediaInfo else { return "nil" }
+                    switch info {
+                    case .movie(let id, let title, _):
+                        return "movie id=\(id) title=\(title)"
+                    case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _):
+                        return "episode showId=\(showId) s=\(seasonNumber) e=\(episodeNumber) title=\(showTitle)"
+                    }
+                }()
+                Logger.shared.log("ServicesResultsSheet: presenting MPV isAnimeHint=\(isAnimeHint) mediaInfo=\(mediaInfoLabel)", type: "Stream")
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -1329,6 +1339,16 @@ struct ModulesSearchResultsSheet: View {
                 )
                 let isAnimeHint = animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
                 pvc.isAnimeHint = isAnimeHint
+                let mediaInfoLabel: String = {
+                    guard let info = playerMediaInfo else { return "nil" }
+                    switch info {
+                    case .movie(let id, let title, _):
+                        return "movie id=\(id) title=\(title)"
+                    case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _):
+                        return "episode showId=\(showId) s=\(seasonNumber) e=\(episodeNumber) title=\(showTitle)"
+                    }
+                }()
+                Logger.shared.log("ServicesResultsSheet: presenting VLC isAnimeHint=\(isAnimeHint) mediaInfo=\(mediaInfoLabel)", type: "Stream")
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,

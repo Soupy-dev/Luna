@@ -788,6 +788,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
         logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
+        let mediaInfoLabel: String = {
+            guard let info = mediaInfo else { return "nil" }
+            switch info {
+            case .movie(let id, let title, _):
+                return "movie id=\(id) title=\(title)"
+            case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _):
+                return "episode showId=\(showId) s=\(seasonNumber) e=\(episodeNumber) title=\(showTitle)"
+            }
+        }()
+        Logger.shared.log("PlayerViewController.load: isAnimeHint=\(isAnimeHint ?? false) mediaInfo=\(mediaInfoLabel)", type: "Stream")
         
         // Ensure renderer is started before loading media
         if !isRunning {
@@ -1428,6 +1438,28 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             self?.updateAudioTracksMenuWhenReady()
         }
     }
+
+    private func updateSubtitleTracksMenuWhenReady(attempt: Int = 0) {
+        if userSelectedSubtitleTrack {
+            updateSubtitleTracksMenu()
+            return
+        }
+
+        if !subtitleURLs.isEmpty && vlcRenderer == nil {
+            updateSubtitleTracksMenu()
+            return
+        }
+
+        let tracks = rendererGetSubtitleTracks()
+        if !tracks.isEmpty || attempt >= 20 {
+            updateSubtitleTracksMenu()
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.updateSubtitleTracksMenuWhenReady(attempt: attempt + 1)
+        }
+    }
     
     private func updateAudioTracksMenu() {
         let detailedTracks = rendererGetAudioTracksDetailed()
@@ -1437,7 +1469,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         // Always show the audio button so the user can view the menu even when empty
         audioButton.isHidden = false
 
-        Logger.shared.log("PlayerViewController: audio tracks count=\(tracks.count) isAnime=\(isAnimeContent())", type: "Player")
+        Logger.shared.log("PlayerViewController: audio tracks count=\(tracks.count) isAnime=\(isAnimeContent()) userSelected=\(userSelectedAudioTrack) renderer=\(vlcRenderer != nil ? "VLC" : "MPV")", type: "Player")
         
         if tracks.isEmpty {
             let noTracksAction = UIAction(title: "No audio tracks available", state: .off) { _ in }
@@ -1485,7 +1517,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 } else {
                     Logger.shared.log("PlayerViewController: No matching anime audio track found for lang=\(preferredLang)", type: "Player")
                 }
+            } else {
+                Logger.shared.log("PlayerViewController: Auto anime audio skipped (preferred language empty)", type: "Player")
             }
+        } else if !isAnimeContent() {
+            Logger.shared.log("PlayerViewController: Auto anime audio skipped (isAnime=false)", type: "Player")
+        } else if userSelectedAudioTrack {
+            Logger.shared.log("PlayerViewController: Auto anime audio skipped (user already selected)", type: "Player")
         }
         
         let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: trackActions)
@@ -1493,8 +1531,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     private func isAnimeContent() -> Bool {
-        guard let info = mediaInfo else { return false }
         if let hint = isAnimeHint, hint == true { return true }
+        guard let info = mediaInfo else { return false }
         switch info {
         case .movie:
             return false
@@ -1638,6 +1676,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             ? rawTracks
             : rawTracks.filter { $0.0 >= 0 && !isDisabledTrackName($0.1) }
 
+        Logger.shared.log("PlayerViewController: subtitle tracks count=\(tracks.count) external=\(useExternalMenu) userSelected=\(userSelectedSubtitleTrack) renderer=\(vlcRenderer != nil ? "VLC" : "MPV")", type: "Player")
+
         // Always show the subtitle button so the user can view the menu even when empty
         subtitleButton.isHidden = false
 
@@ -1649,7 +1689,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             let settings = Settings.shared
             if settings.enableSubtitlesByDefault {
                 let preferredLang = settings.defaultSubtitleLanguage
-                let matchingTrack = tracks.first(where: { $0.1.lowercased().contains(preferredLang.lowercased()) })
+                let tokens = languageTokens(for: preferredLang)
+                let matchingTrack = tracks.first(where: { track in
+                    let nameLower = track.1.lowercased()
+                    if tokens.contains(where: { nameLower.contains($0) }) {
+                        return true
+                    }
+                    if useExternalMenu, track.0 < subtitleURLs.count {
+                        let urlLower = subtitleURLs[track.0].lowercased()
+                        return tokens.contains(where: { urlLower.contains($0) })
+                    }
+                    return false
+                })
+                Logger.shared.log("PlayerViewController: default subtitles enabled lang=\(preferredLang) tokens=\(tokens.joined(separator: ",")) match=\(matchingTrack?.1 ?? "nil")", type: "Player")
                 let selectedTrack = matchingTrack ?? tracks.first
                 if let selectedTrack {
                     if useExternalMenu {
@@ -2320,7 +2372,7 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
             
             // Update audio and subtitle tracks now that the video is ready
             self.updateAudioTracksMenuWhenReady()
-            self.updateSubtitleTracksMenu()
+            self.updateSubtitleTracksMenuWhenReady()
             
             if let seekTime = self.pendingSeekTime {
                 self.rendererSeek(to: seekTime)
@@ -2412,7 +2464,7 @@ extension PlayerViewController: VLCRendererDelegate {
             
             // Update audio and subtitle tracks now that the video is ready
             self.updateAudioTracksMenuWhenReady()
-            self.updateSubtitleTracksMenu()
+            self.updateSubtitleTracksMenuWhenReady()
             
             if let seekTime = self.pendingSeekTime {
                 self.rendererSeek(to: seekTime)
