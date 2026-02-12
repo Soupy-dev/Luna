@@ -791,10 +791,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let mediaInfoLabel: String = {
             guard let info = mediaInfo else { return "nil" }
             switch info {
-            case .movie(let id, let title, _):
-                return "movie id=\(id) title=\(title)"
-            case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _):
-                return "episode showId=\(showId) s=\(seasonNumber) e=\(episodeNumber) title=\(showTitle)"
+            case .movie(let id, let title, _, let isAnime):
+                return "movie id=\(id) title=\(title) isAnime=\(isAnime)"
+            case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _, let isAnime):
+                return "episode showId=\(showId) s=\(seasonNumber) e=\(episodeNumber) title=\(showTitle) isAnime=\(isAnime)"
             }
         }()
         Logger.shared.log("PlayerViewController.load: isAnimeHint=\(isAnimeHint ?? false) mediaInfo=\(mediaInfoLabel)", type: "Stream")
@@ -829,19 +829,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let lastPlayedTime: Double
         
         switch mediaInfo {
-        case .movie(let id, let title, _):
+        case .movie(let id, let title, _, _):
             lastPlayedTime = ProgressManager.shared.getMovieCurrentTime(movieId: id, title: title)
             
-        case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
+        case .episode(let showId, let seasonNumber, let episodeNumber, _, _, _):
             lastPlayedTime = ProgressManager.shared.getEpisodeCurrentTime(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
         }
         
         if lastPlayedTime != 0 {
             let progress: Double
             switch mediaInfo {
-            case .movie(let id, let title, _):
+            case .movie(let id, let title, _, _):
                 progress = ProgressManager.shared.getMovieProgress(movieId: id, title: title)
-            case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
+            case .episode(let showId, let seasonNumber, let episodeNumber, _, _, _):
                 progress = ProgressManager.shared.getEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
             }
             
@@ -1534,9 +1534,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if let hint = isAnimeHint, hint == true { return true }
         guard let info = mediaInfo else { return false }
         switch info {
-        case .movie:
-            return false
-        case .episode(let showId, _, _, _, _):
+        case .movie(_, _, _, let isAnime):
+            return isAnime
+        case .episode(let showId, _, _, _, _, let isAnime):
+            if isAnime { return true }
             return trackerManager.cachedAniListId(for: showId) != nil
         }
     }
@@ -2314,9 +2315,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard effectiveDuration.isFinite, effectiveDuration > 0, position >= 0, let info = mediaInfo else { return }
         
         switch info {
-        case .movie(let id, let title, _):
+        case .movie(let id, let title, _, _):
             ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: position, totalDuration: effectiveDuration)
-        case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL):
+        case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL, _):
             ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: effectiveDuration, showTitle: showTitle, showPosterURL: showPosterURL)
         }
     }
