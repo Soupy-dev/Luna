@@ -172,7 +172,7 @@ struct PlayerSettingsView: View {
             
             if store.inAppPlayer != .normal {
                 let sectionTitle = store.inAppPlayer == .vlc ? "VLC Player" : "MPV Player"
-                let sectionFooter = store.inAppPlayer == .vlc ? "Note: VLC may not work with every service due to streaming compatibility issues." : "Configure default subtitle and audio settings."
+                let sectionFooter = "Configure default subtitle and audio settings."
                 
                 Section(header: Text(sectionTitle), footer: Text(sectionFooter)) {
                     HStack {
@@ -195,6 +195,33 @@ struct PlayerSettingsView: View {
                         ))
                         .tint(accentColorManager.currentAccentColor)
                     }
+
+                #if !os(tvOS)
+                    if store.inAppPlayer == .vlc {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("VLC Header Proxy")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+
+                                Text("Route VLC streams through a local proxy to apply all headers.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+
+                            Spacer()
+
+                            Toggle("", isOn: Binding(
+                                get: {
+                                    UserDefaults.standard.object(forKey: "vlcHeaderProxyEnabled") as? Bool ?? true
+                                },
+                                set: { UserDefaults.standard.set($0, forKey: "vlcHeaderProxyEnabled") }
+                            ))
+                            .tint(accentColorManager.currentAccentColor)
+                        }
+                    }
+                #endif
                     
                     NavigationLink(destination: VLCLanguageSelectionView(
                         title: "Default Subtitle Language",

@@ -86,6 +86,7 @@ struct ModulesSearchResultsSheet: View {
     let seasonTitleOverride: String?
     let originalTitle: String?
     let isMovie: Bool
+    let isAnimeContent: Bool
     let selectedEpisode: TMDBEpisode?
     let tmdbId: Int
     /// Non-nil for anime to force E## format
@@ -1272,15 +1273,16 @@ struct ModulesSearchResultsSheet: View {
             
             if inAppPlayer == "mpv" {
                 let preset = PlayerPreset.presets.first
-                let subtitleArray: [String]? = subtitle.map { [$0] }
+                let rawSubtitles: [String]? = subtitle.map { [$0] }
+                var subtitleArray = rawSubtitles
                 
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil
                 let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
                 if isMovie {
-                    playerMediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
+                    playerMediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL, isAnime: isAnimeContent)
                 } else if let episode = selectedEpisode {
-                    playerMediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
+                    playerMediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL, isAnime: isAnimeContent)
                 }
                 
                 let pvc = PlayerViewController(
@@ -1290,6 +1292,18 @@ struct ModulesSearchResultsSheet: View {
                     subtitles: subtitleArray,
                     mediaInfo: playerMediaInfo
                 )
+                let isAnimeHint = isAnimeContent || animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
+                pvc.isAnimeHint = isAnimeHint
+                let mediaInfoLabel: String = {
+                    guard let info = playerMediaInfo else { return "nil" }
+                    switch info {
+                    case .movie(let id, let title, _, let isAnime):
+                        return "movie id=\(id) title=\(title) isAnime=\(isAnime)"
+                    case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _, let isAnime):
+                        return "episode showId=\(showId) s=\(seasonNumber) e=\(episodeNumber) title=\(showTitle) isAnime=\(isAnime)"
+                    }
+                }()
+                Logger.shared.log("ServicesResultsSheet: presenting MPV isAnimeHint=\(isAnimeHint) isAnimeContent=\(isAnimeContent) mediaInfo=\(mediaInfoLabel)", type: "Stream")
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -1304,23 +1318,38 @@ struct ModulesSearchResultsSheet: View {
                 // VLC uses same PlayerViewController as MPV
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
+
+                let vlcURL = streamURL
+                let vlcHeaders: [String: String]? = finalHeaders
                 
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil
                 let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
                 if isMovie {
-                    playerMediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
+                    playerMediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL, isAnime: isAnimeContent)
                 } else if let episode = selectedEpisode {
-                    playerMediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
+                    playerMediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL, isAnime: isAnimeContent)
                 }
                 
                 let pvc = PlayerViewController(
-                    url: streamURL,
+                    url: vlcURL,
                     preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
-                    headers: finalHeaders,
+                    headers: vlcHeaders,
                     subtitles: subtitleArray,
                     mediaInfo: playerMediaInfo
                 )
+                let isAnimeHint = isAnimeContent || animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
+                pvc.isAnimeHint = isAnimeHint
+                let mediaInfoLabel: String = {
+                    guard let info = playerMediaInfo else { return "nil" }
+                    switch info {
+                    case .movie(let id, let title, _, let isAnime):
+                        return "movie id=\(id) title=\(title) isAnime=\(isAnime)"
+                    case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _, let isAnime):
+                        return "episode showId=\(showId) s=\(seasonNumber) e=\(episodeNumber) title=\(showTitle) isAnime=\(isAnime)"
+                    }
+                }()
+                Logger.shared.log("ServicesResultsSheet: presenting VLC isAnimeHint=\(isAnimeHint) isAnimeContent=\(isAnimeContent) mediaInfo=\(mediaInfoLabel)", type: "Stream")
                 pvc.modalPresentationStyle = .fullScreen
                 
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -1338,10 +1367,10 @@ struct ModulesSearchResultsSheet: View {
                 playerVC.player = AVPlayer(playerItem: item)
                 if isMovie {
                     let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
-                    playerVC.mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL)
+                    playerVC.mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL, isAnime: isAnimeContent)
                 } else if let episode = selectedEpisode {
                     let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
-                    playerVC.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL)
+                    playerVC.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL, isAnime: isAnimeContent)
                 }
                 playerVC.modalPresentationStyle = .fullScreen
                 

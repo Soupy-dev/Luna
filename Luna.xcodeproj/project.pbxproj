@@ -30,6 +30,7 @@
 		13830AF42E55F5FF00B3CDE4 /* AccentColorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13830AF32E55F5FF00B3CDE4 /* AccentColorManager.swift */; };
 		139509A22E7DDAE100CB60D4 /* PlayerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139509A12E7DDAE100CB60D4 /* PlayerSettingsView.swift */; };
 		BB7777912F20000000BB7791 /* VLCLanguageSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7777902F20000000BB7790 /* VLCLanguageSelectionView.swift */; };
+		F9A1B2C32F90000100A1B2C3 /* VLCHeaderProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9A1B2C22F90000100A1B2C3 /* VLCHeaderProxy.swift */; };
 		BB7777972F20000001BB7797 /* VLCKitSPM in Frameworks */ = {isa = PBXBuildFile; productRef = BB7777982F20000001BB7798 /* VLCKitSPM */; };
 		13A46CFD2EF5943400423BC6 /* FakeWebKit in Frameworks */ = {isa = PBXBuildFile; productRef = 13A46CFC2EF5943400423BC6 /* FakeWebKit */; };
 		13A46D002EF5944C00423BC6 /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 13A46CFF2EF5944C00423BC6 /* Kingfisher */; };
@@ -169,6 +170,7 @@
 		13830AF32E55F5FF00B3CDE4 /* AccentColorManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AccentColorManager.swift; sourceTree = "<group>"; };
 		139509A12E7DDAE100CB60D4 /* PlayerSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PlayerSettingsView.swift; sourceTree = "<group>"; };
 		BB7777902F20000000BB7790 /* VLCLanguageSelectionView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VLCLanguageSelectionView.swift; sourceTree = "<group>"; };
+		F9A1B2C22F90000100A1B2C3 /* VLCHeaderProxy.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VLCHeaderProxy.swift; sourceTree = "<group>"; };
 		13B2E5732E7597B9009F3271 /* JSController-NetworkFetch.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "JSController-NetworkFetch.swift"; sourceTree = "<group>"; };
 		13B6F3442EA4C6BC00DECD2B /* ProgressManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ProgressManager.swift; sourceTree = "<group>"; };
 		13C6F3452EA4C6BC00DECD2B /* CacheManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CacheManager.swift; sourceTree = "<group>"; };
@@ -298,6 +300,7 @@
 				1324E7B42E940BD70036B5F5 /* MPVSoftwareRenderer.swift */,
 				1324E7B62E940BD70036B5F5 /* SampleBufferDisplayView.swift */,
 				BB7777702F20000000BB7770 /* VLCRenderer.swift */,
+				F9A1B2C22F90000100A1B2C3 /* VLCHeaderProxy.swift */,
 			);
 			path = Player;
 			sourceTree = "<group>";
@@ -928,6 +931,7 @@
 				13F5B5952E730CB200565E75 /* TMDBContentFilter.swift in Sources */,
 				13F072B12E4B2D9200EF90EB /* NormalPlayer.swift in Sources */,
 				BB7777712F20000000BB7771 /* VLCRenderer.swift in Sources */,
+				F9A1B2C32F90000100A1B2C3 /* VLCHeaderProxy.swift in Sources */,
 				13F072AF2E4B2D9200EF90EB /* StretchyHeader.swift in Sources */,
 				13F0729D2E4B2D9200EF90EB /* JSController-Search.swift in Sources */,
 				13E1EDE72ED9E66000087629 /* kanzenGeneralSettings.swift in Sources */,

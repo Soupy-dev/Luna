@@ -22,6 +22,7 @@ protocol VLCRendererDelegate: AnyObject {
     func renderer(_ renderer: VLCRenderer, didChangePause isPaused: Bool)
     func renderer(_ renderer: VLCRenderer, didChangeLoading isLoading: Bool)
     func renderer(_ renderer: VLCRenderer, didBecomeReadyToSeek: Bool)
+    func renderer(_ renderer: VLCRenderer, didFailWithError message: String)
     func renderer(_ renderer: VLCRenderer, getSubtitleForTime time: Double) -> NSAttributedString?
     func renderer(_ renderer: VLCRenderer, getSubtitleStyle: Void) -> SubtitleStyle
     func renderer(_ renderer: VLCRenderer, subtitleTrackDidChange trackId: Int)
@@ -600,6 +601,12 @@ final class VLCRenderer: NSObject {
                 self.delegate?.renderer(self, didChangePause: true)
                 self.delegate?.renderer(self, didChangeLoading: false)
             }
+            if state == .error {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.delegate?.renderer(self, didFailWithError: "VLC playback error")
+                }
+            }
             
         default:
             break
@@ -647,6 +654,7 @@ protocol VLCRendererDelegate: AnyObject {
     func renderer(_ renderer: VLCRenderer, didChangePause isPaused: Bool)
     func renderer(_ renderer: VLCRenderer, didChangeLoading isLoading: Bool)
     func renderer(_ renderer: VLCRenderer, didBecomeReadyToSeek: Bool)
+    func renderer(_ renderer: VLCRenderer, didFailWithError message: String)
     func renderer(_ renderer: VLCRenderer, getSubtitleForTime time: Double) -> NSAttributedString?
     func renderer(_ renderer: VLCRenderer, getSubtitleStyle: Void) -> SubtitleStyle
     func renderer(_ renderer: VLCRenderer, subtitleTrackDidChange trackId: Int)

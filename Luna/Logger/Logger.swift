@@ -9,6 +9,10 @@ import Foundation
 
 class Logger: @unchecked Sendable {
     static let shared = Logger()
+
+    enum ExportError: Error {
+        case encodingFailed
+    }
     
     struct LogEntry {
         let message: String
@@ -100,6 +104,21 @@ class Logger: @unchecked Sendable {
     
     func getLogFileURL() -> URL {
         return logFileURL
+    }
+
+    func exportLogsToTempFile() async throws -> URL {
+        let logs = await getLogsAsync()
+        let content = logs.isEmpty ? "No logs available." : logs
+        guard let data = content.data(using: .utf8) else {
+            throw ExportError.encodingFailed
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let filename = "luna-logs-\(formatter.string(from: Date())).txt"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        try data.write(to: url, options: .atomic)
+        return url
     }
     
     private func saveLogToFile(_ log: LogEntry) {

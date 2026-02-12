@@ -108,6 +108,30 @@ final class MPVSoftwareRenderer {
     var isPausedState: Bool {
         return isPaused
     }
+
+    private struct MPVTrackInfo {
+        let id: Int
+        let type: String
+        let title: String
+        let lang: String
+        let selected: Bool
+    }
+
+    private func languageName(for code: String) -> String {
+        switch code.lowercased() {
+        case "jpn", "ja", "jp": return "Japanese"
+        case "eng", "en", "us", "uk": return "English"
+        case "spa", "es", "esp": return "Spanish"
+        case "fre", "fra", "fr": return "French"
+        case "ger", "deu", "de": return "German"
+        case "ita", "it": return "Italian"
+        case "por", "pt": return "Portuguese"
+        case "rus", "ru": return "Russian"
+        case "chi", "zho", "zh": return "Chinese"
+        case "kor", "ko": return "Korean"
+        default: return ""
+        }
+    }
     
     init(displayLayer: AVSampleBufferDisplayLayer) {
         guard
@@ -1157,6 +1181,107 @@ final class MPVSoftwareRenderer {
         }
         return result
     }
+
+    private func fetchTrackList() -> [MPVTrackInfo] {
+        guard let handle = mpv else { return [] }
+
+        var node = mpv_node()
+        let status = "track-list".withCString { pointer in
+            mpv_get_property(handle, pointer, MPV_FORMAT_NODE, &node)
+        }
+        guard status >= 0 else { return [] }
+        defer { mpv_free_node_contents(&node) }
+
+        guard node.format == MPV_FORMAT_NODE_ARRAY, let list = node.u.list else { return [] }
+
+        var tracks: [MPVTrackInfo] = []
+        tracks.reserveCapacity(Int(list.pointee.num))
+
+        for index in 0..<Int(list.pointee.num) {
+            let item = list.pointee.values[index]
+            guard item.format == MPV_FORMAT_NODE_MAP, let map = item.u.list else { continue }
+
+            var id = -1
+            var type = ""
+            var title = ""
+            var lang = ""
+            var selected = false
+
+            for entryIndex in 0..<Int(map.pointee.num) {
+                guard let keyPtr = map.pointee.keys[entryIndex] else { continue }
+                let key = String(cString: keyPtr)
+                let value = map.pointee.values[entryIndex]
+
+                switch key {
+                case "id":
+                    if value.format == MPV_FORMAT_INT64 {
+                        id = Int(value.u.int64)
+                    }
+                case "type":
+                    if value.format == MPV_FORMAT_STRING, let cString = value.u.string {
+                        type = String(cString: cString)
+                    }
+                case "title":
+                    if value.format == MPV_FORMAT_STRING, let cString = value.u.string {
+                        title = String(cString: cString)
+                    }
+                case "lang":
+                    if value.format == MPV_FORMAT_STRING, let cString = value.u.string {
+                        lang = String(cString: cString)
+                    }
+                case "selected":
+                    if value.format == MPV_FORMAT_FLAG {
+                        selected = value.u.flag != 0
+                    }
+                default:
+                    break
+                }
+            }
+
+            guard id >= 0, !type.isEmpty else { continue }
+
+            let effectiveTitle: String
+            if !title.isEmpty {
+                if !lang.isEmpty {
+                    let lowerTitle = title.lowercased()
+                    let langName = languageName(for: lang)
+                    if !lowerTitle.contains(lang.lowercased()) && !langName.isEmpty && !lowerTitle.contains(langName.lowercased()) {
+                        effectiveTitle = "\(title) (\(lang))"
+                    } else {
+                        effectiveTitle = title
+                    }
+                } else {
+                    effectiveTitle = title
+                }
+            } else if !lang.isEmpty {
+                let langName = languageName(for: lang)
+                effectiveTitle = langName.isEmpty ? lang.uppercased() : langName
+            } else {
+                effectiveTitle = "Track \(id)"
+            }
+
+            tracks.append(MPVTrackInfo(id: id, type: type, title: effectiveTitle, lang: lang, selected: selected))
+        }
+
+        return tracks
+    }
+
+    private func getTrackIdProperty(_ name: String) -> Int {
+        guard let handle = mpv else { return -1 }
+        if let value = getStringProperty(handle: handle, name: name) {
+            let lower = value.lowercased()
+            if lower == "no" || lower == "auto" {
+                return -1
+            }
+            if let intValue = Int(value) {
+                return intValue
+            }
+        }
+
+        var id: Int64 = -1
+        let status = getProperty(handle: handle, name: name, format: MPV_FORMAT_INT64, value: &id)
+        return status >= 0 ? Int(id) : -1
+    }
     
     @discardableResult
     private func getProperty<T>(handle: OpaquePointer, name: String, format: mpv_format, value: inout T) -> Int32 {
@@ -1221,5 +1346,49 @@ final class MPVSoftwareRenderer {
         var speed: Double = 1.0
         getProperty(handle: handle, name: "speed", format: MPV_FORMAT_DOUBLE, value: &speed)
         return speed
+    }
+
+    // MARK: - Audio and Subtitle Tracks
+    func getAudioTracksDetailed() -> [(Int, String, String)] {
+        let tracks = fetchTrackList().filter { $0.type == "audio" }
+        return tracks.map { ($0.id, $0.title, $0.lang) }
+    }
+
+    func getAudioTracks() -> [(Int, String)] {
+        return getAudioTracksDetailed().map { ($0.0, $0.1) }
+    }
+
+    func setAudioTrack(id: Int) {
+        setProperty(name: "aid", value: String(id))
+    }
+
+    func getCurrentAudioTrackId() -> Int {
+        let id = getTrackIdProperty("aid")
+        if id >= 0 {
+            return id
+        }
+
+        if let selected = fetchTrackList().first(where: { $0.type == "audio" && $0.selected }) {
+            return selected.id
+        }
+
+        return -1
+    }
+
+    func getSubtitleTracks() -> [(Int, String)] {
+        let tracks = fetchTrackList().filter { $0.type == "sub" }
+        return tracks.map { ($0.id, $0.title) }
+    }
+
+    func setSubtitleTrack(id: Int) {
+        setProperty(name: "sid", value: String(id))
+    }
+
+    func getCurrentSubtitleTrackId() -> Int {
+        return getTrackIdProperty("sid")
+    }
+
+    func disableSubtitles() {
+        setProperty(name: "sid", value: "no")
     }
 }

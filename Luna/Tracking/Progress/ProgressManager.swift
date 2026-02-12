@@ -648,10 +648,10 @@ final class ProgressManager: ObservableObject {
             guard currentTime >= 0 && currentTime <= duration else { return }
 
             switch mediaInfo {
-            case .movie(let id, let title, let posterURL):
+            case .movie(let id, let title, let posterURL, _):
                 self.updateMovieProgress(movieId: id, title: title, currentTime: currentTime, totalDuration: duration, posterURL: posterURL)
 
-            case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL):
+            case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL, _):
                 self.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: currentTime, totalDuration: duration, showTitle: showTitle, showPosterURL: showPosterURL)
             }
         }
@@ -662,6 +662,6 @@ final class ProgressManager: ObservableObject {
 // MARK: - MediaInfo Enum
 
 enum MediaInfo {
-    case movie(id: Int, title: String, posterURL: String? = nil)
-    case episode(showId: Int, seasonNumber: Int, episodeNumber: Int, showTitle: String? = nil, showPosterURL: String? = nil)
+    case movie(id: Int, title: String, posterURL: String? = nil, isAnime: Bool = false)
+    case episode(showId: Int, seasonNumber: Int, episodeNumber: Int, showTitle: String? = nil, showPosterURL: String? = nil, isAnime: Bool = false)
 }

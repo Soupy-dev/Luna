@@ -135,6 +135,7 @@ struct MediaDetailView: View {
                 }(),
                 originalTitle: romajiTitle,
                 isMovie: searchResult.isMovie,
+                isAnimeContent: isAnimeShow,
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: searchResult.id,
                 animeSeasonTitle: isAnimeShow ? "anime" : nil,

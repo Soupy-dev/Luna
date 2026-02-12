@@ -149,10 +149,10 @@ class NormalPlayer: AVPlayerViewController, AVPlayerViewControllerDelegate {
         let lastPlayedTime: Double
         
         switch mediaInfo {
-        case .movie(let id, let title, _):
+        case .movie(let id, let title, _, _):
             lastPlayedTime = ProgressManager.shared.getMovieCurrentTime(movieId: id, title: title)
             
-        case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
+        case .episode(let showId, let seasonNumber, let episodeNumber, _, _, _):
             lastPlayedTime = ProgressManager.shared.getEpisodeCurrentTime(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
         }
         
@@ -168,10 +168,10 @@ class NormalPlayer: AVPlayerViewController, AVPlayerViewControllerDelegate {
     
     private func getProgressPercentage(for mediaInfo: MediaInfo) -> Double {
         switch mediaInfo {
-        case .movie(let id, let title, _):
+        case .movie(let id, let title, _, _):
             return ProgressManager.shared.getMovieProgress(movieId: id, title: title)
             
-        case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
+        case .episode(let showId, let seasonNumber, let episodeNumber, _, _, _):
             return ProgressManager.shared.getEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
         }
     }

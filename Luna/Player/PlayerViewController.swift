@@ -340,6 +340,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var initialSubtitles: [String]?
     private var userSelectedAudioTrack = false
     private var userSelectedSubtitleTrack = false
+    private var vlcProxyFallbackTried = false
     
     // Debounce timers for menu updates to avoid excessive rebuilds
     private var audioMenuDebounceTimer: Timer?
@@ -462,6 +463,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererGetAudioTracksDetailed() -> [(Int, String, String)] {
         if let vlc = vlcRenderer {
             return vlc.getAudioTracksDetailed()
+        } else if let mpv = mpvRenderer {
+            return mpv.getAudioTracksDetailed()
         }
         return []
     }
@@ -469,6 +472,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererGetAudioTracks() -> [(Int, String)] {
         if let vlc = vlcRenderer {
             return vlc.getAudioTracks()
+        } else if let mpv = mpvRenderer {
+            return mpv.getAudioTracks()
         }
         return []
     }
@@ -476,12 +481,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererSetAudioTrack(id: Int) {
         if let vlc = vlcRenderer {
             vlc.setAudioTrack(id: id)
+        } else if let mpv = mpvRenderer {
+            mpv.setAudioTrack(id: id)
         }
     }
     
     private func rendererGetCurrentAudioTrackId() -> Int {
         if let vlc = vlcRenderer {
             return vlc.getCurrentAudioTrackId()
+        } else if let mpv = mpvRenderer {
+            return mpv.getCurrentAudioTrackId()
         }
         return -1
     }
@@ -489,6 +498,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererGetSubtitleTracks() -> [(Int, String)] {
         if let vlc = vlcRenderer {
             return vlc.getSubtitleTracks()
+        } else if let mpv = mpvRenderer {
+            return mpv.getSubtitleTracks()
         }
         return []
     }
@@ -496,12 +507,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererSetSubtitleTrack(id: Int) {
         if let vlc = vlcRenderer {
             vlc.setSubtitleTrack(id: id)
+        } else if let mpv = mpvRenderer {
+            mpv.setSubtitleTrack(id: id)
         }
     }
     
     private func rendererGetCurrentSubtitleTrackId() -> Int {
         if let vlc = vlcRenderer {
             return vlc.getCurrentSubtitleTrackId()
+        } else if let mpv = mpvRenderer {
+            return mpv.getCurrentSubtitleTrackId()
         }
         return -1
     }
@@ -509,6 +524,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func rendererDisableSubtitles() {
         if let vlc = vlcRenderer {
             vlc.disableSubtitles()
+        } else if let mpv = mpvRenderer {
+            mpv.disableSubtitles()
         }
     }
     
@@ -660,15 +677,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         setupBrightnessControls()
     #endif
         
-        NotificationCenter.default.addObserver(self, selector: #selector(handleLoggerNotification(_:)), name: NSNotification.Name("LoggerNotification"), object: nil)
-        
         do {
             try rendererStart()
             logMPV("renderer.start succeeded")
         } catch {
             let rendererName = vlcRenderer != nil ? "VLC" : "MPV"
             Logger.shared.log("Failed to start \(rendererName) renderer: \(error)", type: "Error")
-            presentErrorAlert(title: "Playback Error", message: "Failed to start \(rendererName) renderer: \(error)")
         }
         
         // PiP is only supported with MPV renderer
@@ -774,6 +788,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
         logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
+        let mediaInfoLabel: String = {
+            guard let info = mediaInfo else { return "nil" }
+            switch info {
+            case .movie(let id, let title, _, let isAnime):
+                return "movie id=\(id) title=\(title) isAnime=\(isAnime)"
+            case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _, let isAnime):
+                return "episode showId=\(showId) s=\(seasonNumber) e=\(episodeNumber) title=\(showTitle) isAnime=\(isAnime)"
+            }
+        }()
+        Logger.shared.log("PlayerViewController.load: isAnimeHint=\(isAnimeHint ?? false) mediaInfo=\(mediaInfoLabel)", type: "Stream")
         
         // Ensure renderer is started before loading media
         if !isRunning {
@@ -805,19 +829,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let lastPlayedTime: Double
         
         switch mediaInfo {
-        case .movie(let id, let title, _):
+        case .movie(let id, let title, _, _):
             lastPlayedTime = ProgressManager.shared.getMovieCurrentTime(movieId: id, title: title)
             
-        case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
+        case .episode(let showId, let seasonNumber, let episodeNumber, _, _, _):
             lastPlayedTime = ProgressManager.shared.getEpisodeCurrentTime(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
         }
         
         if lastPlayedTime != 0 {
             let progress: Double
             switch mediaInfo {
-            case .movie(let id, let title, _):
+            case .movie(let id, let title, _, _):
                 progress = ProgressManager.shared.getMovieProgress(movieId: id, title: title)
-            case .episode(let showId, let seasonNumber, let episodeNumber, _, _):
+            case .episode(let showId, let seasonNumber, let episodeNumber, _, _, _):
                 progress = ProgressManager.shared.getEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber)
             }
             
@@ -1020,7 +1044,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         
         // Ensure buttons work with VLC
         if vlcRenderer != nil {
-            [centerPlayPauseButton, closeButton, pipButton, skipBackwardButton, 
+            [centerPlayPauseButton, closeButton, pipButton, skipBackwardButton,
              skipForwardButton, subtitleButton, speedButton, audioButton].forEach {
                 $0.isUserInteractionEnabled = true
             }
@@ -1414,6 +1438,28 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             self?.updateAudioTracksMenuWhenReady()
         }
     }
+
+    private func updateSubtitleTracksMenuWhenReady(attempt: Int = 0) {
+        if userSelectedSubtitleTrack {
+            updateSubtitleTracksMenu()
+            return
+        }
+
+        if !subtitleURLs.isEmpty && vlcRenderer == nil {
+            updateSubtitleTracksMenu()
+            return
+        }
+
+        let tracks = rendererGetSubtitleTracks()
+        if !tracks.isEmpty || attempt >= 20 {
+            updateSubtitleTracksMenu()
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.updateSubtitleTracksMenuWhenReady(attempt: attempt + 1)
+        }
+    }
     
     private func updateAudioTracksMenu() {
         let detailedTracks = rendererGetAudioTracksDetailed()
@@ -1422,6 +1468,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         
         // Always show the audio button so the user can view the menu even when empty
         audioButton.isHidden = false
+
+        Logger.shared.log("PlayerViewController: audio tracks count=\(tracks.count) isAnime=\(isAnimeContent()) userSelected=\(userSelectedAudioTrack) renderer=\(vlcRenderer != nil ? "VLC" : "MPV")", type: "Player")
         
         if tracks.isEmpty {
             let noTracksAction = UIAction(title: "No audio tracks available", state: .off) { _ in }
@@ -1448,44 +1496,48 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }
         }
 
-        // Auto-select preferred anime audio language when applicable
-        var didAutoSelectPreferred = false
+        // Auto-select preferred anime audio language when applicable and user hasn't picked a track yet
         if isAnimeContent() && !userSelectedAudioTrack {
             let preferredLang = Settings.shared.preferredAnimeAudioLanguage.lowercased()
-            let preferredLangName = languageName(for: preferredLang)
-            
-            Logger.shared.log("PlayerViewController: Auto anime audio - isAnime=true, preferredLang=\(preferredLang), preferredLangName=\(preferredLangName), detailedTracks=\(detailedTracks.count)", type: "Player")
+            let tokens = languageTokens(for: preferredLang)
 
-            if let matching = detailedTracks.first(where: {
-                let langCode = $0.2.lowercased()
-                let title = $0.1.lowercased()
-                if !preferredLang.isEmpty && langCode.contains(preferredLang) { return true }
-                if !preferredLangName.isEmpty && langCode.contains(preferredLangName.lowercased()) { return true }
-                if !preferredLang.isEmpty && title.contains(preferredLang) { return true }
-                if !preferredLangName.isEmpty && title.contains(preferredLangName.lowercased()) { return true }
-                return false
-            }) {
-                Logger.shared.log("PlayerViewController: Auto-selected anime audio track: \(matching.1) (ID: \(matching.0))", type: "Player")
-                userSelectedAudioTrack = true
-                rendererSetAudioTrack(id: matching.0)
-                didAutoSelectPreferred = true
+            if !preferredLang.isEmpty {
+                Logger.shared.log("PlayerViewController: Auto anime audio - preferredLang=\(preferredLang), tokens=\(tokens.joined(separator: ",")), detailedTracks=\(detailedTracks.count)", type: "Player")
+
+                if let matching = detailedTracks.first(where: {
+                    let langCode = $0.2.lowercased()
+                    let title = $0.1.lowercased()
+                    return tokens.contains(where: { token in
+                        langCode.contains(token) || title.contains(token)
+                    })
+                }) {
+                    Logger.shared.log("PlayerViewController: Auto-selected anime audio track: \(matching.1) (ID: \(matching.0))", type: "Player")
+                    userSelectedAudioTrack = true
+                    rendererSetAudioTrack(id: matching.0)
+                } else {
+                    Logger.shared.log("PlayerViewController: No matching anime audio track found for lang=\(preferredLang)", type: "Player")
+                }
             } else {
-                Logger.shared.log("PlayerViewController: No matching anime audio track found for lang=\(preferredLang)", type: "Player")
+                Logger.shared.log("PlayerViewController: Auto anime audio skipped (preferred language empty)", type: "Player")
             }
+        } else if !isAnimeContent() {
+            Logger.shared.log("PlayerViewController: Auto anime audio skipped (isAnime=false)", type: "Player")
+        } else if userSelectedAudioTrack {
+            Logger.shared.log("PlayerViewController: Auto anime audio skipped (user already selected)", type: "Player")
         }
-        // Per requirement: do not auto-select anime language without an AniList mapping
         
         let audioMenu = UIMenu(title: "Audio Tracks", image: UIImage(systemName: "speaker.wave.2"), children: trackActions)
         audioButton.menu = audioMenu
     }
 
     private func isAnimeContent() -> Bool {
-        guard let info = mediaInfo else { return false }
         if let hint = isAnimeHint, hint == true { return true }
+        guard let info = mediaInfo else { return false }
         switch info {
-        case .movie:
-            return false
-        case .episode(let showId, _, _, _, _):
+        case .movie(_, _, _, let isAnime):
+            return isAnime
+        case .episode(let showId, _, _, _, _, let isAnime):
+            if isAnime { return true }
             return trackerManager.cachedAniListId(for: showId) != nil
         }
     }
@@ -1509,30 +1561,157 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         default: return ""
         }
     }
-    
-    private func updateSubtitleTracksMenu() {
-        // Always allow subtitle UI; for VLC we still surface tracks even if external URLs were supplied
-        if !subtitleURLs.isEmpty && vlcRenderer == nil {
-            return
+
+    private func languageTokens(for preferred: String) -> [String] {
+        let lower = preferred.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lower.isEmpty else { return [] }
+
+        let map: [String: [String]] = [
+            "jpn": ["jpn", "ja", "jp", "japanese"],
+            "eng": ["eng", "en", "us", "uk", "english"],
+            "spa": ["spa", "es", "esp", "spanish", "lat"],
+            "fre": ["fre", "fra", "fr", "french"],
+            "ger": ["ger", "deu", "de", "german"],
+            "ita": ["ita", "it", "italian"],
+            "por": ["por", "pt", "br", "portuguese"],
+            "rus": ["rus", "ru", "russian"],
+            "chi": ["chi", "zho", "zh", "chinese", "mandarin", "cantonese"],
+            "kor": ["kor", "ko", "korean"]
+        ]
+
+        if let tokens = map[lower] {
+            return tokens
         }
 
-        let tracks = rendererGetSubtitleTracks()
+        let name = languageName(for: lower)
+        if name.isEmpty {
+            return [lower]
+        }
+        return [lower, name]
+    }
+
+    #if !os(tvOS)
+    private func buildProxyHeaders(for url: URL, baseHeaders: [String: String]) -> [String: String] {
+        var headers = baseHeaders
+        if headers["User-Agent"] == nil {
+            headers["User-Agent"] = URLSession.randomUserAgent
+        }
+        if headers["Origin"] == nil, let host = url.host, let scheme = url.scheme {
+            headers["Origin"] = "\(scheme)://\(host)"
+        }
+        if headers["Referer"] == nil {
+            headers["Referer"] = url.absoluteString
+        }
+        return headers
+    }
+
+    private func proxySubtitleURLs(_ urls: [String], headers: [String: String]) -> [String] {
+        let proxied = urls.compactMap { urlString -> String? in
+            guard let url = URL(string: urlString),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else {
+                Logger.shared.log("PlayerViewController: subtitle proxy skipped (invalid URL or scheme)", type: "Stream")
+                return nil
+            }
+
+            let proxyHeaders = buildProxyHeaders(for: url, baseHeaders: headers)
+            guard let proxiedURL = VLCHeaderProxy.shared.makeProxyURL(for: url, headers: proxyHeaders) else {
+                Logger.shared.log("PlayerViewController: subtitle proxy URL creation failed", type: "Stream")
+                return nil
+            }
+            return proxiedURL.absoluteString
+        }
+        Logger.shared.log("PlayerViewController: subtitle proxy result count=\(proxied.count) of \(urls.count)", type: "Stream")
+        return proxied
+    }
+
+    private func attemptVlcProxyFallbackIfNeeded() -> Bool {
+        guard vlcRenderer != nil else { return false }
+        guard !vlcProxyFallbackTried else { return false }
+        guard let originalURL = initialURL, originalURL.host != "127.0.0.1" else { return false }
+        guard let headers = initialHeaders, !headers.isEmpty else { return false }
+
+        let proxyEnabled = UserDefaults.standard.object(forKey: "vlcHeaderProxyEnabled") as? Bool ?? true
+        guard proxyEnabled else { return false }
+        guard let preset = initialPreset else { return false }
+
+        let proxyHeaders = buildProxyHeaders(for: originalURL, baseHeaders: headers)
+        guard let proxyURL = VLCHeaderProxy.shared.makeProxyURL(for: originalURL, headers: proxyHeaders) else {
+            return false
+        }
+
+        let fallbackSubtitles: [String]?
+        if let subs = initialSubtitles, !subs.isEmpty {
+            Logger.shared.log("PlayerViewController: proxy fallback subtitle count=\(subs.count)", type: "Stream")
+            let proxiedSubs = proxySubtitleURLs(subs, headers: headers)
+            if proxiedSubs.count == subs.count {
+                Logger.shared.log("PlayerViewController: proxy fallback subtitles ready", type: "Stream")
+                fallbackSubtitles = proxiedSubs
+            } else {
+                Logger.shared.log("PlayerViewController: proxy fallback subtitles incomplete; using direct URLs", type: "Stream")
+                fallbackSubtitles = subs
+            }
+        } else {
+            fallbackSubtitles = nil
+        }
+
+        vlcProxyFallbackTried = true
+        initialSubtitles = fallbackSubtitles
+
+        Logger.shared.log("PlayerViewController: VLC proxy fallback activated", type: "Stream")
+        load(url: proxyURL, preset: preset, headers: nil)
+        return true
+    }
+    #else
+    private func attemptVlcProxyFallbackIfNeeded() -> Bool {
+        return false
+    }
+    #endif
+    
+    private func updateSubtitleTracksMenu() {
+        let useExternalMenu = !subtitleURLs.isEmpty && vlcRenderer == nil
+        let rawTracks: [(Int, String)] = useExternalMenu
+            ? subtitleURLs.enumerated().map { ($0.offset, "Subtitle \($0.offset + 1)") }
+            : rendererGetSubtitleTracks()
+        let tracks = useExternalMenu
+            ? rawTracks
+            : rawTracks.filter { $0.0 >= 0 && !isDisabledTrackName($0.1) }
+
+        Logger.shared.log("PlayerViewController: subtitle tracks count=\(tracks.count) external=\(useExternalMenu) userSelected=\(userSelectedSubtitleTrack) renderer=\(vlcRenderer != nil ? "VLC" : "MPV")", type: "Player")
 
         // Always show the subtitle button so the user can view the menu even when empty
         subtitleButton.isHidden = false
-        
-        // VLC uses menu-only approach to avoid presentation conflicts
-        subtitleButton.showsMenuAsPrimaryAction = (vlcRenderer != nil)
+
+        // Use menu-only behavior for both VLC and MPV so the UI looks consistent
+        subtitleButton.showsMenuAsPrimaryAction = true
 
         // Apply default subtitle settings if enabled and tracks exist
         if !tracks.isEmpty && !userSelectedSubtitleTrack {
             let settings = Settings.shared
             if settings.enableSubtitlesByDefault {
                 let preferredLang = settings.defaultSubtitleLanguage
-                if let matchingTrack = tracks.first(where: { $0.1.lowercased().contains(preferredLang.lowercased()) }) {
-                    rendererSetSubtitleTrack(id: matchingTrack.0)
+                let tokens = languageTokens(for: preferredLang)
+                let matchingTrack = tracks.first(where: { track in
+                    let nameLower = track.1.lowercased()
+                    if tokens.contains(where: { nameLower.contains($0) }) {
+                        return true
+                    }
+                    if useExternalMenu, track.0 < subtitleURLs.count {
+                        let urlLower = subtitleURLs[track.0].lowercased()
+                        return tokens.contains(where: { urlLower.contains($0) })
+                    }
+                    return false
+                })
+                Logger.shared.log("PlayerViewController: default subtitles enabled lang=\(preferredLang) tokens=\(tokens.joined(separator: ",")) match=\(matchingTrack?.1 ?? "nil")", type: "Player")
+                let selectedTrack = matchingTrack ?? tracks.first
+                if let selectedTrack {
+                    if useExternalMenu {
+                        currentSubtitleIndex = selectedTrack.0
+                        loadCurrentSubtitle()
+                    } else {
+                        rendererSetSubtitleTrack(id: selectedTrack.0)
+                    }
                     userSelectedSubtitleTrack = true
-                    // Ensure visibility when selecting programmatically (especially for MPV path)
                     subtitleModel.isVisible = true
                     updateSubtitleButtonAppearance()
                 }
@@ -1548,7 +1727,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         ) { [weak self] _ in
             self?.subtitleModel.isVisible = false
             self?.userSelectedSubtitleTrack = true
-            self?.rendererDisableSubtitles()
+            if useExternalMenu {
+                self?.rendererRefreshSubtitleOverlay()
+            } else {
+                self?.rendererDisableSubtitles()
+            }
             self?.updateSubtitleButtonAppearance()
             self?.updateSubtitleTracksMenu()
         }
@@ -1559,20 +1742,26 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             let noTracksAction = UIAction(title: "No subtitles in stream", state: .off) { _ in }
             trackActions.append(noTracksAction)
         } else {
-            let currentSubtitleTrackId = rendererGetCurrentSubtitleTrackId()
+            let currentSubtitleTrackId = useExternalMenu ? currentSubtitleIndex : rendererGetCurrentSubtitleTrackId()
             let subtitleActions = tracks.map { (id, name) in
                 UIAction(
                     title: name,
                     image: UIImage(systemName: "captions.bubble"),
                     state: id == currentSubtitleTrackId ? .on : .off
                 ) { [weak self] _ in
-                    self?.subtitleModel.isVisible = true
-                    self?.userSelectedSubtitleTrack = true
-                    self?.rendererSetSubtitleTrack(id: id)
-                    self?.updateSubtitleButtonAppearance()
+                    guard let self else { return }
+                    self.subtitleModel.isVisible = true
+                    self.userSelectedSubtitleTrack = true
+                    if useExternalMenu {
+                        self.currentSubtitleIndex = id
+                        self.loadCurrentSubtitle()
+                    } else {
+                        self.rendererSetSubtitleTrack(id: id)
+                    }
+                    self.updateSubtitleButtonAppearance()
                     // Debounce menu update to avoid lag - only update after 0.3s of no selection changes
-                    self?.subtitleMenuDebounceTimer?.invalidate()
-                    self?.subtitleMenuDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+                    self.subtitleMenuDebounceTimer?.invalidate()
+                    self.subtitleMenuDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
                         DispatchQueue.main.async { [weak self] in
                             self?.updateSubtitleTracksMenu()
                         }
@@ -1585,14 +1774,21 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let subtitleMenu = UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: trackActions)
         subtitleButton.menu = subtitleMenu
     }
+
+    private func isDisabledTrackName(_ name: String) -> Bool {
+        let lower = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return lower.contains("disable") || lower.contains("off") || lower.contains("none")
+    }
     private func loadSubtitles(_ urls: [String]) {
         subtitleURLs = urls
         userSelectedSubtitleTrack = false
         
         if !urls.isEmpty {
+            Logger.shared.log("PlayerViewController: loadSubtitles count=\(urls.count) renderer=\(vlcRenderer != nil ? "VLC" : "MPV")", type: "Stream")
             subtitleButton.isHidden = false
             currentSubtitleIndex = 0
-            subtitleModel.isVisible = true
+            let enableByDefault = Settings.shared.enableSubtitlesByDefault
+            subtitleModel.isVisible = enableByDefault
             
             // VLC can load external subtitles natively; MPV uses manual parsing
             if vlcRenderer != nil {
@@ -1601,13 +1797,30 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                     self?.updateSubtitleTracksMenu()
                 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self else { return }
+                    let tracks = self.rendererGetSubtitleTracks()
+                    if tracks.isEmpty {
+                        Logger.shared.log("PlayerViewController: VLC external subtitles not detected after load", type: "Stream")
+                    } else {
+                        Logger.shared.log("PlayerViewController: VLC subtitle tracks available count=\(tracks.count)", type: "Stream")
+                        if enableByDefault, !self.userSelectedSubtitleTrack, self.rendererGetCurrentSubtitleTrackId() == -1 {
+                            self.rendererSetSubtitleTrack(id: tracks[0].0)
+                            self.subtitleModel.isVisible = true
+                            self.userSelectedSubtitleTrack = true
+                            self.updateSubtitleButtonAppearance()
+                        }
+                    }
+                }
             } else {
                 // MPV: manually download and parse subtitles
-                loadCurrentSubtitle()
+                if enableByDefault {
+                    loadCurrentSubtitle()
+                }
             }
             
             updateSubtitleButtonAppearance()
-            updateSubtitleMenu()
+            updateSubtitleTracksMenu()
         } else {
             Logger.shared.log("No subtitle URLs to load", type: "Info")
         }
@@ -1676,6 +1889,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func subtitleButtonTapped() {
+        // Menu-first UI (VLC + MPV). When menu is primary, do not show action sheets.
+        if subtitleButton.showsMenuAsPrimaryAction {
+            return
+        }
+
         // VLC uses menu system directly; this handler is for MPV only
         if vlcRenderer != nil {
             return
@@ -1834,17 +2052,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     
     // MARK: - Error display helpers
     private func presentErrorAlert(title: String, message: String) {
-        DispatchQueue.main.async {
-            let ac = UIAlertController(title: title, message: message, preferredStyle: .alert)
-            ac.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
-            ac.addAction(UIAlertAction(title: "View Logs", style: .default, handler: { _ in
-                self.viewLogsTapped()
-            }))
-            self.showErrorBanner(message)
-            if self.presentedViewController == nil {
-                self.present(ac, animated: true, completion: nil)
-            }
-        }
+        Logger.shared.log("PlayerViewController: \(title) - \(message)", type: "Error")
     }
     
     private func showTransientErrorBanner(_ message: String, duration: TimeInterval = 4.0) {
@@ -1864,14 +2072,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func handleLoggerNotification(_ note: Notification) {
-        guard let info = note.userInfo,
-              let message = info["message"] as? String,
-              let type = info["type"] as? String else { return }
-        
-        let lower = type.lowercased()
-        if lower == "error" || lower == "warn" || message.lowercased().contains("error") || message.lowercased().contains("warn") {
-            showTransientErrorBanner(message)
-        }
+        return
     }
     
     private func showErrorBanner(_ message: String) {
@@ -2078,7 +2279,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             pip.startPictureInPicture()
         }
     }
-    
+
     private func updatePosition(_ position: Double, duration: Double) {
         // Some VLC/HLS sources report 0 duration for a while; keep the last good duration so progress persists.
         let effectiveDuration: Double
@@ -2114,9 +2315,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard effectiveDuration.isFinite, effectiveDuration > 0, position >= 0, let info = mediaInfo else { return }
         
         switch info {
-        case .movie(let id, let title, _):
+        case .movie(let id, let title, _, _):
             ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: position, totalDuration: effectiveDuration)
-        case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL):
+        case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL, _):
             ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: effectiveDuration, showTitle: showTitle, showPosterURL: showPosterURL)
         }
     }
@@ -2172,7 +2373,7 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
             
             // Update audio and subtitle tracks now that the video is ready
             self.updateAudioTracksMenuWhenReady()
-            self.updateSubtitleTracksMenu()
+            self.updateSubtitleTracksMenuWhenReady()
             
             if let seekTime = self.pendingSeekTime {
                 self.rendererSeek(to: seekTime)
@@ -2187,6 +2388,7 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.updateAudioTracksMenu()
+            self.updateSubtitleTracksMenu()
         }
     }
     
@@ -2263,7 +2465,7 @@ extension PlayerViewController: VLCRendererDelegate {
             
             // Update audio and subtitle tracks now that the video is ready
             self.updateAudioTracksMenuWhenReady()
-            self.updateSubtitleTracksMenu()
+            self.updateSubtitleTracksMenuWhenReady()
             
             if let seekTime = self.pendingSeekTime {
                 self.rendererSeek(to: seekTime)
@@ -2271,6 +2473,14 @@ extension PlayerViewController: VLCRendererDelegate {
                 self.pendingSeekTime = nil
             }
         }
+    }
+
+    func renderer(_ renderer: VLCRenderer, didFailWithError message: String) {
+        if isClosing { return }
+        if attemptVlcProxyFallbackIfNeeded() {
+            return
+        }
+        Logger.shared.log("PlayerViewController: VLC error: \(message)", type: "Error")
     }
 
     func rendererDidChangeTracks(_ renderer: VLCRenderer) {
