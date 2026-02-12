@@ -1363,7 +1363,16 @@ final class MPVSoftwareRenderer {
     }
 
     func getCurrentAudioTrackId() -> Int {
-        return getTrackIdProperty("aid")
+        let id = getTrackIdProperty("aid")
+        if id >= 0 {
+            return id
+        }
+
+        if let selected = fetchTrackList().first(where: { $0.type == "audio" && $0.selected }) {
+            return selected.id
+        }
+
+        return -1
     }
 
     func getSubtitleTracks() -> [(Int, String)] {
