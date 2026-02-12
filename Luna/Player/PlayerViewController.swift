@@ -1436,6 +1436,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         
         // Always show the audio button so the user can view the menu even when empty
         audioButton.isHidden = false
+
+        Logger.shared.log("PlayerViewController: audio tracks count=\(tracks.count) isAnime=\(isAnimeContent())", type: "Player")
         
         if tracks.isEmpty {
             let noTracksAction = UIAction(title: "No audio tracks available", state: .off) { _ in }
@@ -1465,19 +1467,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         // Auto-select preferred anime audio language when applicable and user hasn't picked a track yet
         if isAnimeContent() && !userSelectedAudioTrack {
             let preferredLang = Settings.shared.preferredAnimeAudioLanguage.lowercased()
-            let preferredLangName = languageName(for: preferredLang)
+            let tokens = languageTokens(for: preferredLang)
 
             if !preferredLang.isEmpty {
-                Logger.shared.log("PlayerViewController: Auto anime audio - preferredLang=\(preferredLang), preferredLangName=\(preferredLangName), detailedTracks=\(detailedTracks.count)", type: "Player")
+                Logger.shared.log("PlayerViewController: Auto anime audio - preferredLang=\(preferredLang), tokens=\(tokens.joined(separator: ",")), detailedTracks=\(detailedTracks.count)", type: "Player")
 
                 if let matching = detailedTracks.first(where: {
                     let langCode = $0.2.lowercased()
                     let title = $0.1.lowercased()
-                    if !preferredLang.isEmpty && langCode.contains(preferredLang) { return true }
-                    if !preferredLangName.isEmpty && langCode.contains(preferredLangName.lowercased()) { return true }
-                    if !preferredLang.isEmpty && title.contains(preferredLang) { return true }
-                    if !preferredLangName.isEmpty && title.contains(preferredLangName.lowercased()) { return true }
-                    return false
+                    return tokens.contains(where: { token in
+                        langCode.contains(token) || title.contains(token)
+                    })
                 }) {
                     Logger.shared.log("PlayerViewController: Auto-selected anime audio track: \(matching.1) (ID: \(matching.0))", type: "Player")
                     userSelectedAudioTrack = true
@@ -1521,6 +1521,34 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         case "kor", "ko": return "korean"
         default: return ""
         }
+    }
+
+    private func languageTokens(for preferred: String) -> [String] {
+        let lower = preferred.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lower.isEmpty else { return [] }
+
+        let map: [String: [String]] = [
+            "jpn": ["jpn", "ja", "jp", "japanese"],
+            "eng": ["eng", "en", "us", "uk", "english"],
+            "spa": ["spa", "es", "esp", "spanish", "lat"],
+            "fre": ["fre", "fra", "fr", "french"],
+            "ger": ["ger", "deu", "de", "german"],
+            "ita": ["ita", "it", "italian"],
+            "por": ["por", "pt", "br", "portuguese"],
+            "rus": ["rus", "ru", "russian"],
+            "chi": ["chi", "zho", "zh", "chinese", "mandarin", "cantonese"],
+            "kor": ["kor", "ko", "korean"]
+        ]
+
+        if let tokens = map[lower] {
+            return tokens
+        }
+
+        let name = languageName(for: lower)
+        if name.isEmpty {
+            return [lower]
+        }
+        return [lower, name]
     }
 
     #if !os(tvOS)
@@ -1603,9 +1631,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     
     private func updateSubtitleTracksMenu() {
         let useExternalMenu = !subtitleURLs.isEmpty && vlcRenderer == nil
-        let tracks: [(Int, String)] = useExternalMenu
+        let rawTracks: [(Int, String)] = useExternalMenu
             ? subtitleURLs.enumerated().map { ($0.offset, "Subtitle \($0.offset + 1)") }
             : rendererGetSubtitleTracks()
+        let tracks = useExternalMenu
+            ? rawTracks
+            : rawTracks.filter { $0.0 >= 0 && !isDisabledTrackName($0.1) }
 
         // Always show the subtitle button so the user can view the menu even when empty
         subtitleButton.isHidden = false
@@ -1689,6 +1720,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         
         let subtitleMenu = UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: trackActions)
         subtitleButton.menu = subtitleMenu
+    }
+
+    private func isDisabledTrackName(_ name: String) -> Bool {
+        let lower = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return lower.contains("disable") || lower.contains("off") || lower.contains("none")
     }
     private func loadSubtitles(_ urls: [String]) {
         subtitleURLs = urls
