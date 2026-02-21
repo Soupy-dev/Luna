@@ -58,6 +58,8 @@ final class VLCRenderer: NSObject {
     private var isRunning = false
     private var isStopping = false
     private var currentPlaybackSpeed: Double = 1.0
+    private let highSpeedSubtitleCompensationUs: Int = -500_000
+    private var currentSubtitleCompensationUs: Int = 0
     
     weak var delegate: VLCRendererDelegate?
     
@@ -253,6 +255,10 @@ final class VLCRenderer: NSObject {
             media.addOption(":drop-late-frames")
             media.addOption(":skip-frames")
 
+            // Keep A/V clocks tight to reduce subtitle drift, especially on higher playback rates.
+            media.addOption(":clock-jitter=0")
+            media.addOption(":clock-synchro=0")
+
             self.currentMedia = media
             
             Logger.shared.log("[VLCRenderer.load] Setting media on player and calling play()", type: "Stream")
@@ -274,6 +280,12 @@ final class VLCRenderer: NSObject {
     }
     
     func play() {
+        isPaused = false
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.renderer(self, didChangePause: false)
+        }
+
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             player.play()
@@ -281,6 +293,12 @@ final class VLCRenderer: NSObject {
     }
     
     func pausePlayback() {
+        isPaused = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.renderer(self, didChangePause: true)
+        }
+
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             player.pause()
@@ -336,7 +354,20 @@ final class VLCRenderer: NSObject {
             self.currentPlaybackSpeed = max(0.1, speed)
             
             player.rate = Float(speed)
+            self.applySubtitleCompensationIfAvailable(on: player)
         }
+    }
+
+    private func applySubtitleCompensationIfAvailable(on player: VLCMediaPlayer) {
+        let targetCompensation = currentPlaybackSpeed >= 1.9 ? highSpeedSubtitleCompensationUs : 0
+        guard targetCompensation != currentSubtitleCompensationUs else { return }
+
+        let setter = Selector(("setCurrentVideoSubTitleDelay:"))
+        guard player.responds(to: setter) else { return }
+
+        player.perform(setter, with: NSNumber(value: targetCompensation))
+        currentSubtitleCompensationUs = targetCompensation
+        Logger.shared.log("VLCRenderer: subtitle compensation \(targetCompensation)us at \(String(format: "%.2fx", currentPlaybackSpeed))", type: "Player")
     }
     
     func getSpeed() -> Double {

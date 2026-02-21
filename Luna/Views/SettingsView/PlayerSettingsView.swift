@@ -170,11 +170,8 @@ struct PlayerSettingsView: View {
                 }
             }
             
-            if store.inAppPlayer != .normal {
-                let sectionTitle = store.inAppPlayer == .vlc ? "VLC Player" : "MPV Player"
-                let sectionFooter = "Configure default subtitle and audio settings."
-                
-                Section(header: Text(sectionTitle), footer: Text(sectionFooter)) {
+            if store.inAppPlayer == .vlc {
+                Section(header: Text("VLC Player"), footer: Text("Configure default subtitle and audio settings.")) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Enable Subtitles by Default")
