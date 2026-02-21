@@ -61,12 +61,7 @@ final class VLCRenderer: NSObject {
     private var progressPollTimer: DispatchSourceTimer?
     private let highSpeedSubtitleCompensationUs: Int = -500_000
     private var currentSubtitleCompensationUs: Int = 0
-    private var lastSpeedChangeTimestamp: CFTimeInterval = 0
-    private var speedTransitionBasePosition: Double = 0
-    private var speedTransitionBaseDuration: Double = 0
-    private var lastProgressAdvanceTimestamp: CFTimeInterval = CACurrentMediaTime()
-    private var lastPositionForStallCheck: Double = 0
-    private var lastStallRecoveryTimestamp: CFTimeInterval = 0
+    private var lastProgressLogTimestamp: CFTimeInterval = 0
     
     weak var delegate: VLCRendererDelegate?
     
@@ -276,16 +271,6 @@ final class VLCRenderer: NSObject {
             // Reduce buffering while keeping resume/start reasonably responsive
             media.addOption(":network-caching=12000")  // ~12s
 
-            // Subtitle performance: spread libass work across threads without altering glyph styling
-            media.addOption(":subsdec-threads=4")
-
-            // Playback at high speeds with subtitles: prefer dropping late frames over thermal spikes
-            media.addOption(":drop-late-frames")
-            media.addOption(":skip-frames")
-
-            // Keep jitter low without over-constraining A/V sync behavior.
-            media.addOption(":clock-jitter=0")
-
             self.currentMedia = media
             
             Logger.shared.log("[VLCRenderer.load] Setting media on player and calling play()", type: "Stream")
@@ -320,6 +305,7 @@ final class VLCRenderer: NSObject {
         if currentPlaybackSpeed != 1.0 {
             player.rate = Float(currentPlaybackSpeed)
         }
+        Logger.shared.log("VLCRenderer.play: requested play at rate=\(String(format: "%.2f", currentPlaybackSpeed))", type: "Player")
     }
     
     func pausePlayback() {
@@ -330,6 +316,7 @@ final class VLCRenderer: NSObject {
         }
 
         mediaPlayer?.pause()
+        Logger.shared.log("VLCRenderer.pausePlayback: requested pause", type: "Player")
     }
     
     func togglePause() {
@@ -377,15 +364,11 @@ final class VLCRenderer: NSObject {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             
-            // Track current speed for thermal optimization
             self.currentPlaybackSpeed = max(0.1, speed)
-            self.lastSpeedChangeTimestamp = CACurrentMediaTime()
-            self.speedTransitionBasePosition = self.cachedPosition
-            self.speedTransitionBaseDuration = self.cachedDuration
-            self.lastProgressAdvanceTimestamp = self.lastSpeedChangeTimestamp
             
             player.rate = Float(self.currentPlaybackSpeed)
             self.applySubtitleCompensationIfAvailable(on: player)
+            Logger.shared.log("VLCRenderer.setSpeed: rate=\(String(format: "%.2f", self.currentPlaybackSpeed)) player.rate=\(String(format: "%.2f", Double(player.rate)))", type: "Player")
         }
     }
 
@@ -602,54 +585,6 @@ final class VLCRenderer: NSObject {
             position = max(position, normalizedPosition * duration)
         }
 
-        let speedTransitionAge = CACurrentMediaTime() - lastSpeedChangeTimestamp
-        let inSpeedTransitionWindow = speedTransitionAge < 1.5
-
-        // During speed transitions VLC can emit bogus near-zero or backward timestamps.
-        // Use a projected timeline as a temporary stabilizer unless an explicit seek occurred.
-        if inSpeedTransitionWindow,
-           pendingAbsoluteSeek == nil,
-           !isPaused {
-            let referenceDuration = duration > 0 ? duration : max(cachedDuration, speedTransitionBaseDuration)
-            let projected = speedTransitionBasePosition + speedTransitionAge * currentPlaybackSpeed
-            let projectedClamped = referenceDuration > 0 ? min(projected, referenceDuration) : projected
-
-            let sampleLooksBad = !position.isFinite ||
-                                 position < 0 ||
-                                 (cachedPosition > 1.0 && position < 0.2) ||
-                                 (cachedPosition > 1.0 && position + 1.5 < cachedPosition)
-
-            if sampleLooksBad {
-                position = max(cachedPosition, projectedClamped)
-            }
-        }
-
-        // General guard against one-off backward spikes from VLC timing jitter.
-        if pendingAbsoluteSeek == nil,
-           !isPaused,
-           cachedPosition > 5.0,
-           position + 1.5 < cachedPosition {
-            position = cachedPosition
-        }
-
-        // Playback stall recovery: at higher speeds VLC can occasionally freeze frames while
-        // still reporting a playing state. Reassert play/rate when no forward progress is seen.
-        if position > lastPositionForStallCheck + 0.05 {
-            lastPositionForStallCheck = position
-            lastProgressAdvanceTimestamp = now
-        }
-
-        if !isPaused,
-           currentPlaybackSpeed > 1.0,
-           player.state == .playing,
-           now - lastProgressAdvanceTimestamp > 1.3,
-           now - lastStallRecoveryTimestamp > 1.0 {
-            lastStallRecoveryTimestamp = now
-            Logger.shared.log("VLCRenderer: detected playback stall at speed=\(String(format: "%.2fx", currentPlaybackSpeed)); nudging play/rate", type: "Player")
-            player.play()
-            player.rate = Float(currentPlaybackSpeed)
-        }
-
         if position.isFinite {
             cachedPosition = max(0, position)
         }
@@ -677,6 +612,14 @@ final class VLCRenderer: NSObject {
             guard let self else { return }
             self.delegate?.renderer(self, didUpdatePosition: max(0, position), duration: max(0, duration))
         }
+
+        if now - lastProgressLogTimestamp >= 1.0 {
+            lastProgressLogTimestamp = now
+            Logger.shared.log(
+                "VLCRenderer.progress: pos=\(String(format: "%.2f", max(0, position))) dur=\(String(format: "%.2f", max(0, duration))) norm=\(String(format: "%.4f", Double(player.position))) rate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state)) paused=\(isPaused) loading=\(isLoading)",
+                type: "Player"
+            )
+        }
     }
     
     @objc private func mediaPlayerStateChanged() {
@@ -698,7 +641,6 @@ final class VLCRenderer: NSObject {
             isPaused = false
             isLoading = false
             isReadyToSeek = true
-            lastProgressAdvanceTimestamp = CACurrentMediaTime()
             
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -709,7 +651,6 @@ final class VLCRenderer: NSObject {
             
         case .paused:
             isPaused = true
-            lastProgressAdvanceTimestamp = CACurrentMediaTime()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangePause: true)
@@ -717,7 +658,6 @@ final class VLCRenderer: NSObject {
             
         case .opening, .buffering:
             isLoading = true
-            lastProgressAdvanceTimestamp = CACurrentMediaTime()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangeLoading: true)

@@ -336,6 +336,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var isSeeking = false
     private var cachedDuration: Double = 0
     private var cachedPosition: Double = 0
+    private var lastProgressUILogTimestamp: CFTimeInterval = 0
     private var isClosing = false
     private var isRunning = false  // Track if renderer has been started
     private var pipController: PiPController?
@@ -2452,6 +2453,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 self.loadingIndicator.stopAnimating()
                 self.loadingIndicator.alpha = 0.0
                 self.centerPlayPauseButton.isHidden = false
+            }
+
+            if self.vlcRenderer != nil {
+                let now = CACurrentMediaTime()
+                if now - self.lastProgressUILogTimestamp >= 1.0 {
+                    self.lastProgressUILogTimestamp = now
+                    Logger.shared.log(
+                        "PlayerVC.progressUI(VLC): modelPos=\(String(format: "%.2f", self.progressModel.position)) modelDur=\(String(format: "%.2f", self.progressModel.duration)) inputPos=\(String(format: "%.2f", position)) inputDur=\(String(format: "%.2f", duration)) effectiveDur=\(String(format: "%.2f", effectiveDuration))",
+                        type: "Player"
+                    )
+                }
             }
         }
         
