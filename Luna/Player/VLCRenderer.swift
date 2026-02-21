@@ -58,10 +58,8 @@ final class VLCRenderer: NSObject {
     private var isRunning = false
     private var isStopping = false
     private var currentPlaybackSpeed: Double = 1.0
-    private var progressPollTimer: DispatchSourceTimer?
     private let highSpeedSubtitleCompensationUs: Int = -500_000
     private var currentSubtitleCompensationUs: Int = 0
-    private var lastProgressLogTimestamp: CFTimeInterval = 0
     
     weak var delegate: VLCRendererDelegate?
     
@@ -148,15 +146,6 @@ final class VLCRenderer: NSObject {
                 name: UIApplication.willEnterForegroundNotification,
                 object: nil
             )
-
-            let timer = DispatchSource.makeTimerSource(queue: self.eventQueue)
-            timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
-            timer.setEventHandler { [weak self] in
-                guard let self, let player = self.mediaPlayer else { return }
-                self.publishProgressUpdate(from: player)
-            }
-            timer.resume()
-            self.progressPollTimer = timer
             
             isRunning = true
             Logger.shared.log("[VLCRenderer.start] isRunning=true", type: "Stream")
@@ -174,9 +163,6 @@ final class VLCRenderer: NSObject {
 
         eventQueue.async { [weak self] in
             guard let self else { return }
-
-            self.progressPollTimer?.cancel()
-            self.progressPollTimer = nil
             NotificationCenter.default.removeObserver(self)
 
             if let player = self.mediaPlayer {
@@ -305,7 +291,6 @@ final class VLCRenderer: NSObject {
         if currentPlaybackSpeed != 1.0 {
             player.rate = Float(currentPlaybackSpeed)
         }
-        Logger.shared.log("VLCRenderer.play: requested play at rate=\(String(format: "%.2f", currentPlaybackSpeed))", type: "Player")
     }
     
     func pausePlayback() {
@@ -316,7 +301,6 @@ final class VLCRenderer: NSObject {
         }
 
         mediaPlayer?.pause()
-        Logger.shared.log("VLCRenderer.pausePlayback: requested pause", type: "Player")
     }
     
     func togglePause() {
@@ -368,7 +352,6 @@ final class VLCRenderer: NSObject {
             
             player.rate = Float(self.currentPlaybackSpeed)
             self.applySubtitleCompensationIfAvailable(on: player)
-            Logger.shared.log("VLCRenderer.setSpeed: rate=\(String(format: "%.2f", self.currentPlaybackSpeed)) player.rate=\(String(format: "%.2f", Double(player.rate)))", type: "Player")
         }
     }
 
@@ -566,31 +549,13 @@ final class VLCRenderer: NSObject {
     
     @objc private func mediaPlayerTimeChanged() {
         guard let player = mediaPlayer else { return }
-        publishProgressUpdate(from: player)
-    }
-
-    private func publishProgressUpdate(from player: VLCMediaPlayer) {
-        let now = CACurrentMediaTime()
         let positionMs = player.time.value?.doubleValue ?? 0
         let durationMs = player.media?.length.value?.doubleValue ?? 0
-        var duration = durationMs / 1000.0
-        if duration <= 0, cachedDuration > 0 {
-            duration = cachedDuration
-        }
+        let position = positionMs / 1000.0
+        let duration = durationMs / 1000.0
 
-        var position = positionMs / 1000.0
-        let normalizedPosition = Double(player.position)
-        if duration > 0, normalizedPosition.isFinite, normalizedPosition > 0,
-           (position <= 0 || !position.isFinite || abs(position - cachedPosition) < 0.01) {
-            position = max(position, normalizedPosition * duration)
-        }
-
-        if position.isFinite {
-            cachedPosition = max(0, position)
-        }
-        if duration.isFinite, duration > 0 {
-            cachedDuration = duration
-        }
+        cachedPosition = position
+        cachedDuration = duration
 
         // If we were waiting for duration to apply a pending seek, do it once duration is known.
         if duration > 0, let pending = pendingAbsoluteSeek {
@@ -610,15 +575,7 @@ final class VLCRenderer: NSObject {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.delegate?.renderer(self, didUpdatePosition: max(0, position), duration: max(0, duration))
-        }
-
-        if now - lastProgressLogTimestamp >= 1.0 {
-            lastProgressLogTimestamp = now
-            Logger.shared.log(
-                "VLCRenderer.progress: pos=\(String(format: "%.2f", max(0, position))) dur=\(String(format: "%.2f", max(0, duration))) norm=\(String(format: "%.4f", Double(player.position))) rate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state)) paused=\(isPaused) loading=\(isLoading)",
-                type: "Player"
-            )
+            self.delegate?.renderer(self, didUpdatePosition: position, duration: duration)
         }
     }
     
