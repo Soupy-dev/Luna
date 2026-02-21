@@ -58,6 +58,7 @@ final class VLCRenderer: NSObject {
     private var isRunning = false
     private var isStopping = false
     private var currentPlaybackSpeed: Double = 1.0
+    private var progressPollTimer: DispatchSourceTimer?
     private let highSpeedSubtitleCompensationUs: Int = -500_000
     private var currentSubtitleCompensationUs: Int = 0
     
@@ -136,6 +137,15 @@ final class VLCRenderer: NSObject {
                 name: UIApplication.willEnterForegroundNotification,
                 object: nil
             )
+
+            let timer = DispatchSource.makeTimerSource(queue: self.eventQueue)
+            timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
+            timer.setEventHandler { [weak self] in
+                guard let self, let player = self.mediaPlayer else { return }
+                self.publishProgressUpdate(from: player)
+            }
+            timer.resume()
+            self.progressPollTimer = timer
             
             isRunning = true
             Logger.shared.log("[VLCRenderer.start] isRunning=true", type: "Stream")
@@ -163,6 +173,8 @@ final class VLCRenderer: NSObject {
             self.isReadyToSeek = false
             self.isPaused = true
             self.isLoading = false
+            self.progressPollTimer?.cancel()
+            self.progressPollTimer = nil
 
             NotificationCenter.default.removeObserver(self)
 
@@ -245,8 +257,8 @@ final class VLCRenderer: NSObject {
             // Keep reconnect enabled for flaky hosts
             media.addOption(":http-reconnect=true")
 
-            // Reduce buffering to keep CPU/thermal lower while still smoothing HLS
-            media.addOption(":network-caching=20000")  // ~20s
+            // Reduce buffering while keeping resume/start reasonably responsive
+            media.addOption(":network-caching=12000")  // ~12s
 
             // Subtitle performance: spread libass work across threads without altering glyph styling
             media.addOption(":subsdec-threads=4")
@@ -255,9 +267,8 @@ final class VLCRenderer: NSObject {
             media.addOption(":drop-late-frames")
             media.addOption(":skip-frames")
 
-            // Keep A/V clocks tight to reduce subtitle drift, especially on higher playback rates.
+            // Keep jitter low without over-constraining A/V sync behavior.
             media.addOption(":clock-jitter=0")
-            media.addOption(":clock-synchro=0")
 
             self.currentMedia = media
             
@@ -286,9 +297,10 @@ final class VLCRenderer: NSObject {
             self.delegate?.renderer(self, didChangePause: false)
         }
 
-        eventQueue.async { [weak self] in
-            guard let self, let player = self.mediaPlayer else { return }
-            player.play()
+        guard let player = mediaPlayer else { return }
+        player.play()
+        if currentPlaybackSpeed != 1.0 {
+            player.rate = Float(currentPlaybackSpeed)
         }
     }
     
@@ -299,10 +311,7 @@ final class VLCRenderer: NSObject {
             self.delegate?.renderer(self, didChangePause: true)
         }
 
-        eventQueue.async { [weak self] in
-            guard let self, let player = self.mediaPlayer else { return }
-            player.pause()
-        }
+        mediaPlayer?.pause()
     }
     
     func togglePause() {
@@ -552,14 +561,30 @@ final class VLCRenderer: NSObject {
     
     @objc private func mediaPlayerTimeChanged() {
         guard let player = mediaPlayer else { return }
-        
+        publishProgressUpdate(from: player)
+    }
+
+    private func publishProgressUpdate(from player: VLCMediaPlayer) {
         let positionMs = player.time.value?.doubleValue ?? 0
         let durationMs = player.media?.length.value?.doubleValue ?? 0
-        let position = positionMs / 1000.0
-        let duration = durationMs / 1000.0
-        
-        cachedPosition = position
-        cachedDuration = duration
+        var duration = durationMs / 1000.0
+        if duration <= 0, cachedDuration > 0 {
+            duration = cachedDuration
+        }
+
+        var position = positionMs / 1000.0
+        let normalizedPosition = Double(player.position)
+        if duration > 0, normalizedPosition.isFinite, normalizedPosition > 0,
+           (position <= 0 || !position.isFinite || abs(position - cachedPosition) < 0.01) {
+            position = max(position, normalizedPosition * duration)
+        }
+
+        if position.isFinite {
+            cachedPosition = max(0, position)
+        }
+        if duration.isFinite, duration > 0 {
+            cachedDuration = duration
+        }
 
         // If we were waiting for duration to apply a pending seek, do it once duration is known.
         if duration > 0, let pending = pendingAbsoluteSeek {
@@ -569,17 +594,17 @@ final class VLCRenderer: NSObject {
         }
 
         // If we were marked loading but playback is progressing, clear loading state
-        if isLoading {
+        if isLoading && position > 0 {
             isLoading = false
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangeLoading: false)
             }
         }
-        
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.delegate?.renderer(self, didUpdatePosition: position, duration: duration)
+            self.delegate?.renderer(self, didUpdatePosition: max(0, position), duration: max(0, duration))
         }
     }
     
