@@ -1724,20 +1724,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             let settings = Settings.shared
             if settings.enableSubtitlesByDefault {
                 let preferredLang = settings.defaultSubtitleLanguage
-                let tokens = languageTokens(for: preferredLang)
-                let matchingTrack = tracks.first(where: { track in
-                    let nameLower = track.1.lowercased()
-                    if tokens.contains(where: { nameLower.contains($0) }) {
-                        return true
-                    }
-                    if useExternalMenu, track.0 < subtitleURLs.count {
-                        let urlLower = subtitleURLs[track.0].lowercased()
-                        return tokens.contains(where: { urlLower.contains($0) })
-                    }
-                    return false
-                })
-                Logger.shared.log("PlayerViewController: default subtitles enabled lang=\(preferredLang) tokens=\(tokens.joined(separator: ",")) match=\(matchingTrack?.1 ?? "nil")", type: "Player")
-                let selectedTrack = matchingTrack ?? tracks.first
+                let selectedTrack = preferredDefaultSubtitleTrack(from: tracks, useExternalMenu: useExternalMenu, preferredLang: preferredLang)
                 if let selectedTrack {
                     if useExternalMenu {
                         currentSubtitleIndex = selectedTrack.0
@@ -1813,6 +1800,52 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let lower = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return lower.contains("disable") || lower.contains("off") || lower.contains("none")
     }
+
+    private func preferredDefaultSubtitleTrack(from tracks: [(Int, String)], useExternalMenu: Bool, preferredLang: String) -> (Int, String)? {
+        let languageMatches = languageTokens(for: preferredLang)
+        let dialogueTokens = ["dialogue", "dialog", "full", "complete", "cc"]
+        let lessPreferredTokens = ["sign", "songs", "song", "karaoke", "forced"]
+
+        let ranked = tracks.map { track -> ((Int, String), Int) in
+            let nameLower = track.1.lowercased()
+            let urlLower: String = {
+                if useExternalMenu, track.0 < subtitleURLs.count {
+                    return subtitleURLs[track.0].lowercased()
+                }
+                return ""
+            }()
+
+            var score = 0
+
+            if !languageMatches.isEmpty {
+                if languageMatches.contains(where: { nameLower.contains($0) || urlLower.contains($0) }) {
+                    score += 100
+                }
+            }
+
+            if dialogueTokens.contains(where: { nameLower.contains($0) || urlLower.contains($0) }) {
+                score += 10
+            }
+
+            if lessPreferredTokens.contains(where: { nameLower.contains($0) || urlLower.contains($0) }) {
+                score -= 8
+            }
+
+            return (track, score)
+        }
+
+        let sorted = ranked.sorted { lhs, rhs in
+            if lhs.1 == rhs.1 {
+                return lhs.0.0 < rhs.0.0
+            }
+            return lhs.1 > rhs.1
+        }
+
+        let best = sorted.first?.0
+        Logger.shared.log("PlayerViewController: default subtitles preferredLang=\(preferredLang) best=\(best?.1 ?? "nil") score=\(sorted.first?.1 ?? -999)", type: "Player")
+        return best
+    }
+
     private func loadSubtitles(_ urls: [String]) {
         subtitleURLs = urls
         userSelectedSubtitleTrack = false
@@ -2339,25 +2372,45 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func closeTapped() {
+        if isClosing { return }
         isClosing = true
         logMPV("closeTapped; pipActive=\(pipController?.isPictureInPictureActive == true); mediaInfo=\(String(describing: mediaInfo))")
-        if let mpv = mpvRenderer {
-            mpv.delegate = nil
-        } else if let vlc = vlcRenderer {
-            vlc.delegate = nil
+        closeButton.isEnabled = false
+        view.isUserInteractionEnabled = false
+
+        var teardownPerformed = false
+        let teardownAndStop: () -> Void = { [weak self] in
+            guard let self else { return }
+            if teardownPerformed { return }
+            teardownPerformed = true
+
+            if let mpv = self.mpvRenderer {
+                mpv.delegate = nil
+            } else if let vlc = self.vlcRenderer {
+                vlc.delegate = nil
+            }
+
+            self.pipController?.delegate = nil
+            if self.pipController?.isPictureInPictureActive == true {
+                self.pipController?.stopPictureInPicture()
+            }
+
+            self.rendererStop()
+            self.logMPV("renderer.stop called from closeTapped")
         }
-        pipController?.delegate = nil
-        if pipController?.isPictureInPictureActive == true {
-            pipController?.stopPictureInPicture()
-        }
-        
-        rendererStop()
-        logMPV("renderer.stop called from closeTapped")
-        
-        if presentingViewController != nil {
-            dismiss(animated: true, completion: nil)
+
+        if let presenter = presentingViewController {
+            presenter.dismiss(animated: true) {
+                teardownAndStop()
+            }
         } else {
-            view.window?.rootViewController?.dismiss(animated: true, completion: nil)
+            dismiss(animated: true) {
+                teardownAndStop()
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            teardownAndStop()
         }
     }
     

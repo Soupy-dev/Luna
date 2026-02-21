@@ -61,6 +61,7 @@ final class VLCRenderer: NSObject {
     private var progressPollTimer: DispatchSourceTimer?
     private let highSpeedSubtitleCompensationUs: Int = -500_000
     private var currentSubtitleCompensationUs: Int = 0
+    private var lastSpeedChangeTimestamp: CFTimeInterval = 0
     
     weak var delegate: VLCRendererDelegate?
     
@@ -86,6 +87,16 @@ final class VLCRenderer: NSObject {
         vlcView.layer.isOpaque = true
         vlcView.clipsToBounds = true
         vlcView.isUserInteractionEnabled = false  // Allow touches to pass through to controls
+    }
+
+    private func ensureAudioSessionActive() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback)
+            try session.setActive(true)
+        } catch {
+            Logger.shared.log("VLCRenderer: Failed to activate AVAudioSession: \(error)", type: "Error")
+        }
     }
     
     /// Return the VLC view to be added to the view hierarchy
@@ -164,6 +175,10 @@ final class VLCRenderer: NSObject {
         eventQueue.async { [weak self] in
             guard let self else { return }
 
+            self.progressPollTimer?.cancel()
+            self.progressPollTimer = nil
+            NotificationCenter.default.removeObserver(self)
+
             if let player = self.mediaPlayer {
                 player.stop()
                 self.mediaPlayer = nil
@@ -173,10 +188,6 @@ final class VLCRenderer: NSObject {
             self.isReadyToSeek = false
             self.isPaused = true
             self.isLoading = false
-            self.progressPollTimer?.cancel()
-            self.progressPollTimer = nil
-
-            NotificationCenter.default.removeObserver(self)
 
             // Mark stop completion only after cleanup finishes to prevent reentrancy races
             self.isStopping = false
@@ -274,6 +285,7 @@ final class VLCRenderer: NSObject {
             
             Logger.shared.log("[VLCRenderer.load] Setting media on player and calling play()", type: "Stream")
             player.media = media
+            self.ensureAudioSessionActive()
             player.play()
             Logger.shared.log("[VLCRenderer.load] play() called", type: "Stream")
         }
@@ -298,6 +310,7 @@ final class VLCRenderer: NSObject {
         }
 
         guard let player = mediaPlayer else { return }
+        ensureAudioSessionActive()
         player.play()
         if currentPlaybackSpeed != 1.0 {
             player.rate = Float(currentPlaybackSpeed)
@@ -361,8 +374,9 @@ final class VLCRenderer: NSObject {
             
             // Track current speed for thermal optimization
             self.currentPlaybackSpeed = max(0.1, speed)
+            self.lastSpeedChangeTimestamp = CACurrentMediaTime()
             
-            player.rate = Float(speed)
+            player.rate = Float(self.currentPlaybackSpeed)
             self.applySubtitleCompensationIfAvailable(on: player)
         }
     }
@@ -577,6 +591,26 @@ final class VLCRenderer: NSObject {
         if duration > 0, normalizedPosition.isFinite, normalizedPosition > 0,
            (position <= 0 || !position.isFinite || abs(position - cachedPosition) < 0.01) {
             position = max(position, normalizedPosition * duration)
+        }
+
+        // VLC can briefly report a zero/near-zero position right after rate changes.
+        // Avoid regressing progress unless there was an explicit seek.
+        let justChangedSpeed = CACurrentMediaTime() - lastSpeedChangeTimestamp < 1.2
+        if justChangedSpeed,
+           pendingAbsoluteSeek == nil,
+           !isPaused,
+           cachedPosition > 2.0,
+           position >= 0,
+           position < 0.5 {
+            position = cachedPosition
+        }
+
+        // General guard against one-off backward spikes from VLC timing jitter.
+        if pendingAbsoluteSeek == nil,
+           !isPaused,
+           cachedPosition > 5.0,
+           position + 3.0 < cachedPosition {
+            position = cachedPosition
         }
 
         if position.isFinite {
