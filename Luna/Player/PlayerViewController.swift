@@ -336,6 +336,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var isSeeking = false
     private var cachedDuration: Double = 0
     private var cachedPosition: Double = 0
+    private var progressPipelineEventCount: Int = 0
+    private var lastProgressPipelineLogAt: CFTimeInterval = 0
     private var isClosing = false
     private var isRunning = false  // Track if renderer has been started
     private var pipController: PiPController?
@@ -2102,13 +2104,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
         
         if progressHostingController != nil {
+            Logger.shared.log("[PlayerVC.progressHost] already initialized; skipping host creation", type: "Player")
             return
         }
         
         let host = UIHostingController(rootView: AnyView(ProgressHostView(model: progressModel, onEditingChanged: { [weak self] editing in
             guard let self = self else { return }
+            Logger.shared.log("[PlayerVC.progressHost] slider editing=\(editing) modelPos=\(String(format: "%.2f", self.progressModel.position)) modelDur=\(String(format: "%.2f", self.progressModel.duration))", type: "Player")
             self.isSeeking = editing
             if !editing {
+                Logger.shared.log("[PlayerVC.progressHost] editing ended, seeking renderer to \(String(format: "%.2f", max(0, self.progressModel.position)))", type: "Player")
                 self.rendererSeek(to: max(0, self.progressModel.position))
             }
         })))
@@ -2126,6 +2131,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         ])
         host.didMove(toParent: self)
         progressHostingController = host
+        Logger.shared.log("[PlayerVC.progressHost] host created and attached. containerFrame=\(progressContainer.frame)", type: "Player")
     }
     
     private func updatePlayPauseButton(isPaused: Bool, shouldShowControls: Bool = true) {
@@ -2424,6 +2430,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     private func updatePosition(_ position: Double, duration: Double) {
+        progressPipelineEventCount += 1
         // Some VLC/HLS sources report 0 duration for a while; keep the last good duration so progress persists.
         let effectiveDuration: Double
         if duration.isFinite, duration > 0 {
@@ -2432,16 +2439,40 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             effectiveDuration = cachedDuration
         }
 
+        let safePosition: Double
+        if position.isFinite, position >= 0 {
+            safePosition = position
+        } else {
+            safePosition = max(0, cachedPosition)
+        }
+
+        let safeDuration: Double
+        if effectiveDuration.isFinite, effectiveDuration > 0 {
+            safeDuration = effectiveDuration
+        } else {
+            safeDuration = max(1.0, cachedDuration)
+        }
+
+        if !position.isFinite || !duration.isFinite {
+            Logger.shared.log("[PlayerVC.progress] non-finite input from renderer. rawPos=\(position) rawDur=\(duration) cachedPos=\(cachedPosition) cachedDur=\(cachedDuration)", type: "Error")
+        }
+
+        let now = CACurrentMediaTime()
+        if now - lastProgressPipelineLogAt >= 0.5 {
+            lastProgressPipelineLogAt = now
+            Logger.shared.log("[PlayerVC.progress] events=\(progressPipelineEventCount) isSeeking=\(isSeeking) rawPos=\(String(format: "%.2f", position)) rawDur=\(String(format: "%.2f", duration)) effectiveDur=\(String(format: "%.2f", effectiveDuration)) safePos=\(String(format: "%.2f", safePosition)) safeDur=\(String(format: "%.2f", safeDuration)) modelPos=\(String(format: "%.2f", progressModel.position)) modelDur=\(String(format: "%.2f", progressModel.duration))", type: "Player")
+        }
+
         DispatchQueue.main.async {
             if duration.isFinite, duration > 0 {
                 self.cachedDuration = duration
             }
-            self.cachedPosition = position
-            if effectiveDuration > 0 {
+            self.cachedPosition = safePosition
+            if safeDuration > 0 {
                 self.updateProgressHostingController()
             }
-            self.progressModel.position = position
-            self.progressModel.duration = max(effectiveDuration, 1.0)
+            self.progressModel.position = safePosition
+            self.progressModel.duration = max(safeDuration, 1.0)
             
             if self.pipController?.isPictureInPictureActive == true {
                 self.pipController?.updatePlaybackState()
@@ -2455,13 +2486,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }
         }
         
-        guard effectiveDuration.isFinite, effectiveDuration > 0, position >= 0, let info = mediaInfo else { return }
+        guard safeDuration.isFinite, safeDuration > 0, safePosition >= 0, let info = mediaInfo else { return }
         
         switch info {
         case .movie(let id, let title, _, _):
-            ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: position, totalDuration: effectiveDuration)
+            ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: safePosition, totalDuration: safeDuration)
         case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL, _):
-            ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: position, totalDuration: effectiveDuration, showTitle: showTitle, showPosterURL: showPosterURL)
+            ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: safePosition, totalDuration: safeDuration, showTitle: showTitle, showPosterURL: showPosterURL)
         }
     }
     
@@ -2566,17 +2597,23 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
 extension PlayerViewController: VLCRendererDelegate {
     func renderer(_ renderer: VLCRenderer, didUpdatePosition position: Double, duration: Double) {
         if isClosing { return }
+        let now = CACurrentMediaTime()
+        if now - lastProgressPipelineLogAt >= 0.5 {
+            Logger.shared.log("[PlayerVC.VLCDelegate] didUpdatePosition pos=\(String(format: "%.2f", position)) dur=\(String(format: "%.2f", duration))", type: "Player")
+        }
         updatePosition(position, duration: duration)
     }
     
     func renderer(_ renderer: VLCRenderer, didChangePause isPaused: Bool) {
         if isClosing { return }
+        Logger.shared.log("[PlayerVC.VLCDelegate] didChangePause isPaused=\(isPaused)", type: "Player")
         updatePlayPauseButton(isPaused: isPaused)
         pipController?.updatePlaybackState()
     }
     
     func renderer(_ renderer: VLCRenderer, didChangeLoading isLoading: Bool) {
         if isClosing { return }
+        Logger.shared.log("[PlayerVC.VLCDelegate] didChangeLoading isLoading=\(isLoading)", type: "Player")
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if isLoading {
@@ -2594,6 +2631,7 @@ extension PlayerViewController: VLCRendererDelegate {
     
     func renderer(_ renderer: VLCRenderer, didBecomeReadyToSeek: Bool) {
         if isClosing { return }
+        Logger.shared.log("[PlayerVC.VLCDelegate] didBecomeReadyToSeek=\(didBecomeReadyToSeek) pendingSeek=\(pendingSeekTime != nil ? "yes" : "no")", type: "Player")
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             
@@ -2611,6 +2649,7 @@ extension PlayerViewController: VLCRendererDelegate {
 
     func renderer(_ renderer: VLCRenderer, didFailWithError message: String) {
         if isClosing { return }
+        Logger.shared.log("[PlayerVC.VLCDelegate] didFailWithError message=\(message)", type: "Error")
         if attemptVlcProxyFallbackIfNeeded() {
             return
         }
