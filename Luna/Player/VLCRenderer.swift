@@ -62,6 +62,11 @@ final class VLCRenderer: NSObject {
     private let highSpeedSubtitleCompensationUs: Int = -500_000
     private var currentSubtitleCompensationUs: Int = 0
     private var lastSpeedChangeTimestamp: CFTimeInterval = 0
+    private var speedTransitionBasePosition: Double = 0
+    private var speedTransitionBaseDuration: Double = 0
+    private var lastProgressAdvanceTimestamp: CFTimeInterval = CACurrentMediaTime()
+    private var lastPositionForStallCheck: Double = 0
+    private var lastStallRecoveryTimestamp: CFTimeInterval = 0
     
     weak var delegate: VLCRendererDelegate?
     
@@ -375,6 +380,9 @@ final class VLCRenderer: NSObject {
             // Track current speed for thermal optimization
             self.currentPlaybackSpeed = max(0.1, speed)
             self.lastSpeedChangeTimestamp = CACurrentMediaTime()
+            self.speedTransitionBasePosition = self.cachedPosition
+            self.speedTransitionBaseDuration = self.cachedDuration
+            self.lastProgressAdvanceTimestamp = self.lastSpeedChangeTimestamp
             
             player.rate = Float(self.currentPlaybackSpeed)
             self.applySubtitleCompensationIfAvailable(on: player)
@@ -579,6 +587,7 @@ final class VLCRenderer: NSObject {
     }
 
     private func publishProgressUpdate(from player: VLCMediaPlayer) {
+        let now = CACurrentMediaTime()
         let positionMs = player.time.value?.doubleValue ?? 0
         let durationMs = player.media?.length.value?.doubleValue ?? 0
         var duration = durationMs / 1000.0
@@ -593,24 +602,52 @@ final class VLCRenderer: NSObject {
             position = max(position, normalizedPosition * duration)
         }
 
-        // VLC can briefly report a zero/near-zero position right after rate changes.
-        // Avoid regressing progress unless there was an explicit seek.
-        let justChangedSpeed = CACurrentMediaTime() - lastSpeedChangeTimestamp < 1.2
-        if justChangedSpeed,
+        let speedTransitionAge = CACurrentMediaTime() - lastSpeedChangeTimestamp
+        let inSpeedTransitionWindow = speedTransitionAge < 1.5
+
+        // During speed transitions VLC can emit bogus near-zero or backward timestamps.
+        // Use a projected timeline as a temporary stabilizer unless an explicit seek occurred.
+        if inSpeedTransitionWindow,
            pendingAbsoluteSeek == nil,
-           !isPaused,
-           cachedPosition > 2.0,
-           position >= 0,
-           position < 0.5 {
-            position = cachedPosition
+           !isPaused {
+            let referenceDuration = duration > 0 ? duration : max(cachedDuration, speedTransitionBaseDuration)
+            let projected = speedTransitionBasePosition + speedTransitionAge * currentPlaybackSpeed
+            let projectedClamped = referenceDuration > 0 ? min(projected, referenceDuration) : projected
+
+            let sampleLooksBad = !position.isFinite ||
+                                 position < 0 ||
+                                 (cachedPosition > 1.0 && position < 0.2) ||
+                                 (cachedPosition > 1.0 && position + 1.5 < cachedPosition)
+
+            if sampleLooksBad {
+                position = max(cachedPosition, projectedClamped)
+            }
         }
 
         // General guard against one-off backward spikes from VLC timing jitter.
         if pendingAbsoluteSeek == nil,
            !isPaused,
            cachedPosition > 5.0,
-           position + 3.0 < cachedPosition {
+           position + 1.5 < cachedPosition {
             position = cachedPosition
+        }
+
+        // Playback stall recovery: at higher speeds VLC can occasionally freeze frames while
+        // still reporting a playing state. Reassert play/rate when no forward progress is seen.
+        if position > lastPositionForStallCheck + 0.05 {
+            lastPositionForStallCheck = position
+            lastProgressAdvanceTimestamp = now
+        }
+
+        if !isPaused,
+           currentPlaybackSpeed > 1.0,
+           player.state == .playing,
+           now - lastProgressAdvanceTimestamp > 1.3,
+           now - lastStallRecoveryTimestamp > 1.0 {
+            lastStallRecoveryTimestamp = now
+            Logger.shared.log("VLCRenderer: detected playback stall at speed=\(String(format: "%.2fx", currentPlaybackSpeed)); nudging play/rate", type: "Player")
+            player.play()
+            player.rate = Float(currentPlaybackSpeed)
         }
 
         if position.isFinite {
@@ -661,6 +698,7 @@ final class VLCRenderer: NSObject {
             isPaused = false
             isLoading = false
             isReadyToSeek = true
+            lastProgressAdvanceTimestamp = CACurrentMediaTime()
             
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -671,6 +709,7 @@ final class VLCRenderer: NSObject {
             
         case .paused:
             isPaused = true
+            lastProgressAdvanceTimestamp = CACurrentMediaTime()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangePause: true)
@@ -678,6 +717,7 @@ final class VLCRenderer: NSObject {
             
         case .opening, .buffering:
             isLoading = true
+            lastProgressAdvanceTimestamp = CACurrentMediaTime()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangeLoading: true)
