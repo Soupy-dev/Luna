@@ -62,6 +62,7 @@ final class VLCRenderer: NSObject {
     private var currentSubtitleCompensationUs: Int = 0
     private var progressEventCount: Int = 0
     private var lastProgressDiagnosticLogAt: CFTimeInterval = 0
+    private var suppressZeroProgressUntil: CFTimeInterval = 0
     
     weak var delegate: VLCRendererDelegate?
     
@@ -365,6 +366,7 @@ final class VLCRenderer: NSObject {
             guard let self, let player = self.mediaPlayer else { return }
             
             self.currentPlaybackSpeed = max(0.1, speed)
+            self.suppressZeroProgressUntil = CACurrentMediaTime() + 2.0
             
             player.rate = Float(self.currentPlaybackSpeed)
             Logger.shared.log("[VLCRenderer.setSpeed] requested=\(String(format: "%.2f", speed)) applied=\(String(format: "%.2f", self.currentPlaybackSpeed)) actualRate=\(String(format: "%.2f", Double(player.rate))) state=\(self.describeState(player.state))", type: "Player")
@@ -568,17 +570,47 @@ final class VLCRenderer: NSObject {
         guard let player = mediaPlayer else { return }
         let positionMs = player.time.value?.doubleValue ?? 0
         let durationMs = player.media?.length.value?.doubleValue ?? 0
-        let position = positionMs / 1000.0
+        let rawPosition = positionMs / 1000.0
         let duration = durationMs / 1000.0
         let normalizedPosition = Double(player.position)
         progressEventCount += 1
         let now = CACurrentMediaTime()
 
-        if !position.isFinite || !duration.isFinite || !normalizedPosition.isFinite {
-            Logger.shared.log("[VLCRenderer.time] non-finite values: pos=\(position) dur=\(duration) norm=\(normalizedPosition) state=\(describeState(player.state)) rate=\(String(format: "%.2f", Double(player.rate)))", type: "Error")
+        let normalizedDerivedPosition: Double
+        if duration.isFinite, duration > 0, normalizedPosition.isFinite, normalizedPosition >= 0 {
+            normalizedDerivedPosition = normalizedPosition * duration
+        } else {
+            normalizedDerivedPosition = 0
         }
 
-        cachedPosition = position
+        var position = max(rawPosition, normalizedDerivedPosition)
+
+        let isTransientZeroRegression = position <= 0.001
+            && cachedPosition > 0.5
+            && pendingAbsoluteSeek == nil
+            && !isPaused
+            && (now < suppressZeroProgressUntil
+                || player.state == .esAdded
+                || player.state == .buffering
+                || player.state == .opening)
+
+        if isTransientZeroRegression {
+            Logger.shared.log("[VLCRenderer.time] suppressing zero-regression rawPos=\(String(format: "%.2f", rawPosition)) normPos=\(String(format: "%.4f", normalizedPosition)) cachedPos=\(String(format: "%.2f", cachedPosition)) rate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state))", type: "Player")
+            position = cachedPosition
+        }
+
+        if !rawPosition.isFinite || !position.isFinite || !duration.isFinite || !normalizedPosition.isFinite {
+            Logger.shared.log("[VLCRenderer.time] non-finite values: rawPos=\(rawPosition) pos=\(position) dur=\(duration) norm=\(normalizedPosition) state=\(describeState(player.state)) rate=\(String(format: "%.2f", Double(player.rate)))", type: "Error")
+        }
+
+        if position.isFinite, position >= 0 {
+            if pendingAbsoluteSeek == nil {
+                cachedPosition = max(cachedPosition, position)
+                position = cachedPosition
+            } else {
+                cachedPosition = position
+            }
+        }
         cachedDuration = duration
 
         // If we were waiting for duration to apply a pending seek, do it once duration is known.
@@ -605,7 +637,7 @@ final class VLCRenderer: NSObject {
 
         if now - lastProgressDiagnosticLogAt >= 0.5 {
             lastProgressDiagnosticLogAt = now
-            Logger.shared.log("[VLCRenderer.time] events=\(progressEventCount) pos=\(String(format: "%.2f", position)) dur=\(String(format: "%.2f", duration)) norm=\(String(format: "%.4f", normalizedPosition)) cachedPos=\(String(format: "%.2f", cachedPosition)) cachedDur=\(String(format: "%.2f", cachedDuration)) pending=\(pendingAbsoluteSeek != nil ? "yes" : "no") loading=\(isLoading) paused=\(isPaused) rate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state))", type: "Player")
+            Logger.shared.log("[VLCRenderer.time] events=\(progressEventCount) rawPos=\(String(format: "%.2f", rawPosition)) pos=\(String(format: "%.2f", position)) normDerived=\(String(format: "%.2f", normalizedDerivedPosition)) dur=\(String(format: "%.2f", duration)) norm=\(String(format: "%.4f", normalizedPosition)) cachedPos=\(String(format: "%.2f", cachedPosition)) cachedDur=\(String(format: "%.2f", cachedDuration)) pending=\(pendingAbsoluteSeek != nil ? "yes" : "no") loading=\(isLoading) paused=\(isPaused) rate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state))", type: "Player")
         }
     }
     

@@ -338,6 +338,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var cachedPosition: Double = 0
     private var progressPipelineEventCount: Int = 0
     private var lastProgressPipelineLogAt: CFTimeInterval = 0
+    private var isRendererLoading: Bool = false
     private var isClosing = false
     private var isRunning = false  // Track if renderer has been started
     private var pipController: PiPController?
@@ -693,6 +694,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             skipBackwardButton.setImage(UIImage(systemName: "gobackward.15", withConfiguration: cfg), for: .normal)
             skipForwardButton.setImage(UIImage(systemName: "goforward.15", withConfiguration: cfg), for: .normal)
             subtitleButton.showsMenuAsPrimaryAction = true
+        } else {
+            // Ensure subtitle control appears with other buttons immediately on VLC,
+            // even before track discovery finishes.
+            subtitleButton.showsMenuAsPrimaryAction = true
+            updateSubtitleTracksMenu()
         }
 
         NotificationCenter.default.addObserver(self, selector: #selector(handleLoggerNotification(_:)), name: NSNotification.Name("LoggerNotification"), object: nil)
@@ -2136,6 +2142,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     
     private func updatePlayPauseButton(isPaused: Bool, shouldShowControls: Bool = true) {
         DispatchQueue.main.async {
+            if self.isRendererLoading {
+                self.centerPlayPauseButton.isHidden = true
+                return
+            }
             let config = UIImage.SymbolConfiguration(pointSize: 32, weight: .semibold)
             let name = isPaused ? "play.fill" : "pause.fill"
             let img = UIImage(systemName: name, withConfiguration: config)
@@ -2479,7 +2489,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }
 
             // If playback is progressing, force-hide any lingering loading spinner
-            if self.loadingIndicator.alpha > 0.0 || self.loadingIndicator.isAnimating {
+            if !self.isRendererLoading && (self.loadingIndicator.alpha > 0.0 || self.loadingIndicator.isAnimating) {
                 self.loadingIndicator.stopAnimating()
                 self.loadingIndicator.alpha = 0.0
                 self.centerPlayPauseButton.isHidden = false
@@ -2519,12 +2529,17 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
     
     func renderer(_ renderer: MPVSoftwareRenderer, didChangePause isPaused: Bool) {
         if isClosing { return }
+        if isRendererLoading {
+            pipController?.updatePlaybackState()
+            return
+        }
         updatePlayPauseButton(isPaused: isPaused)
         pipController?.updatePlaybackState()
     }
     
     func renderer(_ renderer: MPVSoftwareRenderer, didChangeLoading isLoading: Bool) {
         if isClosing { return }
+        isRendererLoading = isLoading
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if isLoading {
@@ -2607,6 +2622,10 @@ extension PlayerViewController: VLCRendererDelegate {
     func renderer(_ renderer: VLCRenderer, didChangePause isPaused: Bool) {
         if isClosing { return }
         Logger.shared.log("[PlayerVC.VLCDelegate] didChangePause isPaused=\(isPaused)", type: "Player")
+        if isRendererLoading {
+            pipController?.updatePlaybackState()
+            return
+        }
         updatePlayPauseButton(isPaused: isPaused)
         pipController?.updatePlaybackState()
     }
@@ -2614,6 +2633,7 @@ extension PlayerViewController: VLCRendererDelegate {
     func renderer(_ renderer: VLCRenderer, didChangeLoading isLoading: Bool) {
         if isClosing { return }
         Logger.shared.log("[PlayerVC.VLCDelegate] didChangeLoading isLoading=\(isLoading)", type: "Player")
+        isRendererLoading = isLoading
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if isLoading {
