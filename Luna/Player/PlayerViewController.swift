@@ -201,7 +201,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         b.setImage(img, for: .normal)
         b.tintColor = .white
         b.alpha = 0.0
-        // Will be set dynamically based on renderer type
         b.showsMenuAsPrimaryAction = false
         return b
     }()

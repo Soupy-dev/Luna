@@ -1,5 +1,4 @@
 {
-  "originHash" : "4561a9088cc02d530cf0726a874107be63f44ab1ddffae049809036cedc44807",
   "pins" : [
     {
       "identity" : "fakewebkit",
@@ -36,7 +35,16 @@
         "branch" : "main",
         "revision" : "50ddc160fd606e9708adefc1d9fc7003b574446b"
       }
+    },
+    {
+      "identity" : "vlckit-spm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tylerjonesio/vlckit-spm",
+      "state" : {
+        "revision" : "e932bbd488872fdb74f6654d28c2f291eae03daf",
+        "version" : "3.6.0"
+      }
     }
   ],
-  "version" : 3
+  "version" : 2
 }
