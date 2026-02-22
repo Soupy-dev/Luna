@@ -428,6 +428,12 @@ class BackupManager {
     
     /// Applies backup data to all managers and UserDefaults
     private func applyBackupData(_ backup: BackupData) -> Bool {
+        let trackerManager = TrackerManager.shared
+        trackerManager.setBackupRestoreSyncSuppressed(true)
+        defer {
+            trackerManager.setBackupRestoreSyncSuppressed(false)
+        }
+
         let userDefaults = UserDefaults.standard
         
         // Restore settings
@@ -457,42 +463,11 @@ class BackupManager {
         libraryManager.collections = backup.collections.map { $0.toLibraryCollection() }
         // Collections are auto-saved in LibraryManager
         
-        // Restore progress data - individual updates will trigger saves
+        // Restore progress data in bulk to avoid per-entry tracker sync bursts (prevents AniList 429)
         let progressManager = ProgressManager.shared
-        
-        // Update all movie progress
-        for movieEntry in backup.progressData.movieProgress {
-            progressManager.updateMovieProgress(
-                movieId: movieEntry.id,
-                title: movieEntry.title,
-                currentTime: movieEntry.currentTime,
-                totalDuration: movieEntry.totalDuration
-            )
-            if movieEntry.isWatched {
-                progressManager.markMovieAsWatched(movieId: movieEntry.id, title: movieEntry.title)
-            }
-        }
-        
-        // Update all episode progress
-        for episodeEntry in backup.progressData.episodeProgress {
-            progressManager.updateEpisodeProgress(
-                showId: episodeEntry.showId,
-                seasonNumber: episodeEntry.seasonNumber,
-                episodeNumber: episodeEntry.episodeNumber,
-                currentTime: episodeEntry.currentTime,
-                totalDuration: episodeEntry.totalDuration
-            )
-            if episodeEntry.isWatched {
-                progressManager.markEpisodeAsWatched(
-                    showId: episodeEntry.showId,
-                    seasonNumber: episodeEntry.seasonNumber,
-                    episodeNumber: episodeEntry.episodeNumber
-                )
-            }
-        }
+        progressManager.replaceProgressDataForRestore(backup.progressData)
         
         // Restore tracker state
-        let trackerManager = TrackerManager.shared
         // Update tracker state properties from backup
         DispatchQueue.main.async {
             trackerManager.trackerState = backup.trackerState

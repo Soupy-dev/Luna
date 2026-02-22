@@ -33,6 +33,10 @@ final class TrackerManager: NSObject, ObservableObject {
     private var anilistSeasonIdCache: [String: Int] = [:] // key format: "tmdbId_seasonNumber"
     private let anilistSeasonIdCacheQueue = DispatchQueue(label: "com.luna.anilistSeasonIdCache")
 
+    // Prevent tracker sync bursts during local backup restore.
+    private var syncSuppressedDuringBackupRestore = false
+    private let backupRestoreSyncQueue = DispatchQueue(label: "com.luna.backupRestoreSync")
+
     // OAuth config (redirects can be overridden via Info.plist keys AniListRedirectUri / TraktRedirectUri)
     private let anilistClientId = "33908"
     private let anilistClientSecret = "1TeOfbdHy3Uk88UQdE8HKoJDtdI5ARHP4sDCi5Jh"
@@ -67,6 +71,19 @@ final class TrackerManager: NSObject, ObservableObject {
             if let encoded = try? JSONEncoder().encode(self.trackerState) {
                 try? encoded.write(to: self.trackerStateURL)
             }
+        }
+    }
+
+    func setBackupRestoreSyncSuppressed(_ suppressed: Bool) {
+        backupRestoreSyncQueue.sync {
+            syncSuppressedDuringBackupRestore = suppressed
+        }
+        Logger.shared.log("Tracker sync suppression during backup restore: \(suppressed ? "enabled" : "disabled")", type: "Tracker")
+    }
+
+    private func isBackupRestoreSyncSuppressed() -> Bool {
+        backupRestoreSyncQueue.sync {
+            syncSuppressedDuringBackupRestore
         }
     }
 
@@ -597,6 +614,11 @@ final class TrackerManager: NSObject, ObservableObject {
     }
 
     func syncWatchProgress(showId: Int, seasonNumber: Int, episodeNumber: Int, progress: Double, isMovie: Bool = false) {
+        guard !isBackupRestoreSyncSuppressed() else {
+            Logger.shared.log("Skipping watch sync (backup restore in progress) for TMDB \(showId) S\(seasonNumber)E\(episodeNumber) \(Int(progress))%", type: "Tracker")
+            return
+        }
+
         guard trackerState.syncEnabled else {
             Logger.shared.log("Skipping watch sync (sync disabled) for TMDB \(showId) S\(seasonNumber)E\(episodeNumber) \(Int(progress))%", type: "Tracker")
             return

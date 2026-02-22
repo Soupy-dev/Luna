@@ -163,6 +163,17 @@ final class ProgressManager: ObservableObject {
         }
     }
 
+    /// Replaces all progress data during backup restore without triggering per-entry tracker sync.
+    func replaceProgressDataForRestore(_ newData: ProgressData) {
+        accessQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            self.progressData = newData
+            self.publishCurrentData()
+            Logger.shared.log("Progress data restored in bulk (\(newData.movieProgress.count) movies, \(newData.episodeProgress.count) episodes)", type: "Progress")
+        }
+        saveProgressData()
+    }
+
     private func publishCurrentData() {
         accessQueue.async { [weak self] in
             guard let self = self else { return }
