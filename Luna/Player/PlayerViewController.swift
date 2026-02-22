@@ -8,6 +8,9 @@
 import UIKit
 import SwiftUI
 import AVFoundation
+#if canImport(AVKit)
+import AVKit
+#endif
 
 final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate {
     private let playerLogId = UUID().uuidString.prefix(8)
@@ -393,12 +396,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var audioMenuDebounceTimer: Timer?
     private var subtitleMenuDebounceTimer: Timer?
     private var vlcSubtitleOverlayBottomConstraint: NSLayoutConstraint?
+#if canImport(AVKit) && !os(tvOS)
     private var vlcPiPFallbackPlayer: AVPlayer?
     private var vlcPiPFallbackPlayerLayer: AVPlayerLayer?
     private var vlcPiPFallbackController: AVPictureInPictureController?
     private var vlcPiPFallbackSourceURL: URL?
     private var vlcPiPFallbackHeaders: [String: String]?
     private var vlcPiPWasPlayingBeforeFallback: Bool = false
+#endif
     
     // MARK: - Renderer Wrapper Methods
     // These methods abstract away differences between MPVSoftwareRenderer and VLCRenderer
@@ -615,6 +620,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         Logger.shared.log("[PlayerVC.Subtitles] applied VLC overlay bottom constant=\(String(format: "%.1f", constant))", type: "Player")
     }
 
+#if canImport(AVKit) && !os(tvOS)
     private func ensureVLCPiPFallbackConfigured() -> Bool {
         guard isVLCPlayer else { return false }
         guard let sourceURL = initialURL else {
@@ -628,7 +634,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if vlcPiPFallbackPlayer == nil || sourceChanged {
             var assetOptions: [String: Any] = [:]
             if let headers, !headers.isEmpty {
-                assetOptions[AVURLAssetHTTPHeaderFieldsKey] = headers
+                assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = headers
             }
 
             let asset = AVURLAsset(url: sourceURL, options: assetOptions)
@@ -714,6 +720,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
         Logger.shared.log("[PlayerVC.PiPFallback] synced back to VLC time=\(String(format: "%.2f", max(0, pipTime))) resume=\(vlcPiPWasPlayingBeforeFallback)", type: "Player")
     }
+#endif
 
     private func logVlcPiPBridgeWarning(_ message: String) {
         let now = CACurrentMediaTime()
@@ -1058,6 +1065,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         return isVLCPlayer && Settings.shared.enableVLCPictureInPicture
     }
 
+    private var shouldShowTopErrorBanner: Bool {
+        return !isVLCPlayer
+    }
+
     private func logMPV(_ message: String) {
         Logger.shared.log("[MPV \(playerLogId)] " + message, type: "MPV")
     }
@@ -1283,6 +1294,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if pipController?.isPictureInPictureActive == true {
             pipController?.stopPictureInPicture()
         }
+#if canImport(AVKit) && !os(tvOS)
         vlcPiPFallbackController?.delegate = nil
         if vlcPiPFallbackController?.isPictureInPictureActive == true {
             vlcPiPFallbackController?.stopPictureInPicture()
@@ -1290,6 +1302,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         vlcPiPFallbackPlayer?.pause()
         vlcPiPFallbackPlayerLayer?.player = nil
         vlcPiPFallbackPlayer = nil
+#endif
         pipController?.invalidate()
         rendererStop()
         
@@ -2883,6 +2896,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func showTransientErrorBanner(_ message: String, duration: TimeInterval = 4.0) {
+        guard shouldShowTopErrorBanner else { return }
         DispatchQueue.main.async {
             self.showErrorBanner(message)
             NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(self.hideErrorBanner), object: nil)
@@ -2899,6 +2913,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func handleLoggerNotification(_ note: Notification) {
+        guard shouldShowTopErrorBanner else { return }
         guard let info = note.userInfo,
               let message = info["message"] as? String,
               let type = info["type"] as? String else { return }
@@ -2910,6 +2925,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func showErrorBanner(_ message: String) {
+        guard shouldShowTopErrorBanner else { return }
         DispatchQueue.main.async {
             guard let label = self.errorBanner.viewWithTag(101) as? UILabel else { return }
             label.text = message
@@ -3091,7 +3107,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     @objc private func closeTapped() {
         if isClosing { return }
         isClosing = true
+#if canImport(AVKit) && !os(tvOS)
         let isAnyPiPActive = (pipController?.isPictureInPictureActive == true) || (vlcPiPFallbackController?.isPictureInPictureActive == true)
+#else
+        let isAnyPiPActive = (pipController?.isPictureInPictureActive == true)
+#endif
         logMPV("closeTapped; pipActive=\(isAnyPiPActive); mediaInfo=\(String(describing: mediaInfo))")
         closeButton.isEnabled = false
         view.isUserInteractionEnabled = false
@@ -3112,11 +3132,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             if self.pipController?.isPictureInPictureActive == true {
                 self.pipController?.stopPictureInPicture()
             }
+#if canImport(AVKit) && !os(tvOS)
             self.vlcPiPFallbackController?.delegate = nil
             if self.vlcPiPFallbackController?.isPictureInPictureActive == true {
                 self.vlcPiPFallbackController?.stopPictureInPicture()
             }
             self.vlcPiPFallbackPlayer?.pause()
+#endif
 
             self.rendererStop()
             self.logMPV("renderer.stop called from closeTapped")
@@ -3144,6 +3166,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
 
         if isVLCPlayer {
+#if canImport(AVKit) && !os(tvOS)
             let active = vlcPiPFallbackController?.isPictureInPictureActive ?? false
             let possible = vlcPiPFallbackController?.isPictureInPicturePossible ?? PiPController.isPictureInPictureSupported
             Logger.shared.log("[PlayerVC.PiP] VLC fallback tap state active=\(active) possible=\(possible)", type: "Player")
@@ -3153,6 +3176,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 startVLCPiPFallback(trigger: "button")
             }
             return
+#endif
         }
 
         guard let pip = pipController else { return }
@@ -3549,12 +3573,14 @@ extension PlayerViewController: PiPControllerDelegate {
             }
 
             if self.isVLCPlayer {
+#if canImport(AVKit) && !os(tvOS)
                 let active = self.vlcPiPFallbackController?.isPictureInPictureActive ?? false
                 Logger.shared.log("[PlayerVC.PiP] VLC fallback background check active=\(active)", type: "Player")
                 if !active {
                     self.startVLCPiPFallback(trigger: "background")
                 }
                 return
+#endif
             }
 
             guard let pip = self.pipController else { return }
@@ -3573,8 +3599,10 @@ extension PlayerViewController: PiPControllerDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if self.isVLCPlayer {
+#if canImport(AVKit) && !os(tvOS)
                 self.stopVLCPiPFallback(trigger: "foreground")
                 return
+#endif
             }
             guard let pip = self.pipController else { return }
             if pip.isPictureInPictureActive {
@@ -3588,6 +3616,7 @@ extension PlayerViewController: PiPControllerDelegate {
     }
 }
 
+#if canImport(AVKit) && !os(tvOS)
 extension PlayerViewController: AVPictureInPictureControllerDelegate {
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
@@ -3633,3 +3662,4 @@ extension PlayerViewController: AVPictureInPictureControllerDelegate {
         }
     }
 }
+#endif

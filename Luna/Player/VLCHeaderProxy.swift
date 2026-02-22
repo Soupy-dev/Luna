@@ -30,6 +30,26 @@ final class VLCHeaderProxy {
 
     private init() {}
 
+    private func withSessionsLock<T>(_ body: () -> T) -> T {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        return body()
+    }
+
+    private func sessionCount() -> Int {
+        withSessionsLock { sessions.count }
+    }
+
+    private func setSession(_ session: Session, for id: String) {
+        _ = withSessionsLock {
+            sessions[id] = session
+        }
+    }
+
+    private func session(for id: String) -> Session? {
+        withSessionsLock { sessions[id] }
+    }
+
     func makeProxyURL(for targetURL: URL, headers: [String: String]) -> URL? {
         guard ensureStarted() else { return nil }
 
@@ -45,18 +65,14 @@ final class VLCHeaderProxy {
 
         cleanupExpiredSessions()
 
-        sessionLock.lock()
-        let sessionCount = sessions.count
-        sessionLock.unlock()
+        let sessionCount = sessionCount()
 
         if sessionCount >= maxSessions {
             cleanupOldestSessions()
         }
 
         let sessionId = UUID().uuidString
-        sessionLock.lock()
-        sessions[sessionId] = Session(headers: headers, createdAt: Date())
-        sessionLock.unlock()
+        setSession(Session(headers: headers, createdAt: Date()), for: sessionId)
 
         return buildProxyURL(port: activePort, sessionId: sessionId, targetURL: targetURL)
     }
@@ -202,10 +218,7 @@ final class VLCHeaderProxy {
             return
         }
 
-        let session: Session?
-        sessionLock.lock()
-        session = sessions[sessionId]
-        sessionLock.unlock()
+        let session = session(for: sessionId)
 
         guard let session = session else {
             sendSimpleResponse(connection, statusCode: 404, body: "Session not found")
@@ -420,24 +433,23 @@ final class VLCHeaderProxy {
 
     private func cleanupExpiredSessions() {
         let now = Date()
-        sessionLock.lock()
-        sessions = sessions.filter { now.timeIntervalSince($0.value.createdAt) < sessionTTL }
-        sessionLock.unlock()
+        _ = withSessionsLock {
+            sessions = sessions.filter { now.timeIntervalSince($0.value.createdAt) < sessionTTL }
+        }
     }
 
     private func cleanupOldestSessions() {
-        sessionLock.lock()
-        let sorted = sessions.sorted { $0.value.createdAt < $1.value.createdAt }
-        let removeCount = max(0, sessions.count - maxSessions + 1)
-        if removeCount == 0 {
-            sessionLock.unlock()
-            return
-        }
+        _ = withSessionsLock {
+            let sorted = sessions.sorted { $0.value.createdAt < $1.value.createdAt }
+            let removeCount = max(0, sessions.count - maxSessions + 1)
+            if removeCount == 0 {
+                return
+            }
 
-        for idx in 0..<removeCount {
-            sessions.removeValue(forKey: sorted[idx].key)
+            for idx in 0..<removeCount {
+                sessions.removeValue(forKey: sorted[idx].key)
+            }
         }
-        sessionLock.unlock()
     }
 }
 #endif
