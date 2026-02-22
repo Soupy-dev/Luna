@@ -41,6 +41,16 @@ class Settings: ObservableObject {
         get { UserDefaults.standard.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn" }
         set { UserDefaults.standard.set(newValue, forKey: "preferredAnimeAudioLanguage") }
     }
+
+    var enableVLCSubtitleEditMenu: Bool {
+        get { UserDefaults.standard.bool(forKey: "enableVLCSubtitleEditMenu") }
+        set { UserDefaults.standard.set(newValue, forKey: "enableVLCSubtitleEditMenu") }
+    }
+
+    var enableVLCPictureInPicture: Bool {
+        get { UserDefaults.standard.bool(forKey: "enableVLCPictureInPicture") }
+        set { UserDefaults.standard.set(newValue, forKey: "enableVLCPictureInPicture") }
+    }
     
     enum PlayerChoice: String {
         case mpv, vlc

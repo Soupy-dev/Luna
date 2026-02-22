@@ -206,6 +206,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         b.showsMenuAsPrimaryAction = false
         return b
     }()
+
+    private let vlcSubtitleOverlayLabel: UILabel = {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.backgroundColor = .clear
+        label.isHidden = true
+        label.alpha = 0.0
+        return label
+    }()
     
     private let speedButton: UIButton = {
         let b = UIButton(type: .system)
@@ -342,6 +353,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var isClosing = false
     private var isRunning = false  // Track if renderer has been started
     private var pipController: PiPController?
+    private var isUsingVlcFrameBridgePiP = false
+    private var vlcPiPFrameDisplayLink: CADisplayLink?
+    private var vlcPiPFrameFormatDescription: CMVideoFormatDescription?
+    private var vlcPiPFrameIndex: Int64 = 0
+    private var lastVlcPiPBridgeWarningAt: CFTimeInterval = 0
+    private var vlcPiPFrameBridgeDroppedFrames: Int = 0
     private var initialURL: URL?
     private var initialPreset: PlayerPreset?
     private var initialHeaders: [String: String]?
@@ -555,10 +572,172 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
     }
 
-    private func rendererSetPictureInPictureActive(_ active: Bool) {
-        if let vlc = vlcRenderer {
-            vlc.setPictureInPictureActive(active)
+    private func logVlcPiPBridgeWarning(_ message: String) {
+        let now = CACurrentMediaTime()
+        if now - lastVlcPiPBridgeWarningAt >= 1.0 {
+            lastVlcPiPBridgeWarningAt = now
+            Logger.shared.log("[PlayerVC.PiPBridge] \(message)", type: "Player")
         }
+    }
+
+    private func startVlcPiPFrameBridge() {
+        guard isVLCPlayer, vlcPiPFrameDisplayLink == nil else { return }
+
+        isUsingVlcFrameBridgePiP = true
+        vlcPiPFrameIndex = 0
+        vlcPiPFrameFormatDescription = nil
+        vlcPiPFrameBridgeDroppedFrames = 0
+
+        if displayLayer.status == .failed {
+            Logger.shared.log("[PlayerVC.PiPBridge] displayLayer was failed; flushing before start", type: "Player")
+            displayLayer.flush()
+        }
+        displayLayer.flushAndRemoveImage()
+
+        let displayLink = CADisplayLink(target: self, selector: #selector(captureVlcFrameForPiP))
+        if #available(iOS 15.0, tvOS 15.0, *) {
+            displayLink.preferredFrameRateRange = CAFrameRateRange(minimum: 12, maximum: 24, preferred: 24)
+        } else {
+            displayLink.preferredFramesPerSecond = 24
+        }
+        displayLink.add(to: .main, forMode: .common)
+        vlcPiPFrameDisplayLink = displayLink
+        Logger.shared.log("[PlayerVC.PiP] VLC frame bridge started targetFPS=24", type: "Player")
+    }
+
+    private func stopVlcPiPFrameBridge() {
+        vlcPiPFrameDisplayLink?.invalidate()
+        vlcPiPFrameDisplayLink = nil
+        vlcPiPFrameFormatDescription = nil
+        vlcPiPFrameIndex = 0
+        isUsingVlcFrameBridgePiP = false
+
+        if displayLayer.status == .failed {
+            Logger.shared.log("[PlayerVC.PiPBridge] displayLayer failed during stop; flushing", type: "Player")
+            displayLayer.flush()
+        }
+        Logger.shared.log("[PlayerVC.PiP] VLC frame bridge stopped droppedFrames=\(vlcPiPFrameBridgeDroppedFrames) pushedFrames=\(vlcPiPFrameIndex)", type: "Player")
+    }
+
+    @objc private func captureVlcFrameForPiP() {
+        guard isUsingVlcFrameBridgePiP else { return }
+        guard let vlcView = vlcRenderer?.getRenderingView() else {
+            vlcPiPFrameBridgeDroppedFrames += 1
+            logVlcPiPBridgeWarning("capture skipped: missing VLC render view")
+            return
+        }
+
+        let bounds = vlcView.bounds.integral
+        guard bounds.width > 0, bounds.height > 0 else {
+            vlcPiPFrameBridgeDroppedFrames += 1
+            logVlcPiPBridgeWarning("capture skipped: invalid bounds=\(bounds)")
+            return
+        }
+
+        let renderFormat = UIGraphicsImageRendererFormat.default()
+        renderFormat.opaque = true
+        renderFormat.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: bounds.size, format: renderFormat)
+        let image = renderer.image { _ in
+            vlcView.drawHierarchy(in: CGRect(origin: .zero, size: bounds.size), afterScreenUpdates: false)
+        }
+
+          guard let cgImage = image.cgImage,
+              let pixelBuffer = makePiPPixelBuffer(from: cgImage) else {
+            vlcPiPFrameBridgeDroppedFrames += 1
+            logVlcPiPBridgeWarning("capture skipped: cgImage/pixelBuffer creation failed")
+            return
+          }
+
+        if vlcPiPFrameFormatDescription == nil {
+            var formatDescription: CMVideoFormatDescription?
+            CMVideoFormatDescriptionCreateForImageBuffer(
+                allocator: kCFAllocatorDefault,
+                imageBuffer: pixelBuffer,
+                formatDescriptionOut: &formatDescription
+            )
+            vlcPiPFrameFormatDescription = formatDescription
+        }
+
+        guard let formatDescription = vlcPiPFrameFormatDescription else {
+            vlcPiPFrameBridgeDroppedFrames += 1
+            logVlcPiPBridgeWarning("capture skipped: missing video format description")
+            return
+        }
+
+        let timescale: CMTimeScale = 24
+        let pts = CMTime(value: vlcPiPFrameIndex, timescale: timescale)
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: timescale),
+            presentationTimeStamp: pts,
+            decodeTimeStamp: .invalid
+        )
+
+        var sampleBuffer: CMSampleBuffer?
+        let status = CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            formatDescription: formatDescription,
+            sampleTiming: &timing,
+            sampleBufferOut: &sampleBuffer
+        )
+
+        guard status == noErr, let sampleBuffer else {
+            vlcPiPFrameBridgeDroppedFrames += 1
+            logVlcPiPBridgeWarning("capture skipped: CMSampleBuffer creation status=\(status)")
+            return
+        }
+
+        if displayLayer.status == .failed {
+            logVlcPiPBridgeWarning("displayLayer status failed during enqueue; flushing")
+            displayLayer.flush()
+        }
+        displayLayer.enqueue(sampleBuffer)
+        vlcPiPFrameIndex += 1
+    }
+
+    private func makePiPPixelBuffer(from cgImage: CGImage) -> CVPixelBuffer? {
+        let width = cgImage.width
+        let height = cgImage.height
+
+        let attrs: [CFString: Any] = [
+            kCVPixelBufferCGImageCompatibilityKey: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+            kCVPixelBufferIOSurfacePropertiesKey: [:]
+        ]
+
+        var pixelBuffer: CVPixelBuffer?
+        let createStatus = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            width,
+            height,
+            kCVPixelFormatType_32BGRA,
+            attrs as CFDictionary,
+            &pixelBuffer
+        )
+        guard createStatus == kCVReturnSuccess, let pixelBuffer else { return nil }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+
+        guard let context = CGContext(
+            data: baseAddress,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+
+        context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return pixelBuffer
     }
 
     private func rendererApplySubtitleStyle(_ style: SubtitleStyle) {
@@ -579,6 +758,24 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var subtitleURLs: [String] = []
     private var currentSubtitleIndex: Int = 0
     private var subtitleEntries: [SubtitleEntry] = []
+    private var vlcExternalSubtitlesLoadedNatively = false
+    private var lastKnownVLCCustomSubtitleOverlayEnabled: Bool?
+
+    private enum VLCSubtitleSelection {
+        case none
+        case embedded(trackId: Int)
+        case external(index: Int)
+    }
+
+    private var vlcSubtitleSelection: VLCSubtitleSelection = .none
+
+    private var isVLCCustomSubtitleOverlayEnabled: Bool {
+        return isVLCPlayer && Settings.shared.enableVLCSubtitleEditMenu
+    }
+
+    private var isVLCPictureInPictureEnabled: Bool {
+        return isVLCPlayer && Settings.shared.enableVLCPictureInPicture
+    }
 
     private func logMPV(_ message: String) {
         Logger.shared.log("[MPV \(playerLogId)] " + message, type: "MPV")
@@ -609,7 +806,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 if !isLoading { saveSubtitleSettings() }
             }
         }
-        @Published var fontSize: CGFloat = 38.0 {
+        @Published var fontSize: CGFloat = 34.0 {
             didSet {
                 if !isLoading { saveSubtitleSettings() }
             }
@@ -648,7 +845,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             
             if defaults.object(forKey: "subtitles_fontSize") != nil {
                 let size = CGFloat(defaults.double(forKey: "subtitles_fontSize"))
-                fontSize = size > 0 ? size : 38.0
+                fontSize = size > 0 ? size : 34.0
             }
             
             if let foregroundData = defaults.data(forKey: "subtitles_foregroundColor"),
@@ -714,6 +911,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
 
         NotificationCenter.default.addObserver(self, selector: #selector(handleLoggerNotification(_:)), name: NSNotification.Name("LoggerNotification"), object: nil)
+        if isVLCPlayer {
+            lastKnownVLCCustomSubtitleOverlayEnabled = isVLCCustomSubtitleOverlayEnabled
+            NotificationCenter.default.addObserver(self, selector: #selector(handleUserDefaultsDidChange), name: UserDefaults.didChangeNotification, object: nil)
+        }
         
         do {
             try rendererStart()
@@ -722,10 +923,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             let rendererName = vlcRenderer != nil ? "VLC" : "MPV"
             Logger.shared.log("Failed to start \(rendererName) renderer: \(error)", type: "Error")
         }
-        
+
         pipController = PiPController(sampleBufferDisplayLayer: displayLayer)
         pipController?.delegate = self
-        pipButton.isHidden = !(pipController?.isPictureInPictureSupported ?? false)
+        let pipSupported = PiPController.isPictureInPictureSupported
+        pipButton.isHidden = !pipSupported || (isVLCPlayer && !isVLCPictureInPictureEnabled)
         
         showControlsTemporarily()
         
@@ -803,10 +1005,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         pipController?.invalidate()
         rendererStop()
         
-        // Only remove displayLayer if it was added (MPV only)
-        if vlcRenderer == nil {
-            displayLayer.removeFromSuperlayer()
-        }
+        displayLayer.removeFromSuperlayer()
         
         NotificationCenter.default.removeObserver(self)
     }
@@ -823,6 +1022,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     
     func load(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
         logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
+        initialURL = url
+        initialHeaders = headers
         let mediaInfoLabel: String = {
             guard let info = mediaInfo else { return "nil" }
             switch info {
@@ -938,6 +1139,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         videoContainer.addSubview(skipBackwardButton)
         videoContainer.addSubview(skipForwardButton)
         videoContainer.addSubview(speedIndicatorLabel)
+        videoContainer.addSubview(vlcSubtitleOverlayLabel)
         videoContainer.addSubview(subtitleButton)
         if isVLCPlayer {
             videoContainer.addSubview(speedButton)
@@ -1009,6 +1211,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             speedIndicatorLabel.centerXAnchor.constraint(equalTo: videoContainer.centerXAnchor),
             speedIndicatorLabel.widthAnchor.constraint(equalToConstant: 100),
             speedIndicatorLabel.heightAnchor.constraint(equalToConstant: 40),
+
+            vlcSubtitleOverlayLabel.leadingAnchor.constraint(equalTo: progressContainer.leadingAnchor, constant: 12),
+            vlcSubtitleOverlayLabel.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor, constant: -12),
+            vlcSubtitleOverlayLabel.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: -18),
             
             subtitleButton.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor, constant: 0),
             subtitleButton.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: -8),
@@ -1371,12 +1577,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let strokeWidthMenu = UIMenu(title: "Stroke Width", image: UIImage(systemName: "lineweight"), children: strokeWidthActions)
         
         let fontSizes: [(String, CGFloat)] = [
-            ("Small", 34.0),
-            ("Medium", 38.0),
-            ("Large", 42.0),
-            ("Extra Large", 46.0),
-            ("Huge", 56.0),
-            ("Extra Huge", 66.0)
+            ("Very Small", 24.0),
+            ("Small", 30.0),
+            ("Medium", 34.0),
+            ("Large", 38.0),
+            ("Extra Large", 42.0),
+            ("Huge", 46.0),
+            ("Extra Huge", 56.0)
         ]
         
         let fontSizeActions = fontSizes.map { (name, size) in
@@ -1409,11 +1616,45 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             isVisible: subtitleModel.isVisible
         ))
 
+        if isVLCCustomSubtitleOverlayEnabled {
+            updateVLCSubtitleOverlay(for: cachedPosition)
+        }
+
         if subtitleModel.isVisible && currentSubtitleIndex < subtitleURLs.count {
             loadCurrentSubtitle()
             return
         }
         rendererRefreshSubtitleOverlay()
+    }
+
+    private func updateVLCSubtitleOverlay(for time: Double) {
+        guard isVLCCustomSubtitleOverlayEnabled,
+              subtitleModel.isVisible,
+              !subtitleEntries.isEmpty,
+              time.isFinite,
+              let entry = subtitleEntries.first(where: { $0.startTime <= time && time <= $0.endTime }) else {
+            vlcSubtitleOverlayLabel.attributedText = nil
+            vlcSubtitleOverlayLabel.alpha = 0.0
+            vlcSubtitleOverlayLabel.isHidden = true
+            return
+        }
+
+        let styled = NSMutableAttributedString(attributedString: entry.attributedText)
+        let fullRange = NSRange(location: 0, length: styled.length)
+
+        styled.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+            let baseFont = (value as? UIFont) ?? UIFont.boldSystemFont(ofSize: subtitleModel.fontSize)
+            let descriptor = baseFont.fontDescriptor
+            let resized = UIFont(descriptor: descriptor, size: subtitleModel.fontSize)
+            styled.addAttribute(.font, value: resized, range: range)
+            styled.addAttribute(.foregroundColor, value: subtitleModel.foregroundColor, range: range)
+            styled.addAttribute(.strokeColor, value: subtitleModel.strokeColor, range: range)
+            styled.addAttribute(.strokeWidth, value: -abs(subtitleModel.strokeWidth * 2.0), range: range)
+        }
+
+        vlcSubtitleOverlayLabel.attributedText = styled
+        vlcSubtitleOverlayLabel.isHidden = false
+        vlcSubtitleOverlayLabel.alpha = 1.0
     }
 
     private func refreshActiveSubtitleMenu() {
@@ -1604,6 +1845,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         return initialURL?.isFileURL == true
     }
 
+    private func isLocalProxyURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host == "127.0.0.1" || host == "localhost" || host == "::1"
+    }
+
     private func languageName(for code: String) -> String {
         switch code.lowercased() {
         case "jpn", "ja", "jp": return "japanese"
@@ -1730,10 +1976,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard isVLCPlayer else {
             return
         }
-        let tracks = rendererGetSubtitleTracks()
-            .filter { $0.0 >= 0 && !isDisabledTrackName($0.1) }
+        let useCustomExternalOverlay = isVLCCustomSubtitleOverlayEnabled
+        let externalTracks = useCustomExternalOverlay
+            ? subtitleURLs.enumerated().map { ($0.offset, "Subtitle \($0.offset + 1)") }
+            : []
+        let embeddedTracks = rendererGetSubtitleTracks().filter { $0.0 >= 0 && !isDisabledTrackName($0.1) }
 
-        Logger.shared.log("PlayerViewController: subtitle tracks count=\(tracks.count) userSelected=\(userSelectedSubtitleTrack) renderer=\(vlcRenderer != nil ? "VLC" : "MPV")", type: "Player")
+        Logger.shared.log("PlayerViewController: subtitle tracks external=\(externalTracks.count) embedded=\(embeddedTracks.count) userSelected=\(userSelectedSubtitleTrack) renderer=\(vlcRenderer != nil ? "VLC" : "MPV")", type: "Player")
 
         // Always show the subtitle button so the user can view the menu even when empty
         subtitleButton.isHidden = false
@@ -1741,22 +1990,36 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         // Use menu-only behavior for both VLC and MPV so the UI looks consistent
         subtitleButton.showsMenuAsPrimaryAction = true
 
-        let currentSubtitleTrackId = rendererGetCurrentSubtitleTrackId()
-
         // Apply subtitle defaults while the user has not manually selected a track.
         if !userSelectedSubtitleTrack {
             let settings = Settings.shared
             if settings.enableSubtitlesByDefault {
                 let preferredLang = settings.defaultSubtitleLanguage
-                let selectedTrack = preferredDefaultSubtitleTrack(from: tracks, preferredLang: preferredLang)
-                if let selectedTrack, currentSubtitleTrackId != selectedTrack.0 {
-                    rendererSetSubtitleTrack(id: selectedTrack.0)
+                if let selectedEmbeddedTrack = preferredDefaultSubtitleTrack(from: embeddedTracks, preferredLang: preferredLang) {
+                    if rendererGetCurrentSubtitleTrackId() != selectedEmbeddedTrack.0 {
+                        rendererSetSubtitleTrack(id: selectedEmbeddedTrack.0)
+                    }
                     userSelectedSubtitleTrack = true
                     subtitleModel.isVisible = true
+                    vlcSubtitleSelection = .embedded(trackId: selectedEmbeddedTrack.0)
+                    Logger.shared.log("[PlayerVC.Subtitles] default selected embedded track id=\(selectedEmbeddedTrack.0) name=\(selectedEmbeddedTrack.1)", type: "Player")
+                } else if let firstExternalTrack = externalTracks.first {
+                    currentSubtitleIndex = firstExternalTrack.0
+                    loadCurrentSubtitle()
+                    rendererDisableSubtitles()
+                    updateVLCSubtitleOverlay(for: cachedPosition)
+                    userSelectedSubtitleTrack = true
+                    subtitleModel.isVisible = true
+                    vlcSubtitleSelection = .external(index: firstExternalTrack.0)
+                    Logger.shared.log("[PlayerVC.Subtitles] default selected external track index=\(firstExternalTrack.0)", type: "Player")
                 }
-            } else if currentSubtitleTrackId >= 0 {
+            } else {
                 rendererDisableSubtitles()
+                subtitleEntries.removeAll()
+                updateVLCSubtitleOverlay(for: cachedPosition)
                 subtitleModel.isVisible = false
+                vlcSubtitleSelection = .none
+                Logger.shared.log("[PlayerVC.Subtitles] defaults disabled; subtitles forced off", type: "Player")
             }
             updateSubtitleButtonAppearance()
         }
@@ -1766,32 +2029,45 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let disableAction = UIAction(
             title: "Disable Subtitles",
             image: UIImage(systemName: "xmark"),
-            state: rendererGetCurrentSubtitleTrackId() < 0 ? .on : .off
+            state: subtitleModel.isVisible ? .off : .on
         ) { [weak self] _ in
             self?.subtitleModel.isVisible = false
             self?.userSelectedSubtitleTrack = true
             self?.rendererDisableSubtitles()
+            self?.subtitleEntries.removeAll()
+            self?.vlcSubtitleSelection = .none
+            self?.updateVLCSubtitleOverlay(for: self?.cachedPosition ?? 0)
             self?.updateSubtitleButtonAppearance()
             self?.updateSubtitleTracksMenu()
+            Logger.shared.log("[PlayerVC.Subtitles] user disabled subtitles from menu", type: "Player")
         }
         trackActions.append(disableAction)
         
-        if tracks.isEmpty {
+        if externalTracks.isEmpty && embeddedTracks.isEmpty {
             // Inform the user; keep menu available
             let noTracksAction = UIAction(title: "No subtitles in stream", state: .off) { _ in }
             trackActions.append(noTracksAction)
         } else {
-            let selectedSubtitleTrackId = rendererGetCurrentSubtitleTrackId()
-            let subtitleActions = tracks.map { (id, name) in
+            let externalSubtitleActions = externalTracks.map { (id, name) in
                 UIAction(
                     title: name,
                     image: UIImage(systemName: "captions.bubble"),
-                    state: id == selectedSubtitleTrackId ? .on : .off
+                    state: subtitleModel.isVisible && {
+                        if case .external(let selectedIndex) = self.vlcSubtitleSelection {
+                            return selectedIndex == id
+                        }
+                        return false
+                    }() ? .on : .off
                 ) { [weak self] _ in
                     guard let self else { return }
                     self.subtitleModel.isVisible = true
                     self.userSelectedSubtitleTrack = true
-                    self.rendererSetSubtitleTrack(id: id)
+                    self.currentSubtitleIndex = id
+                    self.vlcSubtitleSelection = .external(index: id)
+                    Logger.shared.log("[PlayerVC.Subtitles] user selected external subtitle index=\(id) name=\(name)", type: "Player")
+                    self.loadCurrentSubtitle()
+                    self.rendererDisableSubtitles()
+                    self.updateVLCSubtitleOverlay(for: self.cachedPosition)
                     self.updateSubtitleButtonAppearance()
                     // Debounce menu update to avoid lag - only update after 0.3s of no selection changes
                     self.subtitleMenuDebounceTimer?.invalidate()
@@ -1802,12 +2078,60 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                     }
                 }
             }
-            trackActions.append(contentsOf: subtitleActions)
+
+            let embeddedSubtitleActions = embeddedTracks.map { (id, name) in
+                UIAction(
+                    title: name,
+                    image: UIImage(systemName: "captions.bubble"),
+                    state: subtitleModel.isVisible && {
+                        if case .embedded(let selectedTrackId) = self.vlcSubtitleSelection {
+                            return selectedTrackId == id
+                        }
+                        return false
+                    }() ? .on : .off
+                ) { [weak self] _ in
+                    guard let self else { return }
+                    self.subtitleModel.isVisible = true
+                    self.userSelectedSubtitleTrack = true
+                    self.vlcSubtitleSelection = .embedded(trackId: id)
+                    Logger.shared.log("[PlayerVC.Subtitles] user selected embedded subtitle id=\(id) name=\(name)", type: "Player")
+                    self.subtitleEntries.removeAll()
+                    self.updateVLCSubtitleOverlay(for: self.cachedPosition)
+                    self.rendererSetSubtitleTrack(id: id)
+                    self.rendererApplySubtitleStyle(SubtitleStyle(
+                        foregroundColor: self.subtitleModel.foregroundColor,
+                        strokeColor: self.subtitleModel.strokeColor,
+                        strokeWidth: self.subtitleModel.strokeWidth,
+                        fontSize: self.subtitleModel.fontSize,
+                        isVisible: self.subtitleModel.isVisible
+                    ))
+                    self.updateSubtitleButtonAppearance()
+                    self.subtitleMenuDebounceTimer?.invalidate()
+                    self.subtitleMenuDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+                        DispatchQueue.main.async { [weak self] in
+                            self?.updateSubtitleTracksMenu()
+                        }
+                    }
+                }
+            }
+
+            if !externalSubtitleActions.isEmpty {
+                trackActions.append(contentsOf: externalSubtitleActions)
+            }
+            if !embeddedSubtitleActions.isEmpty {
+                trackActions.append(contentsOf: embeddedSubtitleActions)
+            }
         }
         
         let trackMenu = UIMenu(title: "Select Track", image: UIImage(systemName: "list.bullet"), children: trackActions)
-        let appearanceMenu = createAppearanceMenu()
-        let subtitleMenu = UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: [trackMenu, appearanceMenu])
+        let menuChildren: [UIMenuElement]
+        if Settings.shared.enableVLCSubtitleEditMenu {
+            let appearanceMenu = createAppearanceMenu()
+            menuChildren = [trackMenu, appearanceMenu]
+        } else {
+            menuChildren = [trackMenu]
+        }
+        let subtitleMenu = UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: menuChildren)
         subtitleButton.menu = subtitleMenu
     }
 
@@ -1855,9 +2179,56 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         return best
     }
 
+    @objc private func handleUserDefaultsDidChange() {
+        guard isVLCPlayer else { return }
+        Logger.shared.log("[PlayerVC.Settings] UserDefaults changed; evaluating VLC subtitle mode", type: "Player")
+        applyVLCSubtitleModeSettingIfNeeded()
+    }
+
+    private func applyVLCSubtitleModeSettingIfNeeded() {
+        let customOverlayEnabled = isVLCCustomSubtitleOverlayEnabled
+        if lastKnownVLCCustomSubtitleOverlayEnabled == customOverlayEnabled {
+            return
+        }
+        Logger.shared.log("[PlayerVC.Subtitles] mode toggle detected customOverlayEnabled=\(customOverlayEnabled) subtitleURLs=\(subtitleURLs.count) isVisible=\(subtitleModel.isVisible)", type: "Player")
+        lastKnownVLCCustomSubtitleOverlayEnabled = customOverlayEnabled
+
+        if customOverlayEnabled {
+            rendererDisableSubtitles()
+            if subtitleModel.isVisible && !subtitleURLs.isEmpty {
+                if currentSubtitleIndex >= subtitleURLs.count {
+                    currentSubtitleIndex = 0
+                }
+                Logger.shared.log("[PlayerVC.Subtitles] switching to custom overlay mode; loading external subtitle index=\(currentSubtitleIndex)", type: "Player")
+                loadCurrentSubtitle()
+            } else {
+                subtitleEntries.removeAll()
+                updateVLCSubtitleOverlay(for: cachedPosition)
+                Logger.shared.log("[PlayerVC.Subtitles] switching to custom overlay mode; no subtitle content to load", type: "Player")
+            }
+        } else {
+            subtitleEntries.removeAll()
+            updateVLCSubtitleOverlay(for: cachedPosition)
+            if !subtitleURLs.isEmpty {
+                if !vlcExternalSubtitlesLoadedNatively {
+                    Logger.shared.log("[PlayerVC.Subtitles] switching to native VLC subtitle mode; loading external tracks into VLC", type: "Player")
+                    rendererLoadExternalSubtitles(urls: subtitleURLs)
+                    vlcExternalSubtitlesLoadedNatively = true
+                }
+                userSelectedSubtitleTrack = false
+                updateSubtitleTracksMenuWhenReady()
+            }
+        }
+
+        updateSubtitleTracksMenu()
+        updateSubtitleButtonAppearance()
+    }
+
     private func loadSubtitles(_ urls: [String]) {
         subtitleURLs = urls
         userSelectedSubtitleTrack = false
+        vlcSubtitleSelection = .none
+        vlcExternalSubtitlesLoadedNatively = false
         
         if !urls.isEmpty {
             Logger.shared.log("PlayerViewController: loadSubtitles count=\(urls.count) renderer=\(vlcRenderer != nil ? "VLC" : "MPV")", type: "Stream")
@@ -1868,19 +2239,28 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             
             // VLC can load external subtitles natively; MPV uses manual parsing
             if vlcRenderer != nil {
-                rendererLoadExternalSubtitles(urls: urls)
-                // Update subtitle menu after VLC loads the external subs
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.updateSubtitleTracksMenu()
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                    guard let self else { return }
-                    let tracks = self.rendererGetSubtitleTracks()
-                    if tracks.isEmpty {
-                        Logger.shared.log("PlayerViewController: VLC external subtitles not detected after load", type: "Stream")
-                    } else {
-                        Logger.shared.log("PlayerViewController: VLC subtitle tracks available count=\(tracks.count)", type: "Stream")
-                        self.updateSubtitleTracksMenuWhenReady()
+                if isVLCCustomSubtitleOverlayEnabled {
+                    Logger.shared.log("[PlayerVC.Subtitles] loadSubtitles path=VLC customOverlay", type: "Stream")
+                    rendererDisableSubtitles()
+                    updateSubtitleTracksMenu()
+                    updateVLCSubtitleOverlay(for: cachedPosition)
+                } else {
+                    Logger.shared.log("[PlayerVC.Subtitles] loadSubtitles path=VLC native", type: "Stream")
+                    rendererLoadExternalSubtitles(urls: urls)
+                    vlcExternalSubtitlesLoadedNatively = true
+                    // Update subtitle menu after VLC loads the external subs
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        self?.updateSubtitleTracksMenu()
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                        guard let self else { return }
+                        let tracks = self.rendererGetSubtitleTracks()
+                        if tracks.isEmpty {
+                            Logger.shared.log("PlayerViewController: VLC external subtitles not detected after load", type: "Stream")
+                        } else {
+                            Logger.shared.log("PlayerViewController: VLC subtitle tracks available count=\(tracks.count)", type: "Stream")
+                            self.updateSubtitleTracksMenuWhenReady()
+                        }
                     }
                 }
             } else {
@@ -1901,6 +2281,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func loadCurrentSubtitle() {
         guard currentSubtitleIndex < subtitleURLs.count else { return }
         let urlString = subtitleURLs[currentSubtitleIndex]
+        Logger.shared.log("[PlayerVC.Subtitles] loadCurrentSubtitle index=\(currentSubtitleIndex) renderer=\(isVLCPlayer ? "VLC" : "MPV")", type: "Stream")
 
         if !isVLCPlayer {
             guard let url = URL(string: urlString) else {
@@ -1934,9 +2315,26 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
         
         var request = URLRequest(url: url)
-        request.setValue(URLSession.randomUserAgent, forHTTPHeaderField: "User-Agent")
-        request.setValue(url.scheme! + "://" + (url.host ?? ""), forHTTPHeaderField: "Origin")
-        request.setValue(url.absoluteString, forHTTPHeaderField: "Referer")
+        if isLocalProxyURL(url) {
+            Logger.shared.log("Subtitle download using local proxy URL; preserving proxy headers", type: "Stream")
+        } else {
+            if let headers = initialHeaders, !headers.isEmpty {
+                for (key, value) in headers where !value.isEmpty {
+                    request.setValue(value, forHTTPHeaderField: key)
+                }
+            }
+            if request.value(forHTTPHeaderField: "User-Agent") == nil {
+                request.setValue(URLSession.randomUserAgent, forHTTPHeaderField: "User-Agent")
+            }
+            if request.value(forHTTPHeaderField: "Origin") == nil,
+               let scheme = url.scheme,
+               let host = url.host {
+                request.setValue("\(scheme)://\(host)", forHTTPHeaderField: "Origin")
+            }
+            if request.value(forHTTPHeaderField: "Referer") == nil {
+                request.setValue(url.absoluteString, forHTTPHeaderField: "Referer")
+            }
+        }
         request.timeoutInterval = 30
         
         // Download on background queue to avoid blocking main thread
@@ -1986,7 +2384,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             guard let self = self else { return }
             self.subtitleEntries = SubtitleLoader.parseSubtitles(from: content, fontSize: self.subtitleModel.fontSize, foregroundColor: self.subtitleModel.foregroundColor)
             Logger.shared.log("Loaded \(self.subtitleEntries.count) subtitle entries", type: "Info")
-            self.rendererRefreshSubtitleOverlay()
+            self.updateVLCSubtitleOverlay(for: self.cachedPosition)
         }
     }
     
@@ -2427,11 +2825,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     @objc private func pipTapped() {
+        if isVLCPlayer && !isVLCPictureInPictureEnabled {
+            Logger.shared.log("[PlayerVC.PiP] tap ignored: VLC PiP disabled by setting", type: "Player")
+            return
+        }
         guard let pip = pipController else { return }
         if pip.isPictureInPictureActive {
+            Logger.shared.log("[PlayerVC.PiP] stopping PiP from button", type: "Player")
             pip.stopPictureInPicture()
         } else if pip.isPictureInPicturePossible {
+            Logger.shared.log("[PlayerVC.PiP] starting PiP from button", type: "Player")
             pip.startPictureInPicture()
+        } else {
+            Logger.shared.log("[PlayerVC.PiP] start blocked: PiP not possible", type: "Player")
         }
     }
 
@@ -2482,6 +2888,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             
             if self.pipController?.isPictureInPictureActive == true {
                 self.pipController?.updatePlaybackState()
+            }
+
+            if self.isVLCPlayer {
+                self.updateVLCSubtitleOverlay(for: safePosition)
             }
 
             // If playback is progressing, force-hide any lingering loading spinner
@@ -2707,6 +3117,18 @@ extension PlayerViewController: VLCRendererDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.subtitleModel.isVisible = true
+            if trackId >= 0 {
+                self.vlcSubtitleSelection = .embedded(trackId: trackId)
+                self.rendererApplySubtitleStyle(SubtitleStyle(
+                    foregroundColor: self.subtitleModel.foregroundColor,
+                    strokeColor: self.subtitleModel.strokeColor,
+                    strokeWidth: self.subtitleModel.strokeWidth,
+                    fontSize: self.subtitleModel.fontSize,
+                    isVisible: self.subtitleModel.isVisible
+                ))
+            }
+            self.subtitleEntries.removeAll()
+            self.updateVLCSubtitleOverlay(for: self.cachedPosition)
             self.updateSubtitleButtonAppearance()
             // VLC natively renders ASS subtitles
         }
@@ -2716,17 +3138,30 @@ extension PlayerViewController: VLCRendererDelegate {
 // MARK: - PiP Support
 extension PlayerViewController: PiPControllerDelegate {
     func pipController(_ controller: PiPController, willStartPictureInPicture: Bool) {
-        rendererSetPictureInPictureActive(true)
+        Logger.shared.log("[PlayerVC.PiP] delegate willStart isVLC=\(isVLCPlayer) possible=\(controller.isPictureInPicturePossible)", type: "Player")
+        if isVLCPlayer {
+            startVlcPiPFrameBridge()
+        }
         pipController?.updatePlaybackState()
     }
     func pipController(_ controller: PiPController, didStartPictureInPicture: Bool) {
+        Logger.shared.log("[PlayerVC.PiP] delegate didStart success=\(didStartPictureInPicture) isVLC=\(isVLCPlayer)", type: "Player")
+        if isVLCPlayer && !didStartPictureInPicture {
+            stopVlcPiPFrameBridge()
+        }
         pipController?.updatePlaybackState()
     }
     func pipController(_ controller: PiPController, willStopPictureInPicture: Bool) {
-        rendererSetPictureInPictureActive(false)
+        Logger.shared.log("[PlayerVC.PiP] delegate willStop isVLC=\(isVLCPlayer)", type: "Player")
+        if isVLCPlayer {
+            stopVlcPiPFrameBridge()
+        }
     }
     func pipController(_ controller: PiPController, didStopPictureInPicture: Bool) {
-        rendererSetPictureInPictureActive(false)
+        Logger.shared.log("[PlayerVC.PiP] delegate didStop isVLC=\(isVLCPlayer)", type: "Player")
+        if isVLCPlayer {
+            stopVlcPiPFrameBridge()
+        }
     }
     func pipController(_ controller: PiPController, restoreUserInterfaceForPictureInPictureStop completionHandler: @escaping (Bool) -> Void) {
         if presentedViewController != nil {
@@ -2735,24 +3170,37 @@ extension PlayerViewController: PiPControllerDelegate {
             completionHandler(true)
         }
     }
-    func pipControllerPlay(_ controller: PiPController) { rendererPlay() }
-    func pipControllerPause(_ controller: PiPController) { rendererPausePlayback() }
+    func pipControllerPlay(_ controller: PiPController) {
+        rendererPlay()
+    }
+    func pipControllerPause(_ controller: PiPController) {
+        rendererPausePlayback()
+    }
     func pipController(_ controller: PiPController, skipByInterval interval: CMTime) {
         let seconds = CMTimeGetSeconds(interval)
         let target = max(0, cachedPosition + seconds)
         rendererSeek(to: target)
         pipController?.updatePlaybackState()
     }
-    func pipControllerIsPlaying(_ controller: PiPController) -> Bool { return !rendererIsPausedState() }
+    func pipControllerIsPlaying(_ controller: PiPController) -> Bool {
+        return !rendererIsPausedState()
+    }
     func pipControllerDuration(_ controller: PiPController) -> Double { return cachedDuration }
     func pipControllerCurrentTime(_ controller: PiPController) -> Double { return cachedPosition }
     
     @objc private func appDidEnterBackground() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let pip = self.pipController else { return }
+            guard let self else { return }
+            if self.isVLCPlayer && !self.isVLCPictureInPictureEnabled {
+                Logger.shared.log("[PlayerVC.PiP] background auto-start skipped: VLC PiP disabled by setting", type: "Player")
+                return
+            }
+            guard let pip = self.pipController else { return }
             if pip.isPictureInPicturePossible && !pip.isPictureInPictureActive {
                 self.logMPV("Entering background; starting PiP")
                 pip.startPictureInPicture()
+            } else {
+                Logger.shared.log("[PlayerVC.PiP] background auto-start not triggered possible=\(pip.isPictureInPicturePossible) active=\(pip.isPictureInPictureActive)", type: "Player")
             }
         }
     }

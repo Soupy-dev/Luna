@@ -66,6 +66,14 @@ final class PlayerSettingsStore: ObservableObject {
     @Published var inAppPlayer: InAppPlayer {
         didSet { UserDefaults.standard.set(inAppPlayer.rawValue, forKey: "inAppPlayer") }
     }
+
+    @Published var vlcSubtitleEditMenuEnabled: Bool {
+        didSet { UserDefaults.standard.set(vlcSubtitleEditMenuEnabled, forKey: "enableVLCSubtitleEditMenu") }
+    }
+
+    @Published var vlcPictureInPictureEnabled: Bool {
+        didSet { UserDefaults.standard.set(vlcPictureInPictureEnabled, forKey: "enableVLCPictureInPicture") }
+    }
     
     init() {
         let savedSpeed = UserDefaults.standard.double(forKey: "holdSpeedPlayer")
@@ -78,6 +86,9 @@ final class PlayerSettingsStore: ObservableObject {
         
         let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? InAppPlayer.normal.rawValue
         self.inAppPlayer = InAppPlayer(rawValue: inAppRaw) ?? .normal
+
+        self.vlcSubtitleEditMenuEnabled = UserDefaults.standard.bool(forKey: "enableVLCSubtitleEditMenu")
+        self.vlcPictureInPictureEnabled = UserDefaults.standard.bool(forKey: "enableVLCPictureInPicture")
     }
 }
 
@@ -271,6 +282,143 @@ struct PlayerSettingsView: View {
                                 .font(.caption)
                         }
                     }
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Subtitle Edit Menu")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+
+                            Text("Show subtitle appearance options in VLC player UI. May reduce performance; native VLC subtitle rendering is generally cleaner.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: $store.vlcSubtitleEditMenuEnabled)
+                            .tint(accentColorManager.currentAccentColor)
+                    }
+
+                    if store.vlcSubtitleEditMenuEnabled {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Subtitle Text Color")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+
+                                Text("Default color for custom subtitle rendering.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Picker("", selection: subtitleTextColorBinding) {
+                                ForEach(subtitleTextColorOptions.map(\.name), id: \.self) { name in
+                                    Text(name).tag(name)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Subtitle Stroke Color")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+
+                                Text("Outline color for custom subtitle rendering.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Picker("", selection: subtitleStrokeColorBinding) {
+                                ForEach(subtitleStrokeColorOptions.map(\.name), id: \.self) { name in
+                                    Text(name).tag(name)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(String(format: "Subtitle Stroke Width: %.1f", subtitleStrokeWidthBinding.wrappedValue))
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+
+                                Text("Outline thickness for custom subtitle rendering.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Stepper("", value: subtitleStrokeWidthBinding, in: 0.0...2.0, step: 0.5)
+                        }
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Subtitle Font Size")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+
+                                Text("Named size presets for custom subtitle rendering.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Picker("", selection: subtitleFontSizePresetBinding) {
+                                ForEach(subtitleFontSizeOptions.map(\.name), id: \.self) { name in
+                                    Text(name).tag(name)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+
+                        Button(action: resetVLCSubtitleStyleDefaults) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Reset Subtitle Style")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+
+                                    Text("Restore default subtitle text color, stroke, width, and font size.")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.leading)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "arrow.counterclockwise")
+                                    .foregroundColor(accentColorManager.currentAccentColor)
+                            }
+                        }
+                    }
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Picture in Picture")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+
+                            Text("Show PiP button in VLC player. May reduce performance because VLC does not natively handle PiP.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: $store.vlcPictureInPictureEnabled)
+                            .tint(accentColorManager.currentAccentColor)
+                    }
                 }
             }
         }
@@ -291,4 +439,103 @@ struct PlayerSettingsView: View {
             "rus": "Russian"
         ]
         return languages[code] ?? code.uppercased()
-    }}
+    }
+
+    private var subtitleTextColorOptions: [(name: String, color: UIColor)] {
+        [("White", .white), ("Yellow", .yellow), ("Cyan", .cyan), ("Green", .green), ("Magenta", .magenta)]
+    }
+
+    private var subtitleStrokeColorOptions: [(name: String, color: UIColor)] {
+        [("Black", .black), ("Dark Gray", .darkGray), ("White", .white), ("None", .clear)]
+    }
+
+    private var subtitleTextColorBinding: Binding<String> {
+        Binding(
+            get: {
+                let current = loadSubtitleColor(forKey: "subtitles_foregroundColor", defaultColor: .white)
+                return subtitleTextColorOptions.first(where: { $0.color.isEqual(current) })?.name ?? "White"
+            },
+            set: { selectedName in
+                if let selected = subtitleTextColorOptions.first(where: { $0.name == selectedName })?.color {
+                    saveSubtitleColor(selected, forKey: "subtitles_foregroundColor")
+                }
+            }
+        )
+    }
+
+    private var subtitleStrokeColorBinding: Binding<String> {
+        Binding(
+            get: {
+                let current = loadSubtitleColor(forKey: "subtitles_strokeColor", defaultColor: .black)
+                return subtitleStrokeColorOptions.first(where: { $0.color.isEqual(current) })?.name ?? "Black"
+            },
+            set: { selectedName in
+                if let selected = subtitleStrokeColorOptions.first(where: { $0.name == selectedName })?.color {
+                    saveSubtitleColor(selected, forKey: "subtitles_strokeColor")
+                }
+            }
+        )
+    }
+
+    private var subtitleStrokeWidthBinding: Binding<Double> {
+        Binding(
+            get: {
+                let saved = UserDefaults.standard.double(forKey: "subtitles_strokeWidth")
+                return saved >= 0 ? saved : 1.0
+            },
+            set: { UserDefaults.standard.set($0, forKey: "subtitles_strokeWidth") }
+        )
+    }
+
+    private var subtitleFontSizeOptions: [(name: String, size: Double)] {
+        [
+            ("Very Small", 24.0),
+            ("Small", 30.0),
+            ("Medium", 34.0),
+            ("Large", 38.0),
+            ("Extra Large", 42.0),
+            ("Huge", 46.0),
+            ("Extra Huge", 56.0)
+        ]
+    }
+
+    private var subtitleFontSizePresetBinding: Binding<String> {
+        Binding(
+            get: {
+                let saved = UserDefaults.standard.double(forKey: "subtitles_fontSize")
+                let resolved = saved > 0 ? saved : 34.0
+                if let exact = subtitleFontSizeOptions.first(where: { abs($0.size - resolved) < 0.01 }) {
+                    return exact.name
+                }
+                let nearest = subtitleFontSizeOptions.min(by: { abs($0.size - resolved) < abs($1.size - resolved) })
+                return nearest?.name ?? "Medium"
+            },
+            set: { selectedName in
+                if let selected = subtitleFontSizeOptions.first(where: { $0.name == selectedName }) {
+                    UserDefaults.standard.set(selected.size, forKey: "subtitles_fontSize")
+                }
+            }
+        )
+    }
+
+    private func loadSubtitleColor(forKey key: String, defaultColor: UIColor) -> UIColor {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: data) else {
+            return defaultColor
+        }
+        return color
+    }
+
+    private func saveSubtitleColor(_ color: UIColor, forKey key: String) {
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: color, requiringSecureCoding: false) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    private func resetVLCSubtitleStyleDefaults() {
+        saveSubtitleColor(.white, forKey: "subtitles_foregroundColor")
+        saveSubtitleColor(.black, forKey: "subtitles_strokeColor")
+        UserDefaults.standard.set(1.0, forKey: "subtitles_strokeWidth")
+        UserDefaults.standard.set(34.0, forKey: "subtitles_fontSize")
+    }
+}

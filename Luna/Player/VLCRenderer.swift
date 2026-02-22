@@ -596,16 +596,7 @@ final class VLCRenderer: NSObject {
     }
 
     func setPictureInPictureActive(_ active: Bool) {
-        eventQueue.async { [weak self] in
-            guard let self, let player = self.mediaPlayer else { return }
-            if active {
-                player.drawable = self.displayLayer
-                Logger.shared.log("[VLCRenderer] PiP active: routed drawable to sample buffer display layer", type: "Player")
-            } else {
-                player.drawable = self.vlcView
-                Logger.shared.log("[VLCRenderer] PiP inactive: routed drawable back to VLC view", type: "Player")
-            }
-        }
+        // Intentionally no-op: PiP frame bridging is handled in PlayerViewController.
     }
 
     // MARK: - Event Handlers
