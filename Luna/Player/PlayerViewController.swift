@@ -657,12 +657,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }
 
             if let layer = vlcPiPFallbackPlayerLayer {
-                let controller = AVPictureInPictureController(playerLayer: layer)
-                controller.delegate = self
-                #if !os(tvOS)
-                controller.canStartPictureInPictureAutomaticallyFromInline = true
-                #endif
-                vlcPiPFallbackController = controller
+                if let controller = AVPictureInPictureController(playerLayer: layer) {
+                    controller.delegate = self
+                    #if !os(tvOS)
+                    controller.canStartPictureInPictureAutomaticallyFromInline = true
+                    #endif
+                    vlcPiPFallbackController = controller
+                } else {
+                    vlcPiPFallbackController = nil
+                    Logger.shared.log("[PlayerVC.PiPFallback] failed to create AVPictureInPictureController from player layer", type: "Error")
+                }
             }
 
             Logger.shared.log("[PlayerVC.PiPFallback] configured source=\(sourceURL.absoluteString) headers=\(headers?.count ?? 0)", type: "Player")
