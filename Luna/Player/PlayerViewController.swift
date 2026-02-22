@@ -3619,18 +3619,24 @@ extension PlayerViewController: PiPControllerDelegate {
 #if canImport(AVKit) && !os(tvOS)
 extension PlayerViewController: AVPictureInPictureControllerDelegate {
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
+        guard isVLCPlayer,
+              let fallbackController = vlcPiPFallbackController,
+              pictureInPictureController === fallbackController else { return }
         Logger.shared.log("[PlayerVC.PiPFallback] delegate willStart", type: "Player")
     }
 
     func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
+        guard isVLCPlayer,
+              let fallbackController = vlcPiPFallbackController,
+              pictureInPictureController === fallbackController else { return }
         setVLCInlineVideoHiddenForPiP(true)
         Logger.shared.log("[PlayerVC.PiPFallback] delegate didStart active=\(pictureInPictureController.isPictureInPictureActive)", type: "Player")
     }
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
-        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
+        guard isVLCPlayer,
+              let fallbackController = vlcPiPFallbackController,
+              pictureInPictureController === fallbackController else { return }
         setVLCInlineVideoHiddenForPiP(false)
         let nsError = error as NSError
         Logger.shared.log("[PlayerVC.PiPFallback] failedToStart error=\(nsError.domain)#\(nsError.code) desc=\(nsError.localizedDescription)", type: "Error")
@@ -3638,12 +3644,16 @@ extension PlayerViewController: AVPictureInPictureControllerDelegate {
     }
 
     func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
+        guard isVLCPlayer,
+              let fallbackController = vlcPiPFallbackController,
+              pictureInPictureController === fallbackController else { return }
         Logger.shared.log("[PlayerVC.PiPFallback] delegate willStop", type: "Player")
     }
 
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
+        guard isVLCPlayer,
+              let fallbackController = vlcPiPFallbackController,
+              pictureInPictureController === fallbackController else { return }
         setVLCInlineVideoHiddenForPiP(false)
         vlcPiPFallbackPlayer?.pause()
         syncVLCFromPiPFallbackAfterStop()
@@ -3651,7 +3661,9 @@ extension PlayerViewController: AVPictureInPictureControllerDelegate {
     }
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
-        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else {
+        guard isVLCPlayer,
+              let fallbackController = vlcPiPFallbackController,
+              pictureInPictureController === fallbackController else {
             completionHandler(false)
             return
         }
