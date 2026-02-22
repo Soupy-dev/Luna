@@ -25,6 +25,8 @@ protocol PiPControllerDelegate: AnyObject {
 final class PiPController: NSObject {
     private var pipController: AVPictureInPictureController?
     private weak var sampleBufferDisplayLayer: AVSampleBufferDisplayLayer?
+    private weak var videoCallSourceView: UIView?
+    private var videoCallContentViewController: AVPictureInPictureVideoCallViewController?
     
     weak var delegate: PiPControllerDelegate?
     
@@ -43,10 +45,16 @@ final class PiPController: NSObject {
     init(sampleBufferDisplayLayer: AVSampleBufferDisplayLayer) {
         self.sampleBufferDisplayLayer = sampleBufferDisplayLayer
         super.init()
-        setupPictureInPicture()
+        setupSampleBufferPictureInPicture()
+    }
+
+    init(videoCallSourceView: UIView) {
+        self.videoCallSourceView = videoCallSourceView
+        super.init()
+        setupVideoCallPictureInPicture()
     }
     
-    private func setupPictureInPicture() {
+    private func setupSampleBufferPictureInPicture() {
         guard isPictureInPictureSupported,
               let displayLayer = sampleBufferDisplayLayer else {
             return
@@ -57,6 +65,32 @@ final class PiPController: NSObject {
             playbackDelegate: self
         )
         
+        pipController = AVPictureInPictureController(contentSource: contentSource)
+        pipController?.delegate = self
+        pipController?.requiresLinearPlayback = false
+        #if !os(tvOS)
+        pipController?.canStartPictureInPictureAutomaticallyFromInline = true
+        #endif
+    }
+
+    private func setupVideoCallPictureInPicture() {
+        guard isPictureInPictureSupported,
+              let sourceView = videoCallSourceView else {
+            return
+        }
+
+        guard #available(iOS 15.0, tvOS 15.0, *) else {
+            return
+        }
+
+        let contentViewController = AVPictureInPictureVideoCallViewController()
+        videoCallContentViewController = contentViewController
+
+        let contentSource = AVPictureInPictureController.ContentSource(
+            activeVideoCallSourceView: sourceView,
+            contentViewController: contentViewController
+        )
+
         pipController = AVPictureInPictureController(contentSource: contentSource)
         pipController?.delegate = self
         pipController?.requiresLinearPlayback = false
