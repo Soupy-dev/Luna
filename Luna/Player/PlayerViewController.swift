@@ -226,6 +226,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         view.isUserInteractionEnabled = false
         return view
     }()
+
+    private let vlcPiPFallbackHostView: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.backgroundColor = .clear
+        view.alpha = 0.01
+        view.isUserInteractionEnabled = false
+        return view
+    }()
     
     private let speedButton: UIButton = {
         let b = UIButton(type: .system)
@@ -384,6 +393,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var audioMenuDebounceTimer: Timer?
     private var subtitleMenuDebounceTimer: Timer?
     private var vlcSubtitleOverlayBottomConstraint: NSLayoutConstraint?
+    private var vlcPiPFallbackPlayer: AVPlayer?
+    private var vlcPiPFallbackPlayerLayer: AVPlayerLayer?
+    private var vlcPiPFallbackController: AVPictureInPictureController?
+    private var vlcPiPFallbackSourceURL: URL?
+    private var vlcPiPFallbackHeaders: [String: String]?
+    private var vlcPiPWasPlayingBeforeFallback: Bool = false
     
     // MARK: - Renderer Wrapper Methods
     // These methods abstract away differences between MPVSoftwareRenderer and VLCRenderer
@@ -600,6 +615,106 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         Logger.shared.log("[PlayerVC.Subtitles] applied VLC overlay bottom constant=\(String(format: "%.1f", constant))", type: "Player")
     }
 
+    private func ensureVLCPiPFallbackConfigured() -> Bool {
+        guard isVLCPlayer else { return false }
+        guard let sourceURL = initialURL else {
+            Logger.shared.log("[PlayerVC.PiPFallback] setup blocked: missing source URL", type: "Error")
+            return false
+        }
+
+        let headers = initialHeaders
+        let sourceChanged = vlcPiPFallbackSourceURL != sourceURL || (vlcPiPFallbackHeaders ?? [:]) != (headers ?? [:])
+
+        if vlcPiPFallbackPlayer == nil || sourceChanged {
+            var assetOptions: [String: Any] = [:]
+            if let headers, !headers.isEmpty {
+                assetOptions[AVURLAssetHTTPHeaderFieldsKey] = headers
+            }
+
+            let asset = AVURLAsset(url: sourceURL, options: assetOptions)
+            let item = AVPlayerItem(asset: asset)
+            let player = AVPlayer(playerItem: item)
+            player.automaticallyWaitsToMinimizeStalling = true
+
+            vlcPiPFallbackPlayer = player
+            vlcPiPFallbackSourceURL = sourceURL
+            vlcPiPFallbackHeaders = headers
+
+            if vlcPiPFallbackPlayerLayer == nil {
+                let layer = AVPlayerLayer(player: player)
+                layer.videoGravity = .resizeAspect
+                layer.frame = CGRect(x: 0, y: 0, width: 2, height: 2)
+                vlcPiPFallbackHostView.layer.addSublayer(layer)
+                vlcPiPFallbackPlayerLayer = layer
+            } else {
+                vlcPiPFallbackPlayerLayer?.player = player
+            }
+
+            if let layer = vlcPiPFallbackPlayerLayer {
+                let controller = AVPictureInPictureController(playerLayer: layer)
+                controller.delegate = self
+                #if !os(tvOS)
+                controller.canStartPictureInPictureAutomaticallyFromInline = true
+                #endif
+                vlcPiPFallbackController = controller
+            }
+
+            Logger.shared.log("[PlayerVC.PiPFallback] configured source=\(sourceURL.absoluteString) headers=\(headers?.count ?? 0)", type: "Player")
+        }
+
+        return vlcPiPFallbackController != nil
+    }
+
+    private func startVLCPiPFallback(trigger: String) {
+        guard ensureVLCPiPFallbackConfigured(), let controller = vlcPiPFallbackController, let player = vlcPiPFallbackPlayer else {
+            Logger.shared.log("[PlayerVC.PiPFallback] start blocked trigger=\(trigger)", type: "Error")
+            return
+        }
+        if controller.isPictureInPictureActive {
+            Logger.shared.log("[PlayerVC.PiPFallback] start ignored: already active trigger=\(trigger)", type: "Player")
+            return
+        }
+        if !controller.isPictureInPicturePossible {
+            Logger.shared.log("[PlayerVC.PiPFallback] start blocked: PiP not possible trigger=\(trigger)", type: "Player")
+            return
+        }
+
+        let startTime = max(0, cachedPosition)
+        let seekTime = CMTime(seconds: startTime, preferredTimescale: 1000)
+        let speed = Float(max(0.1, rendererGetSpeed()))
+        vlcPiPWasPlayingBeforeFallback = !rendererIsPausedState()
+
+        rendererPausePlayback()
+        player.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        player.playImmediately(atRate: speed)
+
+        Logger.shared.log("[PlayerVC.PiPFallback] start requested trigger=\(trigger) seek=\(String(format: "%.2f", startTime)) rate=\(String(format: "%.2f", speed))", type: "Player")
+        controller.startPictureInPicture()
+    }
+
+    private func stopVLCPiPFallback(trigger: String) {
+        guard let controller = vlcPiPFallbackController else {
+            Logger.shared.log("[PlayerVC.PiPFallback] stop ignored: no controller trigger=\(trigger)", type: "Player")
+            return
+        }
+        if controller.isPictureInPictureActive {
+            Logger.shared.log("[PlayerVC.PiPFallback] stop requested trigger=\(trigger)", type: "Player")
+            controller.stopPictureInPicture()
+        }
+    }
+
+    private func syncVLCFromPiPFallbackAfterStop() {
+        guard isVLCPlayer, let player = vlcPiPFallbackPlayer else { return }
+        let pipTime = CMTimeGetSeconds(player.currentTime())
+        if pipTime.isFinite, pipTime >= 0 {
+            rendererSeek(to: pipTime)
+        }
+        if vlcPiPWasPlayingBeforeFallback {
+            rendererPlay()
+        }
+        Logger.shared.log("[PlayerVC.PiPFallback] synced back to VLC time=\(String(format: "%.2f", max(0, pipTime))) resume=\(vlcPiPWasPlayingBeforeFallback)", type: "Player")
+    }
+
     private func logVlcPiPBridgeWarning(_ message: String) {
         let now = CACurrentMediaTime()
         if now - lastVlcPiPBridgeWarningAt >= 1.0 {
@@ -782,6 +897,21 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             return hierarchyImage
         }
 
+        let presentationLayerImage = renderer.image { context in
+            if let presentation = vlcView.layer.presentation() {
+                presentation.render(in: context.cgContext)
+            } else {
+                vlcView.layer.render(in: context.cgContext)
+            }
+        }
+
+        if let presentationCG = presentationLayerImage.cgImage,
+           let presentationBuffer = makePiPPixelBuffer(from: presentationCG),
+           !isLikelyBlackPiPFrame(presentationBuffer) {
+            logVlcPiPBridgeWarning("capture fallback recovered frame via presentationLayer.render")
+            return presentationLayerImage
+        }
+
         let layerImage = renderer.image { context in
             vlcView.layer.render(in: context.cgContext)
         }
@@ -792,6 +922,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             logVlcPiPBridgeWarning("capture fallback recovered frame via layer.render")
             return layerImage
         }
+
+        logVlcPiPBridgeWarning("capture produced black frame across hierarchy/presentation/layer paths")
 
         return hierarchyImage
     }
@@ -1151,6 +1283,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if pipController?.isPictureInPictureActive == true {
             pipController?.stopPictureInPicture()
         }
+        vlcPiPFallbackController?.delegate = nil
+        if vlcPiPFallbackController?.isPictureInPictureActive == true {
+            vlcPiPFallbackController?.stopPictureInPicture()
+        }
+        vlcPiPFallbackPlayer?.pause()
+        vlcPiPFallbackPlayerLayer?.player = nil
+        vlcPiPFallbackPlayer = nil
         pipController?.invalidate()
         rendererStop()
         
@@ -1282,6 +1421,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 vlcInlineMaskView.bottomAnchor.constraint(equalTo: vlcView.bottomAnchor),
                 vlcInlineMaskView.leadingAnchor.constraint(equalTo: vlcView.leadingAnchor),
                 vlcInlineMaskView.trailingAnchor.constraint(equalTo: vlcView.trailingAnchor)
+            ])
+
+            videoContainer.addSubview(vlcPiPFallbackHostView)
+            NSLayoutConstraint.activate([
+                vlcPiPFallbackHostView.topAnchor.constraint(equalTo: videoContainer.topAnchor),
+                vlcPiPFallbackHostView.leadingAnchor.constraint(equalTo: videoContainer.leadingAnchor),
+                vlcPiPFallbackHostView.widthAnchor.constraint(equalToConstant: 2),
+                vlcPiPFallbackHostView.heightAnchor.constraint(equalToConstant: 2)
             ])
         }
         
@@ -2944,7 +3091,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     @objc private func closeTapped() {
         if isClosing { return }
         isClosing = true
-        logMPV("closeTapped; pipActive=\(pipController?.isPictureInPictureActive == true); mediaInfo=\(String(describing: mediaInfo))")
+        let isAnyPiPActive = (pipController?.isPictureInPictureActive == true) || (vlcPiPFallbackController?.isPictureInPictureActive == true)
+        logMPV("closeTapped; pipActive=\(isAnyPiPActive); mediaInfo=\(String(describing: mediaInfo))")
         closeButton.isEnabled = false
         view.isUserInteractionEnabled = false
 
@@ -2964,6 +3112,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             if self.pipController?.isPictureInPictureActive == true {
                 self.pipController?.stopPictureInPicture()
             }
+            self.vlcPiPFallbackController?.delegate = nil
+            if self.vlcPiPFallbackController?.isPictureInPictureActive == true {
+                self.vlcPiPFallbackController?.stopPictureInPicture()
+            }
+            self.vlcPiPFallbackPlayer?.pause()
 
             self.rendererStop()
             self.logMPV("renderer.stop called from closeTapped")
@@ -2989,6 +3142,19 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             Logger.shared.log("[PlayerVC.PiP] tap ignored: VLC PiP disabled by setting", type: "Player")
             return
         }
+
+        if isVLCPlayer {
+            let active = vlcPiPFallbackController?.isPictureInPictureActive ?? false
+            let possible = vlcPiPFallbackController?.isPictureInPicturePossible ?? PiPController.isPictureInPictureSupported
+            Logger.shared.log("[PlayerVC.PiP] VLC fallback tap state active=\(active) possible=\(possible)", type: "Player")
+            if active {
+                stopVLCPiPFallback(trigger: "button")
+            } else {
+                startVLCPiPFallback(trigger: "button")
+            }
+            return
+        }
+
         guard let pip = pipController else { return }
         Logger.shared.log("[PlayerVC.PiP] button tap state active=\(pip.isPictureInPictureActive) possible=\(pip.isPictureInPicturePossible) supported=\(pip.isPictureInPictureSupported) isVLC=\(isVLCPlayer)", type: "Player")
         if pip.isPictureInPictureActive {
@@ -3381,6 +3547,16 @@ extension PlayerViewController: PiPControllerDelegate {
                 Logger.shared.log("[PlayerVC.PiP] background auto-start skipped: VLC PiP disabled by setting", type: "Player")
                 return
             }
+
+            if self.isVLCPlayer {
+                let active = self.vlcPiPFallbackController?.isPictureInPictureActive ?? false
+                Logger.shared.log("[PlayerVC.PiP] VLC fallback background check active=\(active)", type: "Player")
+                if !active {
+                    self.startVLCPiPFallback(trigger: "background")
+                }
+                return
+            }
+
             guard let pip = self.pipController else { return }
             Logger.shared.log("[PlayerVC.PiP] background check active=\(pip.isPictureInPictureActive) possible=\(pip.isPictureInPicturePossible) supported=\(pip.isPictureInPictureSupported) isVLC=\(self.isVLCPlayer)", type: "Player")
             if pip.isPictureInPicturePossible && !pip.isPictureInPictureActive {
@@ -3395,7 +3571,12 @@ extension PlayerViewController: PiPControllerDelegate {
     
     @objc private func appWillEnterForeground() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let pip = self.pipController else { return }
+            guard let self else { return }
+            if self.isVLCPlayer {
+                self.stopVLCPiPFallback(trigger: "foreground")
+                return
+            }
+            guard let pip = self.pipController else { return }
             if pip.isPictureInPictureActive {
                 self.logMPV("Returning to foreground; stopping PiP")
                 if self.isVLCPlayer {
@@ -3403,6 +3584,52 @@ extension PlayerViewController: PiPControllerDelegate {
                 }
                 pip.stopPictureInPicture()
             }
+        }
+    }
+}
+
+extension PlayerViewController: AVPictureInPictureControllerDelegate {
+    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
+        Logger.shared.log("[PlayerVC.PiPFallback] delegate willStart", type: "Player")
+    }
+
+    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
+        setVLCInlineVideoHiddenForPiP(true)
+        Logger.shared.log("[PlayerVC.PiPFallback] delegate didStart active=\(pictureInPictureController.isPictureInPictureActive)", type: "Player")
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
+        setVLCInlineVideoHiddenForPiP(false)
+        let nsError = error as NSError
+        Logger.shared.log("[PlayerVC.PiPFallback] failedToStart error=\(nsError.domain)#\(nsError.code) desc=\(nsError.localizedDescription)", type: "Error")
+        syncVLCFromPiPFallbackAfterStop()
+    }
+
+    func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
+        Logger.shared.log("[PlayerVC.PiPFallback] delegate willStop", type: "Player")
+    }
+
+    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else { return }
+        setVLCInlineVideoHiddenForPiP(false)
+        vlcPiPFallbackPlayer?.pause()
+        syncVLCFromPiPFallbackAfterStop()
+        Logger.shared.log("[PlayerVC.PiPFallback] delegate didStop active=\(pictureInPictureController.isPictureInPictureActive)", type: "Player")
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        guard isVLCPlayer, pictureInPictureController === vlcPiPFallbackController else {
+            completionHandler(false)
+            return
+        }
+        if presentedViewController != nil {
+            dismiss(animated: true) { completionHandler(true) }
+        } else {
+            completionHandler(true)
         }
     }
 }
