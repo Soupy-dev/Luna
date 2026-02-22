@@ -373,6 +373,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     // Debounce timers for menu updates to avoid excessive rebuilds
     private var audioMenuDebounceTimer: Timer?
     private var subtitleMenuDebounceTimer: Timer?
+    private var vlcSubtitleOverlayBottomConstraint: NSLayoutConstraint?
     
     // MARK: - Renderer Wrapper Methods
     // These methods abstract away differences between MPVSoftwareRenderer and VLCRenderer
@@ -575,6 +576,20 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
     }
 
+    private var vlcSubtitleOverlayBottomConstant: CGFloat {
+        if let value = UserDefaults.standard.object(forKey: "vlcSubtitleOverlayBottomConstant") as? Double {
+            return CGFloat(value)
+        }
+        return -6.0
+    }
+
+    private func applyVLCSubtitleOverlayPositionSetting() {
+        guard isVLCPlayer else { return }
+        let constant = vlcSubtitleOverlayBottomConstant
+        vlcSubtitleOverlayBottomConstraint?.constant = constant
+        Logger.shared.log("[PlayerVC.Subtitles] applied VLC overlay bottom constant=\(String(format: "%.1f", constant))", type: "Player")
+    }
+
     private func logVlcPiPBridgeWarning(_ message: String) {
         let now = CACurrentMediaTime()
         if now - lastVlcPiPBridgeWarningAt >= 1.0 {
@@ -612,6 +627,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     private func stopVlcPiPFrameBridge() {
+        guard isUsingVlcFrameBridgePiP || vlcPiPFrameTimer != nil else {
+            Logger.shared.log("[PlayerVC.PiP] VLC frame bridge stop ignored: already stopped", type: "Player")
+            return
+        }
+
         let pushedFrames = vlcPiPFrameIndex
         let droppedFrames = vlcPiPFrameBridgeDroppedFrames
         let blackFrames = vlcPiPBlackFrameCount
@@ -647,12 +667,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             return
         }
 
-        let renderFormat = UIGraphicsImageRendererFormat.default()
-        renderFormat.opaque = true
-        renderFormat.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: bounds.size, format: renderFormat)
-        let image = renderer.image { _ in
-            vlcView.drawHierarchy(in: CGRect(origin: .zero, size: bounds.size), afterScreenUpdates: false)
+        guard let image = captureVlcViewImage(vlcView, bounds: bounds) else {
+            vlcPiPFrameBridgeDroppedFrames += 1
+            logVlcPiPBridgeWarning("capture skipped: unable to capture VLC view image")
+            return
         }
 
         guard let cgImage = image.cgImage,
@@ -726,6 +744,36 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if vlcPiPFrameIndex % 120 == 0 {
             Logger.shared.log("[PlayerVC.PiPBridge] enqueue heartbeat pushedFrames=\(vlcPiPFrameIndex) droppedFrames=\(vlcPiPFrameBridgeDroppedFrames) blackFrames=\(vlcPiPBlackFrameCount) displayStatus=\(displayLayer.status.rawValue) hasError=\(displayLayer.error != nil)", type: "Player")
         }
+    }
+
+    private func captureVlcViewImage(_ vlcView: UIView, bounds: CGRect) -> UIImage? {
+        let renderFormat = UIGraphicsImageRendererFormat.default()
+        renderFormat.opaque = true
+        renderFormat.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: bounds.size, format: renderFormat)
+
+        let hierarchyImage = renderer.image { _ in
+            vlcView.drawHierarchy(in: CGRect(origin: .zero, size: bounds.size), afterScreenUpdates: false)
+        }
+
+        if let hierarchyCG = hierarchyImage.cgImage,
+           let hierarchyBuffer = makePiPPixelBuffer(from: hierarchyCG),
+           !isLikelyBlackPiPFrame(hierarchyBuffer) {
+            return hierarchyImage
+        }
+
+        let layerImage = renderer.image { context in
+            vlcView.layer.render(in: context.cgContext)
+        }
+
+        if let layerCG = layerImage.cgImage,
+           let layerBuffer = makePiPPixelBuffer(from: layerCG),
+           !isLikelyBlackPiPFrame(layerBuffer) {
+            logVlcPiPBridgeWarning("capture fallback recovered frame via layer.render")
+            return layerImage
+        }
+
+        return hierarchyImage
     }
 
     private func isLikelyBlackPiPFrame(_ pixelBuffer: CVPixelBuffer) -> Bool {
@@ -1291,13 +1339,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
             vlcSubtitleOverlayLabel.leadingAnchor.constraint(equalTo: progressContainer.leadingAnchor, constant: 12),
             vlcSubtitleOverlayLabel.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor, constant: -12),
-            vlcSubtitleOverlayLabel.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: -6),
             
             subtitleButton.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor, constant: 0),
             subtitleButton.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: -8),
             subtitleButton.widthAnchor.constraint(equalToConstant: 32),
             subtitleButton.heightAnchor.constraint(equalToConstant: 32)
         ])
+
+        vlcSubtitleOverlayBottomConstraint = vlcSubtitleOverlayLabel.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: vlcSubtitleOverlayBottomConstant)
+        vlcSubtitleOverlayBottomConstraint?.isActive = true
         if isVLCPlayer {
             NSLayoutConstraint.activate([
                 speedButton.trailingAnchor.constraint(equalTo: subtitleButton.leadingAnchor, constant: -8),
@@ -2260,6 +2310,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard isVLCPlayer else { return }
         Logger.shared.log("[PlayerVC.Settings] UserDefaults changed; evaluating VLC subtitle mode", type: "Player")
         applyVLCSubtitleModeSettingIfNeeded()
+        applyVLCSubtitleOverlayPositionSetting()
     }
 
     private func applyVLCSubtitleModeSettingIfNeeded() {

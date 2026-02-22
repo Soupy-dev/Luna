@@ -100,6 +100,7 @@ struct PlayerSettingsView: View {
     @State private var subtitleStrokeColorName: String = "Black"
     @State private var subtitleStrokeWidth: Double = 1.0
     @State private var subtitleFontSizePresetName: String = "Medium"
+    @State private var subtitleVerticalOffset: Double = -6.0
     
     var body: some View {
         List {
@@ -396,6 +397,31 @@ struct PlayerSettingsView: View {
                             .pickerStyle(.menu)
                         }
 
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(String(format: "Subtitle Vertical Offset: %.0f", subtitleVerticalOffsetBinding.wrappedValue))
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+
+                                Text("Numeric offset for subtitle height. Higher values place subtitles lower on screen.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+#if os(tvOS)
+                            Picker("", selection: subtitleVerticalOffsetBinding) {
+                                ForEach(Array(stride(from: -24, through: 24, by: 2)), id: \.self) { value in
+                                    Text("\(value)").tag(Double(value))
+                                }
+                            }
+                            .pickerStyle(.menu)
+#else
+                            Stepper("", value: subtitleVerticalOffsetBinding, in: -24...24, step: 1)
+#endif
+                        }
+
                         Button(action: resetVLCSubtitleStyleDefaults) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -525,6 +551,16 @@ struct PlayerSettingsView: View {
         )
     }
 
+    private var subtitleVerticalOffsetBinding: Binding<Double> {
+        Binding(
+            get: { subtitleVerticalOffset },
+            set: { selectedValue in
+                subtitleVerticalOffset = selectedValue
+                UserDefaults.standard.set(selectedValue, forKey: "vlcSubtitleOverlayBottomConstant")
+            }
+        )
+    }
+
     private func loadSubtitleColor(forKey key: String, defaultColor: UIColor) -> UIColor {
         guard let data = UserDefaults.standard.data(forKey: key),
               let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: data) else {
@@ -544,6 +580,7 @@ struct PlayerSettingsView: View {
         saveSubtitleColor(.black, forKey: "subtitles_strokeColor")
         UserDefaults.standard.set(1.0, forKey: "subtitles_strokeWidth")
         UserDefaults.standard.set(30.0, forKey: "subtitles_fontSize")
+        UserDefaults.standard.set(-6.0, forKey: "vlcSubtitleOverlayBottomConstant")
         refreshVLCSubtitleStyleStateFromDefaults()
     }
 
@@ -565,5 +602,10 @@ struct PlayerSettingsView: View {
             let nearest = subtitleFontSizeOptions.min(by: { abs($0.size - resolvedFontSize) < abs($1.size - resolvedFontSize) })
             subtitleFontSizePresetName = nearest?.name ?? "Medium"
         }
+
+        let savedBottomConstant = UserDefaults.standard.double(forKey: "vlcSubtitleOverlayBottomConstant")
+        subtitleVerticalOffset = UserDefaults.standard.object(forKey: "vlcSubtitleOverlayBottomConstant") != nil
+            ? savedBottomConstant
+            : -6.0
     }
 }
