@@ -534,6 +534,7 @@ struct ContinueWatchingCard: View {
     @State private var isHovering = false
     @State private var isLoaded = false
     @State private var showingSearchResults = false
+    @State private var showingDetails = false
 
     private var cardWidth: CGFloat { isTvOS ? 380 : 260 }
     private var cardHeight: CGFloat { isTvOS ? 220 : 146 }
@@ -562,6 +563,24 @@ struct ContinueWatchingCard: View {
             runtime: nil,
             voteAverage: 0,
             voteCount: 0
+        )
+    }
+
+    private var detailSearchResult: TMDBSearchResult {
+        TMDBSearchResult(
+            id: item.tmdbId,
+            mediaType: item.isMovie ? "movie" : "tv",
+            title: item.isMovie ? displayTitle : nil,
+            name: item.isMovie ? nil : displayTitle,
+            overview: nil,
+            posterPath: nil,
+            backdropPath: nil,
+            releaseDate: nil,
+            firstAirDate: nil,
+            voteAverage: nil,
+            popularity: 0,
+            adult: nil,
+            genreIds: nil
         )
     }
 
@@ -674,6 +693,12 @@ struct ContinueWatchingCard: View {
         }
         .contextMenu {
             Button {
+                showingDetails = true
+            } label: {
+                Label("Details", systemImage: "info.circle")
+            }
+
+            Button {
                 markAsWatched()
             } label: {
                 Label("Mark as Watched", systemImage: "checkmark.circle")
@@ -685,6 +710,12 @@ struct ContinueWatchingCard: View {
                 Label("Remove", systemImage: "trash")
             }
         }
+        .background(
+            NavigationLink(destination: MediaDetailView(searchResult: detailSearchResult), isActive: $showingDetails) {
+                EmptyView()
+            }
+            .hidden()
+        )
     }
 
     @ViewBuilder
