@@ -449,7 +449,7 @@ struct PlayerSettingsView: View {
                                 .font(.subheadline)
                                 .fontWeight(.medium)
 
-                            Text("Show PiP button in VLC player. May reduce performance because VLC does not natively handle PiP.")
+                            Text("Show PiP button in VLC player. May reduce performance because VLC does not natively handle PiP. Subtitles in PiP work only for AVPlayer-supported subtitle tracks; custom VLC subtitle overlay styles may not appear in PiP.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.leading)

@@ -639,6 +639,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
             let asset = AVURLAsset(url: sourceURL, options: assetOptions)
             let item = AVPlayerItem(asset: asset)
+            configureVLCPiPFallbackSubtitles(for: item)
             let player = AVPlayer(playerItem: item)
             player.automaticallyWaitsToMinimizeStalling = true
 
@@ -673,6 +674,42 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
 
         return vlcPiPFallbackController != nil
+    }
+
+    private func configureVLCPiPFallbackSubtitles(for item: AVPlayerItem) {
+        let subtitlesEnabled = Settings.shared.enableSubtitlesByDefault
+        let preferredLanguage = Settings.shared.defaultSubtitleLanguage.lowercased()
+
+        item.asset.loadValuesAsynchronously(forKeys: ["availableMediaCharacteristicsWithMediaSelectionOptions"]) { [weak self, weak item] in
+            guard let self, let item else { return }
+
+            var keyError: NSError?
+            let status = item.asset.statusOfValue(forKey: "availableMediaCharacteristicsWithMediaSelectionOptions", error: &keyError)
+            guard status == .loaded else {
+                Logger.shared.log("[PlayerVC.PiPFallback] subtitles metadata load failed status=\(status.rawValue) error=\(keyError?.localizedDescription ?? \"nil\")", type: "Player")
+                return
+            }
+
+            guard let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) else {
+                Logger.shared.log("[PlayerVC.PiPFallback] no legible media selection group", type: "Player")
+                return
+            }
+
+            DispatchQueue.main.async {
+                if !subtitlesEnabled {
+                    item.select(nil, in: group)
+                    Logger.shared.log("[PlayerVC.PiPFallback] subtitles disabled by settings", type: "Player")
+                    return
+                }
+
+                let options = AVMediaSelectionGroup.mediaSelectionOptions(from: group.options, with: Locale(identifier: preferredLanguage))
+                let selected = options.first ?? group.defaultOption ?? group.options.first
+                item.select(selected, in: group)
+
+                let selectedLabel = selected?.displayName ?? "nil"
+                Logger.shared.log("[PlayerVC.PiPFallback] selected subtitle option=\(selectedLabel) preferredLang=\(preferredLanguage)", type: "Player")
+            }
+        }
     }
 
     private func startVLCPiPFallback(trigger: String) {
