@@ -696,6 +696,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         vlcPiPFrameIndex += 1
     }
 
+    private func prepareVlcPiPBridgeForStart(trigger: String) {
+        guard isVLCPlayer else { return }
+        startVlcPiPFrameBridge()
+        captureVlcFrameForPiP()
+        Logger.shared.log("[PlayerVC.PiP] prewarmed VLC bridge trigger=\(trigger) pushedFrames=\(vlcPiPFrameIndex) droppedFrames=\(vlcPiPFrameBridgeDroppedFrames) displayStatus=\(displayLayer.status.rawValue) hasError=\(displayLayer.error != nil)", type: "Player")
+    }
+
     private func makePiPPixelBuffer(from cgImage: CGImage) -> CVPixelBuffer? {
         let width = cgImage.width
         let height = cgImage.height
@@ -2830,14 +2837,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             return
         }
         guard let pip = pipController else { return }
+        Logger.shared.log("[PlayerVC.PiP] button tap state active=\(pip.isPictureInPictureActive) possible=\(pip.isPictureInPicturePossible) supported=\(pip.isPictureInPictureSupported) isVLC=\(isVLCPlayer)", type: "Player")
         if pip.isPictureInPictureActive {
             Logger.shared.log("[PlayerVC.PiP] stopping PiP from button", type: "Player")
             pip.stopPictureInPicture()
         } else if pip.isPictureInPicturePossible {
             Logger.shared.log("[PlayerVC.PiP] starting PiP from button", type: "Player")
+            prepareVlcPiPBridgeForStart(trigger: "button")
             pip.startPictureInPicture()
         } else {
-            Logger.shared.log("[PlayerVC.PiP] start blocked: PiP not possible", type: "Player")
+            Logger.shared.log("[PlayerVC.PiP] start blocked: PiP not possible active=\(pip.isPictureInPictureActive) possible=\(pip.isPictureInPicturePossible) supported=\(pip.isPictureInPictureSupported)", type: "Player")
         }
     }
 
@@ -3196,8 +3205,10 @@ extension PlayerViewController: PiPControllerDelegate {
                 return
             }
             guard let pip = self.pipController else { return }
+            Logger.shared.log("[PlayerVC.PiP] background check active=\(pip.isPictureInPictureActive) possible=\(pip.isPictureInPicturePossible) supported=\(pip.isPictureInPictureSupported) isVLC=\(self.isVLCPlayer)", type: "Player")
             if pip.isPictureInPicturePossible && !pip.isPictureInPictureActive {
                 self.logMPV("Entering background; starting PiP")
+                self.prepareVlcPiPBridgeForStart(trigger: "background")
                 pip.startPictureInPicture()
             } else {
                 Logger.shared.log("[PlayerVC.PiP] background auto-start not triggered possible=\(pip.isPictureInPicturePossible) active=\(pip.isPictureInPictureActive)", type: "Player")

@@ -96,6 +96,10 @@ struct PlayerSettingsView: View {
     @StateObject private var accentColorManager = AccentColorManager.shared
     @StateObject private var store = PlayerSettingsStore()
     @Environment(\.dismiss) private var dismiss
+    @State private var subtitleTextColorName: String = "White"
+    @State private var subtitleStrokeColorName: String = "Black"
+    @State private var subtitleStrokeWidth: Double = 1.0
+    @State private var subtitleFontSizePresetName: String = "Medium"
     
     var body: some View {
         List {
@@ -357,7 +361,18 @@ struct PlayerSettingsView: View {
 
                             Spacer()
 
+#if os(tvOS)
+                            Picker("", selection: subtitleStrokeWidthBinding) {
+                                Text("0.0").tag(0.0)
+                                Text("0.5").tag(0.5)
+                                Text("1.0").tag(1.0)
+                                Text("1.5").tag(1.5)
+                                Text("2.0").tag(2.0)
+                            }
+                            .pickerStyle(.menu)
+#else
                             Stepper("", value: subtitleStrokeWidthBinding, in: 0.0...2.0, step: 0.5)
+#endif
                         }
 
                         HStack {
@@ -423,6 +438,9 @@ struct PlayerSettingsView: View {
             }
         }
         .navigationTitle("Media Player")
+        .onAppear {
+            refreshVLCSubtitleStyleStateFromDefaults()
+        }
     }
     
     private func getLanguageName(_ code: String) -> String {
@@ -451,11 +469,9 @@ struct PlayerSettingsView: View {
 
     private var subtitleTextColorBinding: Binding<String> {
         Binding(
-            get: {
-                let current = loadSubtitleColor(forKey: "subtitles_foregroundColor", defaultColor: .white)
-                return subtitleTextColorOptions.first(where: { $0.color.isEqual(current) })?.name ?? "White"
-            },
+            get: { subtitleTextColorName },
             set: { selectedName in
+                subtitleTextColorName = selectedName
                 if let selected = subtitleTextColorOptions.first(where: { $0.name == selectedName })?.color {
                     saveSubtitleColor(selected, forKey: "subtitles_foregroundColor")
                 }
@@ -465,11 +481,9 @@ struct PlayerSettingsView: View {
 
     private var subtitleStrokeColorBinding: Binding<String> {
         Binding(
-            get: {
-                let current = loadSubtitleColor(forKey: "subtitles_strokeColor", defaultColor: .black)
-                return subtitleStrokeColorOptions.first(where: { $0.color.isEqual(current) })?.name ?? "Black"
-            },
+            get: { subtitleStrokeColorName },
             set: { selectedName in
+                subtitleStrokeColorName = selectedName
                 if let selected = subtitleStrokeColorOptions.first(where: { $0.name == selectedName })?.color {
                     saveSubtitleColor(selected, forKey: "subtitles_strokeColor")
                 }
@@ -479,11 +493,11 @@ struct PlayerSettingsView: View {
 
     private var subtitleStrokeWidthBinding: Binding<Double> {
         Binding(
-            get: {
-                let saved = UserDefaults.standard.double(forKey: "subtitles_strokeWidth")
-                return saved >= 0 ? saved : 1.0
-            },
-            set: { UserDefaults.standard.set($0, forKey: "subtitles_strokeWidth") }
+            get: { subtitleStrokeWidth },
+            set: {
+                subtitleStrokeWidth = $0
+                UserDefaults.standard.set($0, forKey: "subtitles_strokeWidth")
+            }
         )
     }
 
@@ -501,16 +515,9 @@ struct PlayerSettingsView: View {
 
     private var subtitleFontSizePresetBinding: Binding<String> {
         Binding(
-            get: {
-                let saved = UserDefaults.standard.double(forKey: "subtitles_fontSize")
-                let resolved = saved > 0 ? saved : 34.0
-                if let exact = subtitleFontSizeOptions.first(where: { abs($0.size - resolved) < 0.01 }) {
-                    return exact.name
-                }
-                let nearest = subtitleFontSizeOptions.min(by: { abs($0.size - resolved) < abs($1.size - resolved) })
-                return nearest?.name ?? "Medium"
-            },
+            get: { subtitleFontSizePresetName },
             set: { selectedName in
+                subtitleFontSizePresetName = selectedName
                 if let selected = subtitleFontSizeOptions.first(where: { $0.name == selectedName }) {
                     UserDefaults.standard.set(selected.size, forKey: "subtitles_fontSize")
                 }
@@ -537,5 +544,26 @@ struct PlayerSettingsView: View {
         saveSubtitleColor(.black, forKey: "subtitles_strokeColor")
         UserDefaults.standard.set(1.0, forKey: "subtitles_strokeWidth")
         UserDefaults.standard.set(34.0, forKey: "subtitles_fontSize")
+        refreshVLCSubtitleStyleStateFromDefaults()
+    }
+
+    private func refreshVLCSubtitleStyleStateFromDefaults() {
+        let textColor = loadSubtitleColor(forKey: "subtitles_foregroundColor", defaultColor: .white)
+        subtitleTextColorName = subtitleTextColorOptions.first(where: { $0.color.isEqual(textColor) })?.name ?? "White"
+
+        let strokeColor = loadSubtitleColor(forKey: "subtitles_strokeColor", defaultColor: .black)
+        subtitleStrokeColorName = subtitleStrokeColorOptions.first(where: { $0.color.isEqual(strokeColor) })?.name ?? "Black"
+
+        let savedStrokeWidth = UserDefaults.standard.double(forKey: "subtitles_strokeWidth")
+        subtitleStrokeWidth = savedStrokeWidth >= 0 ? savedStrokeWidth : 1.0
+
+        let savedFontSize = UserDefaults.standard.double(forKey: "subtitles_fontSize")
+        let resolvedFontSize = savedFontSize > 0 ? savedFontSize : 34.0
+        if let exact = subtitleFontSizeOptions.first(where: { abs($0.size - resolvedFontSize) < 0.01 }) {
+            subtitleFontSizePresetName = exact.name
+        } else {
+            let nearest = subtitleFontSizeOptions.min(by: { abs($0.size - resolvedFontSize) < abs($1.size - resolvedFontSize) })
+            subtitleFontSizePresetName = nearest?.name ?? "Medium"
+        }
     }
 }
