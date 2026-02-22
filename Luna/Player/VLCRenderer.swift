@@ -60,6 +60,7 @@ final class VLCRenderer: NSObject {
     private var currentPlaybackSpeed: Double = 1.0
     private var progressEventCount: Int = 0
     private var lastProgressDiagnosticLogAt: CFTimeInterval = 0
+    private var currentSubtitleStyle: SubtitleStyle = .default
     
     weak var delegate: VLCRendererDelegate?
     
@@ -256,6 +257,9 @@ final class VLCRenderer: NSObject {
 
             // Keep reconnect enabled for flaky hosts
             media.addOption(":http-reconnect=true")
+
+            // Apply subtitle styling options (best effort; depends on libvlc text renderer support)
+            self.applySubtitleStyleOptions(to: media)
 
             // Reduce buffering while keeping resume/start reasonably responsive
             media.addOption(":network-caching=12000")  // ~12s
@@ -508,6 +512,50 @@ final class VLCRenderer: NSObject {
     func clearSubtitleCache() {
         // VLC handles subtitle caching internally
     }
+
+    func applySubtitleStyle(_ style: SubtitleStyle) {
+        currentSubtitleStyle = style
+        eventQueue.async { [weak self] in
+            guard let self else { return }
+
+            if let media = self.currentMedia {
+                self.applySubtitleStyleOptions(to: media)
+            }
+
+            // Best-effort live re-apply: toggle current subtitle track to force renderer refresh.
+            if let player = self.mediaPlayer {
+                let currentTrack = player.currentVideoSubTitleIndex
+                if currentTrack >= 0 {
+                    player.currentVideoSubTitleIndex = -1
+                    player.currentVideoSubTitleIndex = currentTrack
+                }
+            }
+        }
+    }
+
+    private func applySubtitleStyleOptions(to media: VLCMedia) {
+        let foregroundHex = vlcHexRGB(currentSubtitleStyle.foregroundColor)
+        let strokeHex = vlcHexRGB(currentSubtitleStyle.strokeColor)
+        let fontSize = max(12, Int(round(currentSubtitleStyle.fontSize)))
+        let outline = max(0, Int(round(currentSubtitleStyle.strokeWidth * 2.0)))
+
+        media.addOption(":freetype-color=0x\(foregroundHex)")
+        media.addOption(":freetype-outline-color=0x\(strokeHex)")
+        media.addOption(":freetype-outline-thickness=\(outline)")
+        media.addOption(":freetype-fontsize=\(fontSize)")
+    }
+
+    private func vlcHexRGB(_ color: UIColor) -> String {
+        var r: CGFloat = 1
+        var g: CGFloat = 1
+        var b: CGFloat = 1
+        var a: CGFloat = 1
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let ri = max(0, min(255, Int(round(r * 255))))
+        let gi = max(0, min(255, Int(round(g * 255))))
+        let bi = max(0, min(255, Int(round(b * 255))))
+        return String(format: "%02X%02X%02X", ri, gi, bi)
+    }
     
     func getSubtitleTracksDetailed() -> [(Int, String)] {
         return getSubtitleTracks()
@@ -545,6 +593,19 @@ final class VLCRenderer: NSObject {
     
     func togglePlayPause() {
         togglePause()
+    }
+
+    func setPictureInPictureActive(_ active: Bool) {
+        eventQueue.async { [weak self] in
+            guard let self, let player = self.mediaPlayer else { return }
+            if active {
+                player.drawable = self.displayLayer
+                Logger.shared.log("[VLCRenderer] PiP active: routed drawable to sample buffer display layer", type: "Player")
+            } else {
+                player.drawable = self.vlcView
+                Logger.shared.log("[VLCRenderer] PiP inactive: routed drawable back to VLC view", type: "Player")
+            }
+        }
     }
 
     // MARK: - Event Handlers
@@ -738,11 +799,13 @@ final class VLCRenderer {
     func refreshSubtitleOverlay() { }
     func loadExternalSubtitles(urls: [String]) { }
     func clearSubtitleCache() { }
+    func applySubtitleStyle(_ style: SubtitleStyle) { }
     func getAvailableSubtitles() -> [String] { [] }
     func enableAutoSubtitles(_ enable: Bool) { }
     func setPreferredAudioLanguage(_ language: String) { }
     func setAnimeAudioLanguage(_ language: String) { }
     func togglePlayPause() { }
+    func setPictureInPictureActive(_ active: Bool) { }
     var isPausedState: Bool { true }
     weak var delegate: VLCRendererDelegate?
 }

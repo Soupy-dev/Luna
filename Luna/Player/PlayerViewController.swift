@@ -554,6 +554,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             vlc.clearSubtitleCache()
         }
     }
+
+    private func rendererSetPictureInPictureActive(_ active: Bool) {
+        if let vlc = vlcRenderer {
+            vlc.setPictureInPictureActive(active)
+        }
+    }
+
+    private func rendererApplySubtitleStyle(_ style: SubtitleStyle) {
+        if let vlc = vlcRenderer {
+            vlc.applySubtitleStyle(style)
+        }
+    }
     
     private func rendererIsPausedState() -> Bool {
         if let vlc = vlcRenderer {
@@ -713,7 +725,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         
         pipController = PiPController(sampleBufferDisplayLayer: displayLayer)
         pipController?.delegate = self
-        pipButton.isHidden = isVLCPlayer || !(pipController?.isPictureInPictureSupported ?? false)
+        pipButton.isHidden = !(pipController?.isPictureInPictureSupported ?? false)
         
         showControlsTemporarily()
         
@@ -765,10 +777,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         
-        // Only update displayLayer frame when using MPV
-        if vlcRenderer == nil {
-            displayLayer.frame = videoContainer.bounds
-        }
+        displayLayer.frame = videoContainer.bounds
         
         if let gradientLayer = controlsOverlayView.layer.sublayers?.first(where: { $0.name == "gradientLayer" }) {
             gradientLayer.frame = controlsOverlayView.bounds
@@ -880,31 +889,28 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func setupLayout() {
         view.addSubview(videoContainer)
         
-        // Only add displayLayer for MPV; VLC uses its own UIView rendering
-        if vlcRenderer == nil {
-            displayLayer.frame = videoContainer.bounds
-            // Keep full video visible; avoid cropping for downloaded media
-            displayLayer.videoGravity = .resizeAspect
-            displayLayer.isOpaque = true
+        // Keep the sample-buffer layer attached for MPV playback and VLC PiP handoff
+        displayLayer.frame = videoContainer.bounds
+        // Keep full video visible; avoid cropping for downloaded media
+        displayLayer.videoGravity = .resizeAspect
+        displayLayer.isOpaque = (vlcRenderer == nil)
 #if compiler(>=6.0)
-            if #available(iOS 26.0, tvOS 26.0, *) {
-                displayLayer.preferredDynamicRange = .automatic
-            } else {
+        if #available(iOS 26.0, tvOS 26.0, *) {
+            displayLayer.preferredDynamicRange = .automatic
+        } else {
 #if !os(tvOS)
-                if #available(iOS 17.0, *) {
-                    displayLayer.wantsExtendedDynamicRangeContent = true
-                }
-#endif
-            }
-#elseif !os(tvOS)
             if #available(iOS 17.0, *) {
                 displayLayer.wantsExtendedDynamicRangeContent = true
             }
 #endif
-            displayLayer.backgroundColor = UIColor.black.cgColor
-            
-            videoContainer.layer.addSublayer(displayLayer)
         }
+#elseif !os(tvOS)
+        if #available(iOS 17.0, *) {
+            displayLayer.wantsExtendedDynamicRangeContent = true
+        }
+#endif
+        displayLayer.backgroundColor = (vlcRenderer == nil) ? UIColor.black.cgColor : UIColor.clear.cgColor
+        videoContainer.layer.addSublayer(displayLayer)
         
         // Add VLC rendering view FIRST (before all UI elements) so it renders behind controls
         if let vlc = vlcRenderer {
@@ -943,8 +949,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         brightnessContainer.contentView.addSubview(brightnessIcon)
     #endif
 
-        pipButton.isHidden = false
-        
         NSLayoutConstraint.activate([
             videoContainer.topAnchor.constraint(equalTo: view.topAnchor),
             videoContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -1397,6 +1401,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func updateCurrentSubtitleAppearance() {
+        rendererApplySubtitleStyle(SubtitleStyle(
+            foregroundColor: subtitleModel.foregroundColor,
+            strokeColor: subtitleModel.strokeColor,
+            strokeWidth: subtitleModel.strokeWidth,
+            fontSize: subtitleModel.fontSize,
+            isVisible: subtitleModel.isVisible
+        ))
+
         if subtitleModel.isVisible && currentSubtitleIndex < subtitleURLs.count {
             loadCurrentSubtitle()
             return
@@ -2704,13 +2716,18 @@ extension PlayerViewController: VLCRendererDelegate {
 // MARK: - PiP Support
 extension PlayerViewController: PiPControllerDelegate {
     func pipController(_ controller: PiPController, willStartPictureInPicture: Bool) {
+        rendererSetPictureInPictureActive(true)
         pipController?.updatePlaybackState()
     }
     func pipController(_ controller: PiPController, didStartPictureInPicture: Bool) {
         pipController?.updatePlaybackState()
     }
-    func pipController(_ controller: PiPController, willStopPictureInPicture: Bool) { }
-    func pipController(_ controller: PiPController, didStopPictureInPicture: Bool) { }
+    func pipController(_ controller: PiPController, willStopPictureInPicture: Bool) {
+        rendererSetPictureInPictureActive(false)
+    }
+    func pipController(_ controller: PiPController, didStopPictureInPicture: Bool) {
+        rendererSetPictureInPictureActive(false)
+    }
     func pipController(_ controller: PiPController, restoreUserInterfaceForPictureInPictureStop completionHandler: @escaping (Bool) -> Void) {
         if presentedViewController != nil {
             dismiss(animated: true) { completionHandler(true) }
