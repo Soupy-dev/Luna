@@ -684,8 +684,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if isLikelyBlackPiPFrame(pixelBuffer) {
             vlcPiPBlackFrameCount += 1
             if let lastGood = vlcPiPLastGoodPixelBuffer {
-                bufferForPiP = lastGood
-                logVlcPiPBridgeWarning("capture produced black frame; reusing last good frame blackCount=\(vlcPiPBlackFrameCount)")
+                _ = lastGood
+                logVlcPiPBridgeWarning("capture produced black frame; keeping last displayed frame blackCount=\(vlcPiPBlackFrameCount)")
+                return
             } else {
                 vlcPiPFrameBridgeDroppedFrames += 1
                 logVlcPiPBridgeWarning("capture produced black frame with no fallback")
@@ -2961,6 +2962,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         Logger.shared.log("[PlayerVC.PiP] button tap state active=\(pip.isPictureInPictureActive) possible=\(pip.isPictureInPicturePossible) supported=\(pip.isPictureInPictureSupported) isVLC=\(isVLCPlayer)", type: "Player")
         if pip.isPictureInPictureActive {
             Logger.shared.log("[PlayerVC.PiP] stopping PiP from button", type: "Player")
+            if isVLCPlayer {
+                stopVlcPiPFrameBridge()
+            }
             pip.stopPictureInPicture()
         } else if pip.isPictureInPicturePossible {
             Logger.shared.log("[PlayerVC.PiP] starting PiP from button", type: "Player")
@@ -3267,6 +3271,21 @@ extension PlayerViewController: VLCRendererDelegate {
 
 // MARK: - PiP Support
 extension PlayerViewController: PiPControllerDelegate {
+    private func setVLCInlineVideoHiddenForPiP(_ isHidden: Bool) {
+        guard isVLCPlayer, let vlcView = vlcRenderer?.getRenderingView() else { return }
+        vlcView.isHidden = isHidden
+        vlcView.alpha = isHidden ? 0.0 : 1.0
+
+        if isHidden {
+            vlcSubtitleOverlayLabel.isHidden = true
+            vlcSubtitleOverlayLabel.alpha = 0.0
+        } else {
+            updateVLCSubtitleOverlay(for: cachedPosition)
+        }
+
+        Logger.shared.log("[PlayerVC.PiP] inline VLC video hidden=\(isHidden)", type: "Player")
+    }
+
     func pipController(_ controller: PiPController, willStartPictureInPicture: Bool) {
         Logger.shared.log("[PlayerVC.PiP] delegate willStart isVLC=\(isVLCPlayer) possible=\(controller.isPictureInPicturePossible)", type: "Player")
         if isVLCPlayer {
@@ -3276,8 +3295,13 @@ extension PlayerViewController: PiPControllerDelegate {
     }
     func pipController(_ controller: PiPController, didStartPictureInPicture: Bool) {
         Logger.shared.log("[PlayerVC.PiP] delegate didStart success=\(didStartPictureInPicture) isVLC=\(isVLCPlayer)", type: "Player")
-        if isVLCPlayer && !didStartPictureInPicture {
-            stopVlcPiPFrameBridge()
+        if isVLCPlayer {
+            if didStartPictureInPicture {
+                setVLCInlineVideoHiddenForPiP(true)
+            } else {
+                stopVlcPiPFrameBridge()
+                setVLCInlineVideoHiddenForPiP(false)
+            }
         }
         pipController?.updatePlaybackState()
     }
@@ -3285,12 +3309,14 @@ extension PlayerViewController: PiPControllerDelegate {
         Logger.shared.log("[PlayerVC.PiP] delegate willStop isVLC=\(isVLCPlayer)", type: "Player")
         if isVLCPlayer {
             stopVlcPiPFrameBridge()
+            setVLCInlineVideoHiddenForPiP(false)
         }
     }
     func pipController(_ controller: PiPController, didStopPictureInPicture: Bool) {
         Logger.shared.log("[PlayerVC.PiP] delegate didStop isVLC=\(isVLCPlayer)", type: "Player")
         if isVLCPlayer {
             stopVlcPiPFrameBridge()
+            setVLCInlineVideoHiddenForPiP(false)
         }
     }
     func pipController(_ controller: PiPController, restoreUserInterfaceForPictureInPictureStop completionHandler: @escaping (Bool) -> Void) {
@@ -3342,6 +3368,9 @@ extension PlayerViewController: PiPControllerDelegate {
             guard let self, let pip = self.pipController else { return }
             if pip.isPictureInPictureActive {
                 self.logMPV("Returning to foreground; stopping PiP")
+                if self.isVLCPlayer {
+                    self.stopVlcPiPFrameBridge()
+                }
                 pip.stopPictureInPicture()
             }
         }
