@@ -354,7 +354,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var isRunning = false  // Track if renderer has been started
     private var pipController: PiPController?
     private var isUsingVlcFrameBridgePiP = false
-    private var vlcPiPFrameDisplayLink: CADisplayLink?
+    private var vlcPiPFrameTimer: DispatchSourceTimer?
+    private let vlcPiPFrameTimerQueue = DispatchQueue(label: "Luna.PlayerVC.VLCPiPFrameTimer")
     private var vlcPiPFrameFormatDescription: CMVideoFormatDescription?
     private var vlcPiPFrameIndex: Int64 = 0
     private var lastVlcPiPBridgeWarningAt: CFTimeInterval = 0
@@ -581,7 +582,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     private func startVlcPiPFrameBridge() {
-        guard isVLCPlayer, vlcPiPFrameDisplayLink == nil else { return }
+        guard isVLCPlayer, vlcPiPFrameTimer == nil else { return }
 
         isUsingVlcFrameBridgePiP = true
         vlcPiPFrameIndex = 0
@@ -594,29 +595,34 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
         displayLayer.flushAndRemoveImage()
 
-        let displayLink = CADisplayLink(target: self, selector: #selector(captureVlcFrameForPiP))
-        if #available(iOS 15.0, tvOS 15.0, *) {
-            displayLink.preferredFrameRateRange = CAFrameRateRange(minimum: 12, maximum: 24, preferred: 24)
-        } else {
-            displayLink.preferredFramesPerSecond = 24
+        let timer = DispatchSource.makeTimerSource(queue: vlcPiPFrameTimerQueue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(42), leeway: .milliseconds(10))
+        timer.setEventHandler { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                self?.captureVlcFrameForPiP()
+            }
         }
-        displayLink.add(to: .main, forMode: .common)
-        vlcPiPFrameDisplayLink = displayLink
-        Logger.shared.log("[PlayerVC.PiP] VLC frame bridge started targetFPS=24", type: "Player")
+        vlcPiPFrameTimer = timer
+        timer.resume()
+        Logger.shared.log("[PlayerVC.PiP] VLC frame bridge started targetFPS=24 pump=timer", type: "Player")
     }
 
     private func stopVlcPiPFrameBridge() {
-        vlcPiPFrameDisplayLink?.invalidate()
-        vlcPiPFrameDisplayLink = nil
+        let pushedFrames = vlcPiPFrameIndex
+        let droppedFrames = vlcPiPFrameBridgeDroppedFrames
+
+        vlcPiPFrameTimer?.cancel()
+        vlcPiPFrameTimer = nil
         vlcPiPFrameFormatDescription = nil
         vlcPiPFrameIndex = 0
+        vlcPiPFrameBridgeDroppedFrames = 0
         isUsingVlcFrameBridgePiP = false
 
         if displayLayer.status == .failed {
             Logger.shared.log("[PlayerVC.PiPBridge] displayLayer failed during stop; flushing", type: "Player")
             displayLayer.flush()
         }
-        Logger.shared.log("[PlayerVC.PiP] VLC frame bridge stopped droppedFrames=\(vlcPiPFrameBridgeDroppedFrames) pushedFrames=\(vlcPiPFrameIndex)", type: "Player")
+        Logger.shared.log("[PlayerVC.PiP] VLC frame bridge stopped droppedFrames=\(droppedFrames) pushedFrames=\(pushedFrames)", type: "Player")
     }
 
     @objc private func captureVlcFrameForPiP() {
@@ -694,6 +700,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
         displayLayer.enqueue(sampleBuffer)
         vlcPiPFrameIndex += 1
+        if vlcPiPFrameIndex % 120 == 0 {
+            Logger.shared.log("[PlayerVC.PiPBridge] enqueue heartbeat pushedFrames=\(vlcPiPFrameIndex) droppedFrames=\(vlcPiPFrameBridgeDroppedFrames) displayStatus=\(displayLayer.status.rawValue) hasError=\(displayLayer.error != nil)", type: "Player")
+        }
     }
 
     private func prepareVlcPiPBridgeForStart(trigger: String) {
