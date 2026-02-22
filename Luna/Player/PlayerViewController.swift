@@ -686,7 +686,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             var keyError: NSError?
             let status = item.asset.statusOfValue(forKey: "availableMediaCharacteristicsWithMediaSelectionOptions", error: &keyError)
             guard status == .loaded else {
-                Logger.shared.log("[PlayerVC.PiPFallback] subtitles metadata load failed status=\(status.rawValue) error=\(keyError?.localizedDescription ?? \"nil\")", type: "Player")
+                Logger.shared.log("[PlayerVC.PiPFallback] subtitles metadata load failed status=\(status.rawValue) error=\(keyError?.localizedDescription ?? "nil")", type: "Player")
                 return
             }
 
