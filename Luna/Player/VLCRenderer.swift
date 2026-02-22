@@ -58,6 +58,8 @@ final class VLCRenderer: NSObject {
     private var isRunning = false
     private var isStopping = false
     private var currentPlaybackSpeed: Double = 1.0
+    private var progressEventCount: Int = 0
+    private var lastProgressDiagnosticLogAt: CFTimeInterval = 0
     
     weak var delegate: VLCRendererDelegate?
     
@@ -83,6 +85,16 @@ final class VLCRenderer: NSObject {
         vlcView.layer.isOpaque = true
         vlcView.clipsToBounds = true
         vlcView.isUserInteractionEnabled = false  // Allow touches to pass through to controls
+    }
+
+    private func ensureAudioSessionActive() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback)
+            try session.setActive(true)
+        } catch {
+            Logger.shared.log("VLCRenderer: Failed to activate AVAudioSession: \(error)", type: "Error")
+        }
     }
     
     /// Return the VLC view to be added to the view hierarchy
@@ -145,12 +157,15 @@ final class VLCRenderer: NSObject {
     func stop() {
         if isStopping { return }
         if !isRunning { return }
+
+        Logger.shared.log("[VLCRenderer.stop] stop requested. paused=\(isPaused) loading=\(isLoading) ready=\(isReadyToSeek)", type: "Player")
         
         isRunning = false
         isStopping = true
 
         eventQueue.async { [weak self] in
             guard let self else { return }
+            NotificationCenter.default.removeObserver(self)
 
             if let player = self.mediaPlayer {
                 player.stop()
@@ -162,10 +177,9 @@ final class VLCRenderer: NSObject {
             self.isPaused = true
             self.isLoading = false
 
-            NotificationCenter.default.removeObserver(self)
-
             // Mark stop completion only after cleanup finishes to prevent reentrancy races
             self.isStopping = false
+            Logger.shared.log("[VLCRenderer.stop] cleanup complete", type: "Player")
         }
     }
     
@@ -243,20 +257,14 @@ final class VLCRenderer: NSObject {
             // Keep reconnect enabled for flaky hosts
             media.addOption(":http-reconnect=true")
 
-            // Reduce buffering to keep CPU/thermal lower while still smoothing HLS
-            media.addOption(":network-caching=20000")  // ~20s
-
-            // Subtitle performance: spread libass work across threads without altering glyph styling
-            media.addOption(":subsdec-threads=4")
-
-            // Playback at high speeds with subtitles: prefer dropping late frames over thermal spikes
-            media.addOption(":drop-late-frames")
-            media.addOption(":skip-frames")
+            // Reduce buffering while keeping resume/start reasonably responsive
+            media.addOption(":network-caching=12000")  // ~12s
 
             self.currentMedia = media
             
             Logger.shared.log("[VLCRenderer.load] Setting media on player and calling play()", type: "Stream")
             player.media = media
+            self.ensureAudioSessionActive()
             player.play()
             Logger.shared.log("[VLCRenderer.load] play() called", type: "Stream")
         }
@@ -274,16 +282,33 @@ final class VLCRenderer: NSObject {
     }
     
     func play() {
-        eventQueue.async { [weak self] in
-            guard let self, let player = self.mediaPlayer else { return }
-            player.play()
+        Logger.shared.log("[VLCRenderer.play] requested. isPaused=\(isPaused) targetRate=\(String(format: "%.2f", currentPlaybackSpeed))", type: "Player")
+        isPaused = false
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.renderer(self, didChangePause: false)
         }
+
+        guard let player = mediaPlayer else { return }
+        ensureAudioSessionActive()
+        player.play()
+        if currentPlaybackSpeed != 1.0 {
+            player.rate = Float(currentPlaybackSpeed)
+        }
+        Logger.shared.log("[VLCRenderer.play] play() called. actualRate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state))", type: "Player")
     }
     
     func pausePlayback() {
-        eventQueue.async { [weak self] in
-            guard let self, let player = self.mediaPlayer else { return }
-            player.pause()
+        Logger.shared.log("[VLCRenderer.pause] requested. isPaused=\(isPaused)", type: "Player")
+        isPaused = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.renderer(self, didChangePause: true)
+        }
+
+        mediaPlayer?.pause()
+        if let player = mediaPlayer {
+            Logger.shared.log("[VLCRenderer.pause] pause() called. rate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state))", type: "Player")
         }
     }
     
@@ -295,6 +320,7 @@ final class VLCRenderer: NSObject {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             let clamped = max(0, seconds)
+            Logger.shared.log("[VLCRenderer.seek] absolute seek requested=\(String(format: "%.2f", seconds)) clamped=\(String(format: "%.2f", clamped))", type: "Player")
 
             // If VLC already knows the duration, seek accurately using normalized position.
             let durationMs = player.media?.length.value?.doubleValue ?? 0
@@ -304,6 +330,7 @@ final class VLCRenderer: NSObject {
                 player.position = Float(normalized)
                 self.cachedDuration = durationSec
                 self.pendingAbsoluteSeek = nil
+                Logger.shared.log("[VLCRenderer.seek] applied with media duration=\(String(format: "%.2f", durationSec)) normalized=\(String(format: "%.4f", normalized))", type: "Player")
                 return
             }
 
@@ -312,11 +339,13 @@ final class VLCRenderer: NSObject {
                 let normalized = min(max(clamped / self.cachedDuration, 0), 1)
                 player.position = Float(normalized)
                 self.pendingAbsoluteSeek = clamped
+                Logger.shared.log("[VLCRenderer.seek] applied via cached duration=\(String(format: "%.2f", self.cachedDuration)) normalized=\(String(format: "%.4f", normalized)) pending=\(String(format: "%.2f", clamped))", type: "Player")
                 return
             }
 
             // Duration unknown: stash the seek request to apply once duration arrives.
             self.pendingAbsoluteSeek = clamped
+            Logger.shared.log("[VLCRenderer.seek] duration unknown, pending seek stored=\(String(format: "%.2f", clamped))", type: "Player")
         }
     }
     
@@ -324,6 +353,7 @@ final class VLCRenderer: NSObject {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             let newTime = self.cachedPosition + seconds
+            Logger.shared.log("[VLCRenderer.seekBy] delta=\(String(format: "%.2f", seconds)) cachedPos=\(String(format: "%.2f", self.cachedPosition)) target=\(String(format: "%.2f", newTime)) state=\(self.describeState(player.state))", type: "Player")
             self.seek(to: newTime)
         }
     }
@@ -332,10 +362,10 @@ final class VLCRenderer: NSObject {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             
-            // Track current speed for thermal optimization
             self.currentPlaybackSpeed = max(0.1, speed)
             
-            player.rate = Float(speed)
+            player.rate = Float(self.currentPlaybackSpeed)
+            Logger.shared.log("[VLCRenderer.setSpeed] requested=\(String(format: "%.2f", speed)) applied=\(String(format: "%.2f", self.currentPlaybackSpeed)) actualRate=\(String(format: "%.2f", Double(player.rate))) state=\(self.describeState(player.state))", type: "Player")
         }
     }
     
@@ -521,12 +551,18 @@ final class VLCRenderer: NSObject {
     
     @objc private func mediaPlayerTimeChanged() {
         guard let player = mediaPlayer else { return }
-        
         let positionMs = player.time.value?.doubleValue ?? 0
         let durationMs = player.media?.length.value?.doubleValue ?? 0
         let position = positionMs / 1000.0
         let duration = durationMs / 1000.0
-        
+        let normalizedPosition = Double(player.position)
+        progressEventCount += 1
+        let now = CACurrentMediaTime()
+
+        if !position.isFinite || !duration.isFinite || !normalizedPosition.isFinite {
+            Logger.shared.log("[VLCRenderer.time] non-finite values: pos=\(position) dur=\(duration) norm=\(normalizedPosition) state=\(describeState(player.state)) rate=\(String(format: "%.2f", Double(player.rate)))", type: "Error")
+        }
+
         cachedPosition = position
         cachedDuration = duration
 
@@ -535,20 +571,26 @@ final class VLCRenderer: NSObject {
             let normalized = min(max(pending / duration, 0), 1)
             player.position = Float(normalized)
             pendingAbsoluteSeek = nil
+            Logger.shared.log("[VLCRenderer.time] applied pending seek pending=\(String(format: "%.2f", pending)) duration=\(String(format: "%.2f", duration)) normalized=\(String(format: "%.4f", normalized))", type: "Player")
         }
 
         // If we were marked loading but playback is progressing, clear loading state
-        if isLoading {
+        if isLoading && position > 0 {
             isLoading = false
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangeLoading: false)
             }
         }
-        
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.delegate?.renderer(self, didUpdatePosition: position, duration: duration)
+        }
+
+        if now - lastProgressDiagnosticLogAt >= 0.5 {
+            lastProgressDiagnosticLogAt = now
+            Logger.shared.log("[VLCRenderer.time] events=\(progressEventCount) pos=\(String(format: "%.2f", position)) dur=\(String(format: "%.2f", duration)) norm=\(String(format: "%.4f", normalizedPosition)) cachedPos=\(String(format: "%.2f", cachedPosition)) cachedDur=\(String(format: "%.2f", cachedDuration)) pending=\(pendingAbsoluteSeek != nil ? "yes" : "no") loading=\(isLoading) paused=\(isPaused) rate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state))", type: "Player")
         }
     }
     
@@ -571,6 +613,7 @@ final class VLCRenderer: NSObject {
             isPaused = false
             isLoading = false
             isReadyToSeek = true
+            Logger.shared.log("[VLCRenderer.state] playing -> paused=false loading=false ready=true rate=\(String(format: "%.2f", Double(player.rate)))", type: "Player")
             
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -581,6 +624,7 @@ final class VLCRenderer: NSObject {
             
         case .paused:
             isPaused = true
+            Logger.shared.log("[VLCRenderer.state] paused", type: "Player")
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangePause: true)
@@ -588,6 +632,7 @@ final class VLCRenderer: NSObject {
             
         case .opening, .buffering:
             isLoading = true
+            Logger.shared.log("[VLCRenderer.state] \(stateLabel) loading=true", type: "Player")
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangeLoading: true)
@@ -596,6 +641,7 @@ final class VLCRenderer: NSObject {
         case .stopped, .ended, .error:
             isPaused = true
             isLoading = false
+            Logger.shared.log("[VLCRenderer.state] \(stateLabel) paused=true loading=false", type: "Player")
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangePause: true)
