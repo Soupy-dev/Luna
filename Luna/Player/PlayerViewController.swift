@@ -711,13 +711,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             Logger.shared.log("Failed to start \(rendererName) renderer: \(error)", type: "Error")
         }
         
-        if let vlc = vlcRenderer {
-            pipController = PiPController(videoCallSourceView: vlc.getRenderingView())
-        } else {
-            pipController = PiPController(sampleBufferDisplayLayer: displayLayer)
-        }
+        pipController = PiPController(sampleBufferDisplayLayer: displayLayer)
         pipController?.delegate = self
-        pipButton.isHidden = !(pipController?.isPictureInPictureSupported ?? false)
+        pipButton.isHidden = isVLCPlayer || !(pipController?.isPictureInPictureSupported ?? false)
         
         showControlsTemporarily()
         

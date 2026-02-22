@@ -25,8 +25,6 @@ protocol PiPControllerDelegate: AnyObject {
 final class PiPController: NSObject {
     private var pipController: AVPictureInPictureController?
     private weak var sampleBufferDisplayLayer: AVSampleBufferDisplayLayer?
-    private weak var videoCallSourceView: UIView?
-    private var videoCallContentViewController: AVPictureInPictureVideoCallViewController?
     
     weak var delegate: PiPControllerDelegate?
     
@@ -46,12 +44,6 @@ final class PiPController: NSObject {
         self.sampleBufferDisplayLayer = sampleBufferDisplayLayer
         super.init()
         setupSampleBufferPictureInPicture()
-    }
-
-    init(videoCallSourceView: UIView) {
-        self.videoCallSourceView = videoCallSourceView
-        super.init()
-        setupVideoCallPictureInPicture()
     }
     
     private func setupSampleBufferPictureInPicture() {
@@ -73,32 +65,6 @@ final class PiPController: NSObject {
         #endif
     }
 
-    private func setupVideoCallPictureInPicture() {
-        guard isPictureInPictureSupported,
-              let sourceView = videoCallSourceView else {
-            return
-        }
-
-        guard #available(iOS 15.0, tvOS 15.0, *) else {
-            return
-        }
-
-        let contentViewController = AVPictureInPictureVideoCallViewController()
-        videoCallContentViewController = contentViewController
-
-        let contentSource = AVPictureInPictureController.ContentSource(
-            activeVideoCallSourceView: sourceView,
-            contentViewController: contentViewController
-        )
-
-        pipController = AVPictureInPictureController(contentSource: contentSource)
-        pipController?.delegate = self
-        pipController?.requiresLinearPlayback = false
-        #if !os(tvOS)
-        pipController?.canStartPictureInPictureAutomaticallyFromInline = true
-        #endif
-    }
-    
     func startPictureInPicture() {
         guard let pipController = pipController,
               pipController.isPictureInPicturePossible else {
