@@ -503,13 +503,13 @@ struct PlayerSettingsView: View {
 
     private var subtitleFontSizeOptions: [(name: String, size: Double)] {
         [
-            ("Very Small", 24.0),
-            ("Small", 30.0),
-            ("Medium", 34.0),
-            ("Large", 38.0),
-            ("Extra Large", 42.0),
-            ("Huge", 46.0),
-            ("Extra Huge", 56.0)
+            ("Very Small", 20.0),
+            ("Small", 24.0),
+            ("Medium", 30.0),
+            ("Large", 34.0),
+            ("Extra Large", 38.0),
+            ("Huge", 42.0),
+            ("Extra Huge", 46.0)
         ]
     }
 
@@ -543,7 +543,7 @@ struct PlayerSettingsView: View {
         saveSubtitleColor(.white, forKey: "subtitles_foregroundColor")
         saveSubtitleColor(.black, forKey: "subtitles_strokeColor")
         UserDefaults.standard.set(1.0, forKey: "subtitles_strokeWidth")
-        UserDefaults.standard.set(34.0, forKey: "subtitles_fontSize")
+        UserDefaults.standard.set(30.0, forKey: "subtitles_fontSize")
         refreshVLCSubtitleStyleStateFromDefaults()
     }
 
@@ -558,7 +558,7 @@ struct PlayerSettingsView: View {
         subtitleStrokeWidth = savedStrokeWidth >= 0 ? savedStrokeWidth : 1.0
 
         let savedFontSize = UserDefaults.standard.double(forKey: "subtitles_fontSize")
-        let resolvedFontSize = savedFontSize > 0 ? savedFontSize : 34.0
+        let resolvedFontSize = savedFontSize > 0 ? savedFontSize : 30.0
         if let exact = subtitleFontSizeOptions.first(where: { abs($0.size - resolvedFontSize) < 0.01 }) {
             subtitleFontSizePresetName = exact.name
         } else {

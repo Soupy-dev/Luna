@@ -360,6 +360,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var vlcPiPFrameIndex: Int64 = 0
     private var lastVlcPiPBridgeWarningAt: CFTimeInterval = 0
     private var vlcPiPFrameBridgeDroppedFrames: Int = 0
+    private var vlcPiPBlackFrameCount: Int = 0
+    private var vlcPiPLastGoodPixelBuffer: CVPixelBuffer?
     private var initialURL: URL?
     private var initialPreset: PlayerPreset?
     private var initialHeaders: [String: String]?
@@ -588,6 +590,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         vlcPiPFrameIndex = 0
         vlcPiPFrameFormatDescription = nil
         vlcPiPFrameBridgeDroppedFrames = 0
+        vlcPiPBlackFrameCount = 0
+        vlcPiPLastGoodPixelBuffer = nil
 
         if displayLayer.status == .failed {
             Logger.shared.log("[PlayerVC.PiPBridge] displayLayer was failed; flushing before start", type: "Player")
@@ -610,19 +614,22 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func stopVlcPiPFrameBridge() {
         let pushedFrames = vlcPiPFrameIndex
         let droppedFrames = vlcPiPFrameBridgeDroppedFrames
+        let blackFrames = vlcPiPBlackFrameCount
 
         vlcPiPFrameTimer?.cancel()
         vlcPiPFrameTimer = nil
         vlcPiPFrameFormatDescription = nil
         vlcPiPFrameIndex = 0
         vlcPiPFrameBridgeDroppedFrames = 0
+        vlcPiPBlackFrameCount = 0
+        vlcPiPLastGoodPixelBuffer = nil
         isUsingVlcFrameBridgePiP = false
 
         if displayLayer.status == .failed {
             Logger.shared.log("[PlayerVC.PiPBridge] displayLayer failed during stop; flushing", type: "Player")
             displayLayer.flush()
         }
-        Logger.shared.log("[PlayerVC.PiP] VLC frame bridge stopped droppedFrames=\(droppedFrames) pushedFrames=\(pushedFrames)", type: "Player")
+        Logger.shared.log("[PlayerVC.PiP] VLC frame bridge stopped droppedFrames=\(droppedFrames) blackFrames=\(blackFrames) pushedFrames=\(pushedFrames)", type: "Player")
     }
 
     @objc private func captureVlcFrameForPiP() {
@@ -648,18 +655,34 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             vlcView.drawHierarchy(in: CGRect(origin: .zero, size: bounds.size), afterScreenUpdates: false)
         }
 
-          guard let cgImage = image.cgImage,
+        guard let cgImage = image.cgImage,
               let pixelBuffer = makePiPPixelBuffer(from: cgImage) else {
             vlcPiPFrameBridgeDroppedFrames += 1
             logVlcPiPBridgeWarning("capture skipped: cgImage/pixelBuffer creation failed")
             return
-          }
+        }
+
+        let bufferForPiP: CVPixelBuffer
+        if isLikelyBlackPiPFrame(pixelBuffer) {
+            vlcPiPBlackFrameCount += 1
+            if let lastGood = vlcPiPLastGoodPixelBuffer {
+                bufferForPiP = lastGood
+                logVlcPiPBridgeWarning("capture produced black frame; reusing last good frame blackCount=\(vlcPiPBlackFrameCount)")
+            } else {
+                vlcPiPFrameBridgeDroppedFrames += 1
+                logVlcPiPBridgeWarning("capture produced black frame with no fallback")
+                return
+            }
+        } else {
+            vlcPiPLastGoodPixelBuffer = pixelBuffer
+            bufferForPiP = pixelBuffer
+        }
 
         if vlcPiPFrameFormatDescription == nil {
             var formatDescription: CMVideoFormatDescription?
             CMVideoFormatDescriptionCreateForImageBuffer(
                 allocator: kCFAllocatorDefault,
-                imageBuffer: pixelBuffer,
+                imageBuffer: bufferForPiP,
                 formatDescriptionOut: &formatDescription
             )
             vlcPiPFrameFormatDescription = formatDescription
@@ -682,7 +705,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         var sampleBuffer: CMSampleBuffer?
         let status = CMSampleBufferCreateReadyWithImageBuffer(
             allocator: kCFAllocatorDefault,
-            imageBuffer: pixelBuffer,
+            imageBuffer: bufferForPiP,
             formatDescription: formatDescription,
             sampleTiming: &timing,
             sampleBufferOut: &sampleBuffer
@@ -701,8 +724,46 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         displayLayer.enqueue(sampleBuffer)
         vlcPiPFrameIndex += 1
         if vlcPiPFrameIndex % 120 == 0 {
-            Logger.shared.log("[PlayerVC.PiPBridge] enqueue heartbeat pushedFrames=\(vlcPiPFrameIndex) droppedFrames=\(vlcPiPFrameBridgeDroppedFrames) displayStatus=\(displayLayer.status.rawValue) hasError=\(displayLayer.error != nil)", type: "Player")
+            Logger.shared.log("[PlayerVC.PiPBridge] enqueue heartbeat pushedFrames=\(vlcPiPFrameIndex) droppedFrames=\(vlcPiPFrameBridgeDroppedFrames) blackFrames=\(vlcPiPBlackFrameCount) displayStatus=\(displayLayer.status.rawValue) hasError=\(displayLayer.error != nil)", type: "Player")
         }
+    }
+
+    private func isLikelyBlackPiPFrame(_ pixelBuffer: CVPixelBuffer) -> Bool {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return false }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        if width <= 0 || height <= 0 || bytesPerRow <= 0 { return false }
+
+        let samplePoints: [(Int, Int)] = [
+            (width / 2, height / 2),
+            (width / 4, height / 4),
+            (width * 3 / 4, height / 4),
+            (width / 4, height * 3 / 4),
+            (width * 3 / 4, height * 3 / 4),
+            (width / 2, height / 4),
+            (width / 2, height * 3 / 4),
+            (width / 4, height / 2),
+            (width * 3 / 4, height / 2)
+        ]
+
+        let ptr = baseAddress.assumingMemoryBound(to: UInt8.self)
+        var brightSamples = 0
+        for (x, y) in samplePoints {
+            let px = max(0, min(width - 1, x))
+            let py = max(0, min(height - 1, y))
+            let offset = py * bytesPerRow + px * 4
+            let b = Int(ptr[offset])
+            let g = Int(ptr[offset + 1])
+            let r = Int(ptr[offset + 2])
+            if max(r, max(g, b)) > 16 {
+                brightSamples += 1
+            }
+        }
+        return brightSamples == 0
     }
 
     private func prepareVlcPiPBridgeForStart(trigger: String) {
@@ -822,7 +883,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 if !isLoading { saveSubtitleSettings() }
             }
         }
-        @Published var fontSize: CGFloat = 34.0 {
+        @Published var fontSize: CGFloat = 30.0 {
             didSet {
                 if !isLoading { saveSubtitleSettings() }
             }
@@ -861,7 +922,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             
             if defaults.object(forKey: "subtitles_fontSize") != nil {
                 let size = CGFloat(defaults.double(forKey: "subtitles_fontSize"))
-                fontSize = size > 0 ? size : 34.0
+                fontSize = size > 0 ? size : 30.0
             }
             
             if let foregroundData = defaults.data(forKey: "subtitles_foregroundColor"),
@@ -1230,7 +1291,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
             vlcSubtitleOverlayLabel.leadingAnchor.constraint(equalTo: progressContainer.leadingAnchor, constant: 12),
             vlcSubtitleOverlayLabel.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor, constant: -12),
-            vlcSubtitleOverlayLabel.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: -18),
+            vlcSubtitleOverlayLabel.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: -6),
             
             subtitleButton.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor, constant: 0),
             subtitleButton.bottomAnchor.constraint(equalTo: progressContainer.topAnchor, constant: -8),
@@ -1593,13 +1654,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let strokeWidthMenu = UIMenu(title: "Stroke Width", image: UIImage(systemName: "lineweight"), children: strokeWidthActions)
         
         let fontSizes: [(String, CGFloat)] = [
-            ("Very Small", 24.0),
-            ("Small", 30.0),
-            ("Medium", 34.0),
-            ("Large", 38.0),
-            ("Extra Large", 42.0),
-            ("Huge", 46.0),
-            ("Extra Huge", 56.0)
+            ("Very Small", 20.0),
+            ("Small", 24.0),
+            ("Medium", 30.0),
+            ("Large", 34.0),
+            ("Extra Large", 38.0),
+            ("Huge", 42.0),
+            ("Extra Huge", 46.0)
         ]
         
         let fontSizeActions = fontSizes.map { (name, size) in
