@@ -374,16 +374,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var isClosing = false
     private var isRunning = false  // Track if renderer has been started
     private var pipController: PiPController?
-    private var isUsingVlcFrameBridgePiP = false
-    private var vlcPiPFrameTimer: DispatchSourceTimer?
-    private let vlcPiPFrameTimerQueue = DispatchQueue(label: "Luna.PlayerVC.VLCPiPFrameTimer")
-    private var vlcPiPFrameFormatDescription: CMVideoFormatDescription?
-    private var vlcPiPFrameIndex: Int64 = 0
-    private var lastVlcPiPBridgeWarningAt: CFTimeInterval = 0
-    private var vlcPiPFrameBridgeDroppedFrames: Int = 0
-    private var vlcPiPBlackFrameCount: Int = 0
-    private var vlcPiPConsecutiveBlackFrameCount: Int = 0
-    private var vlcPiPLastGoodPixelBuffer: CVPixelBuffer?
     private var initialURL: URL?
     private var initialPreset: PlayerPreset?
     private var initialHeaders: [String: String]?
@@ -837,312 +827,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 #endif
 
-    private func logVlcPiPBridgeWarning(_ message: String) {
-        let now = CACurrentMediaTime()
-        if now - lastVlcPiPBridgeWarningAt >= 1.0 {
-            lastVlcPiPBridgeWarningAt = now
-            Logger.shared.log("[PlayerVC.PiPBridge] \(message)", type: "Player")
-        }
-    }
-
-    private func startVlcPiPFrameBridge() {
-        guard isVLCPlayer, vlcPiPFrameTimer == nil else { return }
-
-        isUsingVlcFrameBridgePiP = true
-        vlcPiPFrameIndex = 0
-        vlcPiPFrameFormatDescription = nil
-        vlcPiPFrameBridgeDroppedFrames = 0
-        vlcPiPBlackFrameCount = 0
-        vlcPiPConsecutiveBlackFrameCount = 0
-        vlcPiPLastGoodPixelBuffer = nil
-
-        if displayLayer.status == .failed {
-            Logger.shared.log("[PlayerVC.PiPBridge] displayLayer was failed; flushing before start", type: "Player")
-            displayLayer.flush()
-        }
-        displayLayer.flushAndRemoveImage()
-
-        let timer = DispatchSource.makeTimerSource(queue: vlcPiPFrameTimerQueue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(42), leeway: .milliseconds(10))
-        timer.setEventHandler { [weak self] in
-            DispatchQueue.main.async { [weak self] in
-                self?.captureVlcFrameForPiP()
-            }
-        }
-        vlcPiPFrameTimer = timer
-        timer.resume()
-        Logger.shared.log("[PlayerVC.PiP] VLC frame bridge started targetFPS=24 pump=timer", type: "Player")
-    }
-
-    private func stopVlcPiPFrameBridge() {
-        guard isUsingVlcFrameBridgePiP || vlcPiPFrameTimer != nil else {
-            Logger.shared.log("[PlayerVC.PiP] VLC frame bridge stop ignored: already stopped", type: "Player")
-            return
-        }
-
-        let pushedFrames = vlcPiPFrameIndex
-        let droppedFrames = vlcPiPFrameBridgeDroppedFrames
-        let blackFrames = vlcPiPBlackFrameCount
-        let consecutiveBlackFrames = vlcPiPConsecutiveBlackFrameCount
-
-        vlcPiPFrameTimer?.cancel()
-        vlcPiPFrameTimer = nil
-        vlcPiPFrameFormatDescription = nil
-        vlcPiPFrameIndex = 0
-        vlcPiPFrameBridgeDroppedFrames = 0
-        vlcPiPBlackFrameCount = 0
-        vlcPiPConsecutiveBlackFrameCount = 0
-        vlcPiPLastGoodPixelBuffer = nil
-        isUsingVlcFrameBridgePiP = false
-
-        if displayLayer.status == .failed {
-            Logger.shared.log("[PlayerVC.PiPBridge] displayLayer failed during stop; flushing", type: "Player")
-            displayLayer.flush()
-        }
-        Logger.shared.log("[PlayerVC.PiP] VLC frame bridge stopped droppedFrames=\(droppedFrames) blackFrames=\(blackFrames) consecutiveBlack=\(consecutiveBlackFrames) pushedFrames=\(pushedFrames)", type: "Player")
-    }
-
-    @objc private func captureVlcFrameForPiP() {
-        guard isUsingVlcFrameBridgePiP else { return }
-        guard let vlcView = vlcRenderer?.getRenderingView() else {
-            vlcPiPFrameBridgeDroppedFrames += 1
-            logVlcPiPBridgeWarning("capture skipped: missing VLC render view")
-            return
-        }
-
-        let bounds = vlcView.bounds.integral
-        guard bounds.width > 0, bounds.height > 0 else {
-            vlcPiPFrameBridgeDroppedFrames += 1
-            logVlcPiPBridgeWarning("capture skipped: invalid bounds=\(bounds)")
-            return
-        }
-
-        guard let image = captureVlcViewImage(vlcView, bounds: bounds) else {
-            vlcPiPFrameBridgeDroppedFrames += 1
-            logVlcPiPBridgeWarning("capture skipped: unable to capture VLC view image")
-            return
-        }
-
-        guard let cgImage = image.cgImage,
-              let pixelBuffer = makePiPPixelBuffer(from: cgImage) else {
-            vlcPiPFrameBridgeDroppedFrames += 1
-            logVlcPiPBridgeWarning("capture skipped: cgImage/pixelBuffer creation failed")
-            return
-        }
-
-        let bufferForPiP: CVPixelBuffer
-        if isLikelyBlackPiPFrame(pixelBuffer) {
-            vlcPiPBlackFrameCount += 1
-            vlcPiPConsecutiveBlackFrameCount += 1
-            if let lastGood = vlcPiPLastGoodPixelBuffer {
-                if vlcPiPConsecutiveBlackFrameCount <= 24 {
-                    bufferForPiP = lastGood
-                    logVlcPiPBridgeWarning("capture produced black frame; reusing last good frame blackCount=\(vlcPiPBlackFrameCount) streak=\(vlcPiPConsecutiveBlackFrameCount)")
-                } else {
-                    bufferForPiP = pixelBuffer
-                    logVlcPiPBridgeWarning("black-frame streak exceeded fallback window; enqueueing live frame blackCount=\(vlcPiPBlackFrameCount) streak=\(vlcPiPConsecutiveBlackFrameCount)")
-                }
-            } else {
-                vlcPiPFrameBridgeDroppedFrames += 1
-                logVlcPiPBridgeWarning("capture produced black frame with no fallback")
-                return
-            }
-        } else {
-            vlcPiPConsecutiveBlackFrameCount = 0
-            vlcPiPLastGoodPixelBuffer = pixelBuffer
-            bufferForPiP = pixelBuffer
-        }
-
-        if vlcPiPFrameFormatDescription == nil {
-            var formatDescription: CMVideoFormatDescription?
-            CMVideoFormatDescriptionCreateForImageBuffer(
-                allocator: kCFAllocatorDefault,
-                imageBuffer: bufferForPiP,
-                formatDescriptionOut: &formatDescription
-            )
-            vlcPiPFrameFormatDescription = formatDescription
-        }
-
-        guard let formatDescription = vlcPiPFrameFormatDescription else {
-            vlcPiPFrameBridgeDroppedFrames += 1
-            logVlcPiPBridgeWarning("capture skipped: missing video format description")
-            return
-        }
-
-        let timescale: CMTimeScale = 24
-        let pts = CMTime(value: vlcPiPFrameIndex, timescale: timescale)
-        var timing = CMSampleTimingInfo(
-            duration: CMTime(value: 1, timescale: timescale),
-            presentationTimeStamp: pts,
-            decodeTimeStamp: .invalid
-        )
-
-        var sampleBuffer: CMSampleBuffer?
-        let status = CMSampleBufferCreateReadyWithImageBuffer(
-            allocator: kCFAllocatorDefault,
-            imageBuffer: bufferForPiP,
-            formatDescription: formatDescription,
-            sampleTiming: &timing,
-            sampleBufferOut: &sampleBuffer
-        )
-
-        guard status == noErr, let sampleBuffer else {
-            vlcPiPFrameBridgeDroppedFrames += 1
-            logVlcPiPBridgeWarning("capture skipped: CMSampleBuffer creation status=\(status)")
-            return
-        }
-
-        if displayLayer.status == .failed {
-            logVlcPiPBridgeWarning("displayLayer status failed during enqueue; flushing")
-            displayLayer.flush()
-        }
-        displayLayer.enqueue(sampleBuffer)
-        vlcPiPFrameIndex += 1
-        if vlcPiPFrameIndex % 120 == 0 {
-            Logger.shared.log("[PlayerVC.PiPBridge] enqueue heartbeat pushedFrames=\(vlcPiPFrameIndex) droppedFrames=\(vlcPiPFrameBridgeDroppedFrames) blackFrames=\(vlcPiPBlackFrameCount) consecutiveBlack=\(vlcPiPConsecutiveBlackFrameCount) displayStatus=\(displayLayer.status.rawValue) hasError=\(displayLayer.error != nil)", type: "Player")
-        }
-    }
-
-    private func captureVlcViewImage(_ vlcView: UIView, bounds: CGRect) -> UIImage? {
-        let renderFormat = UIGraphicsImageRendererFormat.default()
-        renderFormat.opaque = true
-        renderFormat.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: bounds.size, format: renderFormat)
-
-        let hierarchyImage = renderer.image { _ in
-            vlcView.drawHierarchy(in: CGRect(origin: .zero, size: bounds.size), afterScreenUpdates: false)
-        }
-
-        if let hierarchyCG = hierarchyImage.cgImage,
-           let hierarchyBuffer = makePiPPixelBuffer(from: hierarchyCG),
-           !isLikelyBlackPiPFrame(hierarchyBuffer) {
-            return hierarchyImage
-        }
-
-        let presentationLayerImage = renderer.image { context in
-            if let presentation = vlcView.layer.presentation() {
-                presentation.render(in: context.cgContext)
-            } else {
-                vlcView.layer.render(in: context.cgContext)
-            }
-        }
-
-        if let presentationCG = presentationLayerImage.cgImage,
-           let presentationBuffer = makePiPPixelBuffer(from: presentationCG),
-           !isLikelyBlackPiPFrame(presentationBuffer) {
-            logVlcPiPBridgeWarning("capture fallback recovered frame via presentationLayer.render")
-            return presentationLayerImage
-        }
-
-        let layerImage = renderer.image { context in
-            vlcView.layer.render(in: context.cgContext)
-        }
-
-        if let layerCG = layerImage.cgImage,
-           let layerBuffer = makePiPPixelBuffer(from: layerCG),
-           !isLikelyBlackPiPFrame(layerBuffer) {
-            logVlcPiPBridgeWarning("capture fallback recovered frame via layer.render")
-            return layerImage
-        }
-
-        logVlcPiPBridgeWarning("capture produced black frame across hierarchy/presentation/layer paths")
-
-        return hierarchyImage
-    }
-
-    private func isLikelyBlackPiPFrame(_ pixelBuffer: CVPixelBuffer) -> Bool {
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-
-        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return false }
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        if width <= 0 || height <= 0 || bytesPerRow <= 0 { return false }
-
-        let samplePoints: [(Int, Int)] = [
-            (width / 2, height / 2),
-            (width / 4, height / 4),
-            (width * 3 / 4, height / 4),
-            (width / 4, height * 3 / 4),
-            (width * 3 / 4, height * 3 / 4),
-            (width / 2, height / 4),
-            (width / 2, height * 3 / 4),
-            (width / 4, height / 2),
-            (width * 3 / 4, height / 2)
-        ]
-
-        let ptr = baseAddress.assumingMemoryBound(to: UInt8.self)
-        var brightSamples = 0
-        var sampleLumaTotal = 0
-        for (x, y) in samplePoints {
-            let px = max(0, min(width - 1, x))
-            let py = max(0, min(height - 1, y))
-            let offset = py * bytesPerRow + px * 4
-            let b = Int(ptr[offset])
-            let g = Int(ptr[offset + 1])
-            let r = Int(ptr[offset + 2])
-            let luma = (54 * r + 183 * g + 19 * b) / 256
-            sampleLumaTotal += luma
-            if max(r, max(g, b)) > 4 {
-                brightSamples += 1
-            }
-        }
-        let averageLuma = sampleLumaTotal / max(samplePoints.count, 1)
-        return brightSamples == 0 && averageLuma <= 3
-    }
-
-    private func prepareVlcPiPBridgeForStart(trigger: String) {
-        guard isVLCPlayer else { return }
-        startVlcPiPFrameBridge()
-        captureVlcFrameForPiP()
-        Logger.shared.log("[PlayerVC.PiP] prewarmed VLC bridge trigger=\(trigger) pushedFrames=\(vlcPiPFrameIndex) droppedFrames=\(vlcPiPFrameBridgeDroppedFrames) displayStatus=\(displayLayer.status.rawValue) hasError=\(displayLayer.error != nil)", type: "Player")
-    }
-
-    private func makePiPPixelBuffer(from cgImage: CGImage) -> CVPixelBuffer? {
-        let width = cgImage.width
-        let height = cgImage.height
-
-        let attrs: [CFString: Any] = [
-            kCVPixelBufferCGImageCompatibilityKey: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey: true,
-            kCVPixelBufferIOSurfacePropertiesKey: [:]
-        ]
-
-        var pixelBuffer: CVPixelBuffer?
-        let createStatus = CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            width,
-            height,
-            kCVPixelFormatType_32BGRA,
-            attrs as CFDictionary,
-            &pixelBuffer
-        )
-        guard createStatus == kCVReturnSuccess, let pixelBuffer else { return nil }
-
-        CVPixelBufferLockBaseAddress(pixelBuffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
-
-        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-
-        guard let context = CGContext(
-            data: baseAddress,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else { return nil }
-
-        context.clear(CGRect(x: 0, y: 0, width: width, height: height))
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return pixelBuffer
-    }
-
     private func rendererApplySubtitleStyle(_ style: SubtitleStyle) {
         if let vlc = vlcRenderer {
             vlc.applySubtitleStyle(style)
@@ -1178,6 +862,23 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
     private var isVLCPictureInPictureEnabled: Bool {
         return isVLCPlayer && Settings.shared.enableVLCPictureInPicture
+    }
+
+    private var isLikelyUnsupportedForVLCAVPlayerPiP: Bool {
+        guard isVLCPlayer, let url = initialURL else { return false }
+        let unsupportedExtensions: Set<String> = ["mkv", "avi", "flv", "wmv", "m2ts", "ts"]
+        let ext = url.pathExtension.lowercased()
+        if unsupportedExtensions.contains(ext) {
+            return true
+        }
+
+        return false
+    }
+
+    private func updatePiPButtonVisibility() {
+        let pipSupported = PiPController.isPictureInPictureSupported
+        let hideForVLC = isVLCPlayer && (!isVLCPictureInPictureEnabled || isLikelyUnsupportedForVLCAVPlayerPiP)
+        pipButton.isHidden = !pipSupported || hideForVLC
     }
 
     private var shouldShowTopErrorBanner: Bool {
@@ -1333,8 +1034,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
         pipController = PiPController(sampleBufferDisplayLayer: displayLayer)
         pipController?.delegate = self
-        let pipSupported = PiPController.isPictureInPictureSupported
-        pipButton.isHidden = !pipSupported || (isVLCPlayer && !isVLCPictureInPictureEnabled)
+        updatePiPButtonVisibility()
         
         showControlsTemporarily()
         
@@ -1443,6 +1143,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         logMPV("load url=\(url.absoluteString) preset=\(preset.id.rawValue) headers=\(headers?.count ?? 0)")
         initialURL = url
         initialHeaders = headers
+        updatePiPButtonVisibility()
         let mediaInfoLabel: String = {
             guard let info = mediaInfo else { return "nil" }
             switch info {
@@ -1714,6 +1415,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func setupActions() {
         centerPlayPauseButton.addTarget(self, action: #selector(centerPlayPauseTapped), for: .touchUpInside)
         closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        pipButton.addTarget(self, action: #selector(pipTouchDown), for: .touchDown)
         pipButton.addTarget(self, action: #selector(pipTapped), for: .touchUpInside)
         skipBackwardButton.addTarget(self, action: #selector(skipBackwardTapped), for: .touchUpInside)
         skipForwardButton.addTarget(self, action: #selector(skipForwardTapped), for: .touchUpInside)
@@ -1739,6 +1441,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             videoContainer.addGestureRecognizer(tap)
         }
         containerTapGesture = tap
+    }
+
+    @objc private func pipTouchDown() {
+        Logger.shared.log("[PlayerVC.PiP] touchDown hidden=\(pipButton.isHidden) alpha=\(String(format: "%.2f", pipButton.alpha)) enabled=\(pipButton.isEnabled) controlsVisible=\(controlsVisible)", type: "Player")
     }
     
     private func setupHoldGesture() {
@@ -3285,6 +2991,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
         if isVLCPlayer {
 #if canImport(AVKit) && !os(tvOS)
+            if isLikelyUnsupportedForVLCAVPlayerPiP {
+                Logger.shared.log("[PlayerVC.PiP] VLC fallback blocked: stream likely unsupported by AVPlayer PiP ext=\(initialURL?.pathExtension.lowercased() ?? "")", type: "Player")
+                return
+            }
             logVLCPiPFallbackState("buttonTap", trigger: "button")
             let active = vlcPiPFallbackController?.isPictureInPictureActive ?? false
             let possible = vlcPiPFallbackController?.isPictureInPicturePossible ?? PiPController.isPictureInPictureSupported
@@ -3302,13 +3012,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         Logger.shared.log("[PlayerVC.PiP] button tap state active=\(pip.isPictureInPictureActive) possible=\(pip.isPictureInPicturePossible) supported=\(pip.isPictureInPictureSupported) isVLC=\(isVLCPlayer)", type: "Player")
         if pip.isPictureInPictureActive {
             Logger.shared.log("[PlayerVC.PiP] stopping PiP from button", type: "Player")
-            if isVLCPlayer {
-                stopVlcPiPFrameBridge()
-            }
             pip.stopPictureInPicture()
         } else if pip.isPictureInPicturePossible {
             Logger.shared.log("[PlayerVC.PiP] starting PiP from button", type: "Player")
-            prepareVlcPiPBridgeForStart(trigger: "button")
             pip.startPictureInPicture()
         } else {
             Logger.shared.log("[PlayerVC.PiP] start blocked: PiP not possible active=\(pip.isPictureInPictureActive) possible=\(pip.isPictureInPicturePossible) supported=\(pip.isPictureInPictureSupported)", type: "Player")
@@ -3627,9 +3333,6 @@ extension PlayerViewController: PiPControllerDelegate {
 
     func pipController(_ controller: PiPController, willStartPictureInPicture: Bool) {
         Logger.shared.log("[PlayerVC.PiP] delegate willStart isVLC=\(isVLCPlayer) possible=\(controller.isPictureInPicturePossible)", type: "Player")
-        if isVLCPlayer {
-            startVlcPiPFrameBridge()
-        }
         pipController?.updatePlaybackState()
     }
     func pipController(_ controller: PiPController, didStartPictureInPicture: Bool) {
@@ -3638,7 +3341,6 @@ extension PlayerViewController: PiPControllerDelegate {
             if didStartPictureInPicture {
                 setVLCInlineVideoHiddenForPiP(true)
             } else {
-                stopVlcPiPFrameBridge()
                 setVLCInlineVideoHiddenForPiP(false)
             }
         }
@@ -3647,14 +3349,12 @@ extension PlayerViewController: PiPControllerDelegate {
     func pipController(_ controller: PiPController, willStopPictureInPicture: Bool) {
         Logger.shared.log("[PlayerVC.PiP] delegate willStop isVLC=\(isVLCPlayer)", type: "Player")
         if isVLCPlayer {
-            stopVlcPiPFrameBridge()
             setVLCInlineVideoHiddenForPiP(false)
         }
     }
     func pipController(_ controller: PiPController, didStopPictureInPicture: Bool) {
         Logger.shared.log("[PlayerVC.PiP] delegate didStop isVLC=\(isVLCPlayer)", type: "Player")
         if isVLCPlayer {
-            stopVlcPiPFrameBridge()
             setVLCInlineVideoHiddenForPiP(false)
         }
     }
@@ -3693,6 +3393,10 @@ extension PlayerViewController: PiPControllerDelegate {
 
             if self.isVLCPlayer {
 #if canImport(AVKit) && !os(tvOS)
+                if self.isLikelyUnsupportedForVLCAVPlayerPiP {
+                    Logger.shared.log("[PlayerVC.PiP] background auto-start blocked: stream likely unsupported by AVPlayer PiP ext=\(self.initialURL?.pathExtension.lowercased() ?? "")", type: "Player")
+                    return
+                }
                 let active = self.vlcPiPFallbackController?.isPictureInPictureActive ?? false
                 Logger.shared.log("[PlayerVC.PiP] VLC fallback background check active=\(active)", type: "Player")
                 if !active {
@@ -3706,7 +3410,6 @@ extension PlayerViewController: PiPControllerDelegate {
             Logger.shared.log("[PlayerVC.PiP] background check active=\(pip.isPictureInPictureActive) possible=\(pip.isPictureInPicturePossible) supported=\(pip.isPictureInPictureSupported) isVLC=\(self.isVLCPlayer)", type: "Player")
             if pip.isPictureInPicturePossible && !pip.isPictureInPictureActive {
                 self.logMPV("Entering background; starting PiP")
-                self.prepareVlcPiPBridgeForStart(trigger: "background")
                 pip.startPictureInPicture()
             } else {
                 Logger.shared.log("[PlayerVC.PiP] background auto-start not triggered possible=\(pip.isPictureInPicturePossible) active=\(pip.isPictureInPictureActive)", type: "Player")
@@ -3726,9 +3429,6 @@ extension PlayerViewController: PiPControllerDelegate {
             guard let pip = self.pipController else { return }
             if pip.isPictureInPictureActive {
                 self.logMPV("Returning to foreground; stopping PiP")
-                if self.isVLCPlayer {
-                    self.stopVlcPiPFrameBridge()
-                }
                 pip.stopPictureInPicture()
             }
         }
