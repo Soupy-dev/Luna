@@ -427,7 +427,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let likelyToKeepUp = currentItem?.isPlaybackLikelyToKeepUp ?? false
         let itemError = currentItem?.error?.localizedDescription ?? "nil"
         let playerError = vlcPiPFallbackPlayer?.error?.localizedDescription ?? "nil"
-        Logger.shared.log("[PlayerVC.PiPFallback] state label=\(label) trigger=\(triggerText) \(vlcPiPFallbackSourceDescriptor()) headers=\(initialHeaders?.count ?? 0) hasController=\(hasController) active=\(controllerActive) possible=\(controllerPossible) hasLayer=\(hasPlayerLayer) rate=\(String(format: \"%.2f\", playerRate)) timeControl=\(timeControl) itemStatus=\(itemStatus) keepUp=\(likelyToKeepUp) retries=\(vlcPiPFallbackStartRetriesRemaining) itemError=\(itemError) playerError=\(playerError)", type: "Player")
+        Logger.shared.log("[PlayerVC.PiPFallback] state label=\(label) trigger=\(triggerText) \(vlcPiPFallbackSourceDescriptor()) headers=\(initialHeaders?.count ?? 0) hasController=\(hasController) active=\(controllerActive) possible=\(controllerPossible) hasLayer=\(hasPlayerLayer) rate=\(String(format: "%.2f", playerRate)) timeControl=\(timeControl) itemStatus=\(itemStatus) keepUp=\(likelyToKeepUp) retries=\(vlcPiPFallbackStartRetriesRemaining) itemError=\(itemError) playerError=\(playerError)", type: "Player")
     }
 #endif
     
@@ -764,7 +764,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         vlcPiPFallbackStartRetryWorkItem?.cancel()
         vlcPiPFallbackStartRetriesRemaining = 8
 
-        Logger.shared.log("[PlayerVC.PiPFallback] start requested trigger=\(trigger) seek=\(String(format: \"%.2f\", startTime)) rate=\(String(format: \"%.2f\", speed)) possibleNow=\(controller.isPictureInPicturePossible)", type: "Player")
+        Logger.shared.log("[PlayerVC.PiPFallback] start requested trigger=\(trigger) seek=\(String(format: "%.2f", startTime)) rate=\(String(format: "%.2f", speed)) possibleNow=\(controller.isPictureInPicturePossible)", type: "Player")
         logVLCPiPFallbackState("startPrepared", trigger: trigger)
         attemptStartVLCPiPFallbackController(trigger: trigger)
     }
