@@ -109,7 +109,7 @@ struct ModulesSearchResultsSheet: View {
 
     private var displayTitle: String {
         if let episode = selectedEpisode {
-            if animeSeasonTitle != nil {
+            if isAnimeContent || animeSeasonTitle != nil {
                 return "\(animeEffectiveTitle) E\(episode.episodeNumber)"
             }
             return "\(effectiveTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
@@ -119,6 +119,9 @@ struct ModulesSearchResultsSheet: View {
     
     private var episodeSeasonInfo: String {
         guard let episode = selectedEpisode else { return "" }
+        if isAnimeContent || animeSeasonTitle != nil {
+            return "E\(episode.episodeNumber)"
+        }
         return "S\(episode.seasonNumber)E\(episode.episodeNumber)"
     }
     
