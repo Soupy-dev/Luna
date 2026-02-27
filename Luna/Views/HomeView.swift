@@ -518,6 +518,13 @@ struct ContinueWatchingCard: View {
     @State private var showingSearchResults = false
     @State private var showingDetails = false
 
+    // Anime metadata resolved from TMDB + AniList (mirrors MediaDetailView logic)
+    @State private var isAnimeContent = false
+    @State private var animeSeasonTitle: String? = nil
+    @State private var originalTitle: String? = nil
+    @State private var isMetadataReady = false
+    @State private var pendingOpenSheet = false
+
     private var cardWidth: CGFloat { isTvOS ? 380 : 260 }
     private var cardHeight: CGFloat { isTvOS ? 220 : 146 }
     private var logoMaxWidth: CGFloat { isTvOS ? 200 : 140 }
@@ -525,6 +532,15 @@ struct ContinueWatchingCard: View {
 
     private var displayTitle: String {
         title.isEmpty ? item.title : title
+    }
+
+    /// Title to pass to the search sheet – uses the AniList season title for anime, matching MediaDetailView's logic
+    private var searchSheetTitle: String {
+        if isAnimeContent, !item.isMovie,
+           let seasonTitle = animeSeasonTitle {
+            return seasonTitle
+        }
+        return displayTitle
     }
 
     private var selectedEpisodeForSearch: TMDBEpisode? {
@@ -568,7 +584,11 @@ struct ContinueWatchingCard: View {
 
     var body: some View {
         Button {
-            showingSearchResults = true
+            if isMetadataReady {
+                showingSearchResults = true
+            } else {
+                pendingOpenSheet = true
+            }
         } label: {
             ZStack(alignment: .bottomLeading) {
                 ZStack {
@@ -662,15 +682,15 @@ struct ContinueWatchingCard: View {
         }
         .sheet(isPresented: $showingSearchResults) {
             ModulesSearchResultsSheet(
-                mediaTitle: displayTitle,
-                seasonTitleOverride: nil,
-                originalTitle: nil,
+                mediaTitle: searchSheetTitle,
+                seasonTitleOverride: isAnimeContent ? animeSeasonTitle : nil,
+                originalTitle: originalTitle,
                 isMovie: item.isMovie,
-                isAnimeContent: false,
+                isAnimeContent: isAnimeContent,
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: item.tmdbId,
-                animeSeasonTitle: nil,
-                posterPath: nil
+                animeSeasonTitle: isAnimeContent ? "anime" : nil,
+                posterPath: item.posterURL
             )
         }
         .contextMenu {
@@ -735,8 +755,9 @@ struct ContinueWatchingCard: View {
             if item.isMovie {
                 async let detailsTask = tmdbService.getMovieDetails(id: item.tmdbId)
                 async let imagesTask = tmdbService.getMovieImages(id: item.tmdbId, preferredLanguage: selectedLanguage)
+                async let romajiTask = tmdbService.getRomajiTitle(for: "movie", id: item.tmdbId)
 
-                let (details, images) = try await (detailsTask, imagesTask)
+                let (details, images, romaji) = try await (detailsTask, imagesTask, romajiTask)
 
                 await MainActor.run {
                     self.title = details.title
@@ -744,21 +765,94 @@ struct ContinueWatchingCard: View {
                     if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
                         self.logoURL = logo.fullURL
                     }
+                    self.originalTitle = romaji
+                    self.isAnimeContent = false
                     self.isLoaded = true
+                    self.isMetadataReady = true
+                    if self.pendingOpenSheet {
+                        self.pendingOpenSheet = false
+                        self.showingSearchResults = true
+                    }
                 }
             } else {
+                // Fetch TMDB details, images, and romaji title in parallel
                 async let detailsTask = tmdbService.getTVShowDetails(id: item.tmdbId)
                 async let imagesTask = tmdbService.getTVShowImages(id: item.tmdbId, preferredLanguage: selectedLanguage)
+                async let romajiTask = tmdbService.getRomajiTitle(for: "tv", id: item.tmdbId)
 
-                let (details, images) = try await (detailsTask, imagesTask)
+                let (details, images, romaji) = try await (detailsTask, imagesTask, romajiTask)
 
+                // Anime detection: same logic as MediaDetailView
+                let isJapanese = details.originCountry?.contains("JP") ?? false
+                let isAnimation = details.genres.contains { $0.id == 16 }
+                let detectedAsAnime = isJapanese && isAnimation
+
+                // Set visual details immediately
                 await MainActor.run {
                     self.title = details.name
                     self.backdropURL = details.fullBackdropURL ?? details.fullPosterURL ?? item.posterURL
                     if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
                         self.logoURL = logo.fullURL
                     }
+                    self.originalTitle = romaji
                     self.isLoaded = true
+                }
+
+                if detectedAsAnime {
+                    // Fetch AniList data for correct season title mapping
+                    do {
+                        let animeData = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
+                            title: details.name,
+                            tmdbShowId: details.id,
+                            tmdbService: tmdbService,
+                            tmdbShowPoster: details.fullPosterURL,
+                            token: nil
+                        )
+
+                        // Register AniList season IDs for tracker sync (same as MediaDetailView)
+                        let seasonMappings = animeData.seasons.map { (seasonNumber: $0.seasonNumber, anilistId: $0.anilistId) }
+                        TrackerManager.shared.registerAniListAnimeData(tmdbId: details.id, seasons: seasonMappings)
+
+                        // Find the season title for the episode the user was watching
+                        let matchedSeasonTitle: String? = {
+                            guard let sn = item.seasonNumber else { return animeData.seasons.first?.title }
+                            return animeData.seasons.first(where: { $0.seasonNumber == sn })?.title
+                                ?? animeData.seasons.first?.title
+                        }()
+
+                        await MainActor.run {
+                            self.isAnimeContent = true
+                            self.animeSeasonTitle = matchedSeasonTitle
+                            self.isMetadataReady = true
+                            if self.pendingOpenSheet {
+                                self.pendingOpenSheet = false
+                                self.showingSearchResults = true
+                            }
+                        }
+
+                        Logger.shared.log("ContinueWatchingCard: Resolved anime metadata for \(details.name), seasonTitle=\(matchedSeasonTitle ?? "nil")", type: "AniList")
+                    } catch {
+                        // AniList fetch failed – still mark as anime but without season title
+                        Logger.shared.log("ContinueWatchingCard: AniList fetch failed for \(details.name): \(error.localizedDescription)", type: "AniList")
+                        await MainActor.run {
+                            self.isAnimeContent = true
+                            self.isMetadataReady = true
+                            if self.pendingOpenSheet {
+                                self.pendingOpenSheet = false
+                                self.showingSearchResults = true
+                            }
+                        }
+                    }
+                } else {
+                    // Not anime – metadata is ready
+                    await MainActor.run {
+                        self.isAnimeContent = false
+                        self.isMetadataReady = true
+                        if self.pendingOpenSheet {
+                            self.pendingOpenSheet = false
+                            self.showingSearchResults = true
+                        }
+                    }
                 }
             }
         } catch {
@@ -768,6 +862,11 @@ struct ContinueWatchingCard: View {
                 }
                 self.backdropURL = item.posterURL
                 self.isLoaded = true
+                self.isMetadataReady = true
+                if self.pendingOpenSheet {
+                    self.pendingOpenSheet = false
+                    self.showingSearchResults = true
+                }
             }
         }
     }

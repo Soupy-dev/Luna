@@ -17,6 +17,8 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
     let textColor: Color
     let emptyColor: Color
     let height: CGFloat
+    /// Normalized 0-1 skip segment ranges to render as yellow overlays.
+    let segments: [(start: Double, end: Double)]
     let onEditingChanged: (Bool) -> Void
     
     @State private var localRealProgress: T = 0
@@ -34,6 +36,7 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
         textColor: Color,
         emptyColor: Color,
         height: CGFloat,
+        segments: [(start: Double, end: Double)] = [],
         onEditingChanged: @escaping (Bool) -> Void
     ) {
         self._value = value
@@ -43,6 +46,7 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
         self.textColor = textColor
         self.emptyColor = emptyColor
         self.height = height
+        self.segments = segments
         self.onEditingChanged = onEditingChanged
     }
     
@@ -52,13 +56,23 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
                 Color.clear
                     .allowsHitTesting(false)
                 VStack(spacing: 8) {
-                    ZStack(alignment: .center) {
-                        ZStack(alignment: .center) {
-                            Capsule()
-                                .fill(.ultraThinMaterial)
-                        }
-                        .clipShape(Capsule())
+                    ZStack(alignment: .leading) {
+                        // Background capsule
+                        Capsule()
+                            .fill(.ultraThinMaterial)
 
+                        // Yellow skip-segment overlays
+                        ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
+                            let segStart = CGFloat(max(0, min(seg.start, 1)))
+                            let segEnd = CGFloat(max(0, min(seg.end, 1)))
+                            let segWidth = max((segEnd - segStart) * bounds.size.width, 2)
+                            Rectangle()
+                                .fill(Color.yellow.opacity(0.55))
+                                .frame(width: segWidth)
+                                .offset(x: segStart * bounds.size.width)
+                        }
+
+                        // Progress fill
                         Capsule()
                             .fill(isActive ? activeFillColor : fillColor)
                             .mask({
@@ -75,6 +89,7 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
                                 }
                             })
                     }
+                    .clipShape(Capsule())
                     
                     HStack {
                         Text(timeString(from: progressDuration))

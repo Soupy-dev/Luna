@@ -847,7 +847,7 @@ final class TrackerManager: NSObject, ObservableObject {
 
     // MARK: - Helper Methods
 
-    private func getAniListMediaId(tmdbId: Int) async -> Int? {
+    func getAniListMediaId(tmdbId: Int) async -> Int? {
         // Return cached mapping when available
         if let cachedId = cachedAniListId(for: tmdbId) {
             return cachedId

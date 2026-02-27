@@ -323,6 +323,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     class ProgressModel: ObservableObject {
         @Published var position: Double = 0
         @Published var duration: Double = 1
+        @Published var skipSegments: [(start: Double, end: Double)] = []
     }
     private var progressModel = ProgressModel()
 
@@ -365,6 +366,58 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     var mediaInfo: MediaInfo?
     // Optional override: when true, treat content as anime regardless of tracker mapping
     var isAnimeHint: Bool?
+
+    // MARK: - AniSkip & Next Episode
+    /// Called when the user taps "Next Episode" — passes (seasonNumber, nextEpisodeNumber).
+    var onRequestNextEpisode: ((_ seasonNumber: Int, _ nextEpisodeNumber: Int) -> Void)?
+
+    private var aniSkipSegments: [SkipSegment] = []
+    private var aniSkipFetched = false
+    private var aniSkipAutoSkippedSegments: Set<String> = []
+    private var currentActiveSkipSegment: SkipSegment?
+    private var nextEpisodeButtonShown = false
+
+#if !os(tvOS)
+    private lazy var aniSkipButton: UIButton = {
+        var config = UIButton.Configuration.filled()
+        config.cornerStyle = .capsule
+        config.baseBackgroundColor = UIColor.systemYellow
+        config.baseForegroundColor = UIColor.black
+        config.image = UIImage(systemName: "forward.end.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold))
+        config.imagePadding = 6
+        config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 18)
+        config.title = "Skip Intro"
+        let btn = UIButton(configuration: config)
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.alpha = 0
+        btn.isHidden = true
+        btn.layer.shadowColor = UIColor.black.cgColor
+        btn.layer.shadowOpacity = 0.3
+        btn.layer.shadowOffset = CGSize(width: 0, height: 2)
+        btn.layer.shadowRadius = 4
+        return btn
+    }()
+
+    private lazy var nextEpisodeButton: UIButton = {
+        var config = UIButton.Configuration.filled()
+        config.cornerStyle = .capsule
+        config.baseBackgroundColor = UIColor.white.withAlphaComponent(0.2)
+        config.baseForegroundColor = UIColor.white
+        config.image = UIImage(systemName: "forward.end.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold))
+        config.imagePadding = 6
+        config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 18)
+        config.title = "Next Episode"
+        let btn = UIButton(configuration: config)
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.alpha = 0
+        btn.isHidden = true
+        btn.layer.shadowColor = UIColor.black.cgColor
+        btn.layer.shadowOpacity = 0.3
+        btn.layer.shadowOffset = CGSize(width: 0, height: 2)
+        btn.layer.shadowRadius = 4
+        return btn
+    }()
+#endif
     private var isSeeking = false
     private var cachedDuration: Double = 0
     private var cachedPosition: Double = 0
@@ -1274,6 +1327,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         videoContainer.addSubview(brightnessContainer)
         brightnessContainer.contentView.addSubview(brightnessSlider)
         brightnessContainer.contentView.addSubview(brightnessIcon)
+        if isVLCPlayer {
+            videoContainer.addSubview(aniSkipButton)
+            videoContainer.addSubview(nextEpisodeButton)
+        }
     #endif
 
         NSLayoutConstraint.activate([
@@ -1378,6 +1435,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             brightnessIcon.heightAnchor.constraint(equalToConstant: 20),
             brightnessIcon.widthAnchor.constraint(equalToConstant: 20)
         ])
+        if isVLCPlayer {
+            NSLayoutConstraint.activate([
+                aniSkipButton.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor),
+                aniSkipButton.bottomAnchor.constraint(equalTo: subtitleButton.topAnchor, constant: -12),
+
+                nextEpisodeButton.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor),
+                nextEpisodeButton.bottomAnchor.constraint(equalTo: aniSkipButton.topAnchor, constant: -10)
+            ])
+        }
 #endif
         
         // CRITICAL: After all UI elements are added, ensure VLC view is at the very back
@@ -1408,6 +1474,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         pipButton.addTarget(self, action: #selector(pipTapped), for: .touchUpInside)
         skipBackwardButton.addTarget(self, action: #selector(skipBackwardTapped), for: .touchUpInside)
         skipForwardButton.addTarget(self, action: #selector(skipForwardTapped), for: .touchUpInside)
+#if !os(tvOS)
+        if isVLCPlayer {
+            aniSkipButton.addTarget(self, action: #selector(aniSkipButtonTapped), for: .touchUpInside)
+            nextEpisodeButton.addTarget(self, action: #selector(nextEpisodeButtonTapped), for: .touchUpInside)
+        }
+#endif
         if isVLCPlayer {
             subtitleButton.addTarget(self, action: #selector(subtitleButtonTapped), for: .touchUpInside)
         }
@@ -1972,6 +2044,165 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             return trackerManager.cachedAniListId(for: showId) != nil
         }
     }
+
+    // MARK: - AniSkip Integration (VLC-only)
+
+    private func fetchAniSkipData() {
+        guard isVLCPlayer, !aniSkipFetched, isAnimeContent() else { return }
+        guard case .episode(let showId, let seasonNumber, let episodeNumber, _, _, _) = mediaInfo else { return }
+
+        aniSkipFetched = true
+        let duration = cachedDuration
+
+        // Resolve AniList ID: prefer season-specific, then show-level, then async lookup
+        let seasonId = trackerManager.cachedAniListSeasonId(tmdbId: showId, seasonNumber: seasonNumber)
+        let showLevelId = trackerManager.cachedAniListId(for: showId)
+        let resolvedId = seasonId ?? showLevelId
+
+        Task { [weak self] in
+            guard let self else { return }
+            var anilistId = resolvedId
+
+            if anilistId == nil {
+                anilistId = await self.trackerManager.getAniListMediaId(tmdbId: showId)
+            }
+
+            guard let finalId = anilistId else {
+                Logger.shared.log("AniSkip: No AniList ID found for tmdbId=\(showId) season=\(seasonNumber)", type: "AniSkip")
+                return
+            }
+
+            do {
+                let segments = try await AniSkipService.shared.fetchSkipTimes(
+                    anilistId: finalId,
+                    episodeNumber: episodeNumber,
+                    episodeDuration: duration
+                )
+                await MainActor.run {
+                    self.aniSkipSegments = segments
+                    guard duration > 0 else { return }
+                    self.progressModel.skipSegments = segments.map { seg in
+                        (start: seg.startTime / duration, end: seg.endTime / duration)
+                    }
+                }
+            } catch {
+                Logger.shared.log("AniSkip: Fetch failed for anilistId=\(finalId) ep=\(episodeNumber): \(error.localizedDescription)", type: "Error")
+            }
+        }
+    }
+
+#if !os(tvOS)
+    private func updateAniSkipState(position: Double, duration: Double) {
+        guard isVLCPlayer, !aniSkipSegments.isEmpty, duration > 0 else { return }
+
+        // Find if current position is inside any skip segment (with 1 s tolerance on entry)
+        let activeSegment = aniSkipSegments.first { seg in
+            position >= seg.startTime && position <= seg.endTime
+        }
+
+        if let seg = activeSegment {
+            // Auto-skip if enabled and not yet skipped for this segment
+            let autoSkipEnabled = UserDefaults.standard.bool(forKey: "aniSkipAutoSkip")
+            if autoSkipEnabled, !aniSkipAutoSkippedSegments.contains(seg.uniqueKey) {
+                aniSkipAutoSkippedSegments.insert(seg.uniqueKey)
+                Logger.shared.log("AniSkip: Auto-skipping \(seg.type.rawValue) from \(Int(seg.startTime))s to \(Int(seg.endTime))s", type: "AniSkip")
+                rendererSeek(to: seg.endTime + 1.0)
+                return
+            }
+
+            if currentActiveSkipSegment?.uniqueKey != seg.uniqueKey {
+                currentActiveSkipSegment = seg
+                aniSkipButton.configuration?.title = seg.type.displayLabel
+                showAniSkipButton()
+            }
+        } else {
+            if currentActiveSkipSegment != nil {
+                currentActiveSkipSegment = nil
+                hideAniSkipButton()
+            }
+        }
+    }
+
+    private func updateNextEpisodeState(position: Double, duration: Double) {
+        guard isVLCPlayer, duration > 0 else { return }
+        guard case .episode(_, _, _, _, _, _) = mediaInfo else { return }
+
+        let enabled: Bool
+        if UserDefaults.standard.object(forKey: "showNextEpisodeButton") == nil {
+            enabled = true // default
+        } else {
+            enabled = UserDefaults.standard.bool(forKey: "showNextEpisodeButton")
+        }
+        guard enabled else {
+            if nextEpisodeButtonShown { hideNextEpisodeButton() }
+            return
+        }
+
+        let threshold: Double
+        let savedThreshold = UserDefaults.standard.double(forKey: "nextEpisodeThreshold")
+        threshold = savedThreshold > 0 ? savedThreshold : 0.90
+
+        let progress = position / duration
+        if progress >= threshold, !nextEpisodeButtonShown {
+            showNextEpisodeButton()
+        } else if progress < threshold, nextEpisodeButtonShown {
+            hideNextEpisodeButton()
+        }
+    }
+
+    @objc private func aniSkipButtonTapped() {
+        guard let seg = currentActiveSkipSegment else { return }
+        Logger.shared.log("AniSkip: User tapped skip for \(seg.type.rawValue) → seeking to \(Int(seg.endTime + 1))s", type: "AniSkip")
+        aniSkipAutoSkippedSegments.insert(seg.uniqueKey)
+        rendererSeek(to: seg.endTime + 1.0)
+        currentActiveSkipSegment = nil
+        hideAniSkipButton()
+    }
+
+    @objc private func nextEpisodeButtonTapped() {
+        guard case .episode(_, let seasonNumber, let episodeNumber, _, _, _) = mediaInfo else { return }
+        Logger.shared.log("NextEpisode: User requested S\(seasonNumber)E\(episodeNumber + 1)", type: "Player")
+        onRequestNextEpisode?(seasonNumber, episodeNumber + 1)
+        closeTapped()
+    }
+
+    private func showAniSkipButton() {
+        guard aniSkipButton.isHidden || aniSkipButton.alpha < 1 else { return }
+        aniSkipButton.isHidden = false
+        videoContainer.bringSubviewToFront(aniSkipButton)
+        UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseOut]) {
+            self.aniSkipButton.alpha = 1.0
+        }
+    }
+
+    private func hideAniSkipButton() {
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseIn]) {
+            self.aniSkipButton.alpha = 0
+        } completion: { _ in
+            self.aniSkipButton.isHidden = true
+        }
+    }
+
+    private func showNextEpisodeButton() {
+        guard !nextEpisodeButtonShown else { return }
+        nextEpisodeButtonShown = true
+        nextEpisodeButton.isHidden = false
+        videoContainer.bringSubviewToFront(nextEpisodeButton)
+        UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseOut]) {
+            self.nextEpisodeButton.alpha = 1.0
+        }
+    }
+
+    private func hideNextEpisodeButton() {
+        guard nextEpisodeButtonShown else { return }
+        nextEpisodeButtonShown = false
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseIn]) {
+            self.nextEpisodeButton.alpha = 0
+        } completion: { _ in
+            self.nextEpisodeButton.isHidden = true
+        }
+    }
+#endif
 
     private func isLocalFile() -> Bool {
         return initialURL?.isFileURL == true
@@ -2632,7 +2863,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             @ObservedObject var model: ProgressModel
             var onEditingChanged: (Bool) -> Void
             var body: some View {
-                MusicProgressSlider(value: Binding(get: { model.position }, set: { model.position = $0 }), inRange: 0...max(model.duration, 1.0), activeFillColor: .white, fillColor: .white, textColor: .white.opacity(0.7), emptyColor: .white.opacity(0.3), height: 33, onEditingChanged: onEditingChanged)
+                MusicProgressSlider(
+                    value: Binding(get: { model.position }, set: { model.position = $0 }),
+                    inRange: 0...max(model.duration, 1.0),
+                    activeFillColor: .white,
+                    fillColor: .white,
+                    textColor: .white.opacity(0.7),
+                    emptyColor: .white.opacity(0.3),
+                    height: 33,
+                    segments: model.skipSegments,
+                    onEditingChanged: onEditingChanged
+                )
             }
         }
         
@@ -3063,6 +3304,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 self.updateVLCSubtitleOverlay(for: safePosition)
             }
 
+#if !os(tvOS)
+            if self.isVLCPlayer {
+                self.updateAniSkipState(position: safePosition, duration: safeDuration)
+                self.updateNextEpisodeState(position: safePosition, duration: safeDuration)
+            }
+#endif
+
             // If playback is progressing, force-hide any lingering loading spinner
             if !self.isRendererLoading && (self.loadingIndicator.alpha > 0.0 || self.loadingIndicator.isAnimating) {
                 self.loadingIndicator.stopAnimating()
@@ -3226,6 +3474,9 @@ extension PlayerViewController: VLCRendererDelegate {
                 Logger.shared.log("Resumed VLC playback from \(Int(seekTime))s", type: "Progress")
                 self.pendingSeekTime = nil
             }
+
+            // Fetch AniSkip data once VLC is ready
+            self.fetchAniSkipData()
         }
     }
 

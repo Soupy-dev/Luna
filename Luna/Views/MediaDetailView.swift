@@ -106,6 +106,25 @@ struct MediaDetailView: View {
             }
             updateBookmarkStatus()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .requestNextEpisode)) { notification in
+            guard let userInfo = notification.userInfo,
+                  let tmdbId = userInfo["tmdbId"] as? Int,
+                  tmdbId == searchResult.id,
+                  let seasonNumber = userInfo["seasonNumber"] as? Int,
+                  let episodeNumber = userInfo["episodeNumber"] as? Int else { return }
+
+            // Find the next episode in the current season detail
+            if let episodes = seasonDetail?.episodes,
+               let nextEp = episodes.first(where: { $0.seasonNumber == seasonNumber && $0.episodeNumber == episodeNumber }) {
+                selectedEpisodeForSearch = nextEp
+                // Small delay to ensure any dismissing sheet completes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    showingSearchResults = true
+                }
+            } else {
+                Logger.shared.log("NextEpisode: Could not find S\(seasonNumber)E\(episodeNumber) in loaded season detail for tmdbId=\(tmdbId)", type: "Player")
+            }
+        }
         .onChangeComp(of: libraryManager.collections) { _, _ in
             updateBookmarkStatus()
         }

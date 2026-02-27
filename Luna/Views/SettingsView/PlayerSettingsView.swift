@@ -74,7 +74,19 @@ final class PlayerSettingsStore: ObservableObject {
     @Published var vlcPictureInPictureEnabled: Bool {
         didSet { UserDefaults.standard.set(vlcPictureInPictureEnabled, forKey: "enableVLCPictureInPicture") }
     }
-    
+
+    @Published var aniSkipAutoSkip: Bool {
+        didSet { UserDefaults.standard.set(aniSkipAutoSkip, forKey: "aniSkipAutoSkip") }
+    }
+
+    @Published var showNextEpisodeButton: Bool {
+        didSet { UserDefaults.standard.set(showNextEpisodeButton, forKey: "showNextEpisodeButton") }
+    }
+
+    @Published var nextEpisodeThreshold: Double {
+        didSet { UserDefaults.standard.set(nextEpisodeThreshold, forKey: "nextEpisodeThreshold") }
+    }
+
     init() {
         let savedSpeed = UserDefaults.standard.double(forKey: "holdSpeedPlayer")
         self.holdSpeed = savedSpeed > 0 ? savedSpeed : 2.0
@@ -89,6 +101,18 @@ final class PlayerSettingsStore: ObservableObject {
 
         self.vlcSubtitleEditMenuEnabled = UserDefaults.standard.bool(forKey: "enableVLCSubtitleEditMenu")
         self.vlcPictureInPictureEnabled = UserDefaults.standard.bool(forKey: "enableVLCPictureInPicture")
+
+        self.aniSkipAutoSkip = UserDefaults.standard.bool(forKey: "aniSkipAutoSkip")
+
+        // Default to true if key has never been set
+        if UserDefaults.standard.object(forKey: "showNextEpisodeButton") == nil {
+            self.showNextEpisodeButton = true
+        } else {
+            self.showNextEpisodeButton = UserDefaults.standard.bool(forKey: "showNextEpisodeButton")
+        }
+
+        let savedThreshold = UserDefaults.standard.double(forKey: "nextEpisodeThreshold")
+        self.nextEpisodeThreshold = savedThreshold > 0 ? savedThreshold : 0.90
     }
 }
 
@@ -459,6 +483,79 @@ struct PlayerSettingsView: View {
 
                         Toggle("", isOn: $store.vlcPictureInPictureEnabled)
                             .tint(accentColorManager.currentAccentColor)
+                    }
+                }
+
+                Section(header: Text("AniSkip")) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Auto Skip")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+
+                            Text("Automatically skip intros, outros, and recaps when detected via AniSkip. A skip button is always shown regardless of this setting.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: $store.aniSkipAutoSkip)
+                            .tint(accentColorManager.currentAccentColor)
+                    }
+                }
+
+                Section(header: Text("Next Episode")) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Show Next Episode Button")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+
+                            Text("Display a button near the end of an episode to quickly open stream search for the next episode.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: $store.showNextEpisodeButton)
+                            .tint(accentColorManager.currentAccentColor)
+                    }
+
+                    if store.showNextEpisodeButton {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Appearance Threshold")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+
+                                Text("How far into the episode (%) before the button appears. Default is 90%.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+
+                            Spacer()
+
+                            Text("\(Int(store.nextEpisodeThreshold * 100))%")
+                                .foregroundColor(.secondary)
+                                .font(.subheadline)
+
+#if os(tvOS)
+                            Picker("", selection: $store.nextEpisodeThreshold) {
+                                ForEach(Array(stride(from: 0.50, through: 0.99, by: 0.05)), id: \.self) { value in
+                                    Text("\(Int(value * 100))%").tag(value)
+                                }
+                            }
+                            .pickerStyle(.menu)
+#else
+                            Stepper("", value: $store.nextEpisodeThreshold, in: 0.50...0.99, step: 0.05)
+                                .frame(width: 100)
+#endif
+                        }
                     }
                 }
             }
