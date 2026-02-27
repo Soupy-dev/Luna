@@ -12,8 +12,7 @@ class KanzenEngine: ObservableObject
     private let controller: KanzenRunnerController
     init() {
         let moduleRunner = KanzenModuleRunner()
-        let outputFormatter = KanzenOutputFormatter()
-        self.controller = KanzenRunnerController(moduleRunner: moduleRunner, outputFormatter: outputFormatter)
+        self.controller = KanzenRunnerController(moduleRunner: moduleRunner)
     }
     
     func loadScript(_ script: String) throws {

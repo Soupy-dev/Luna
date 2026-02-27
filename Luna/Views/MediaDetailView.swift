@@ -20,13 +20,10 @@ struct MediaDetailView: View {
     @State private var errorMessage: String?
     @State private var ambientColor: Color = Color.black
     @State private var showFullSynopsis: Bool = false
-    @State private var selectedEpisodeNumber: Int = 1
-    @State private var selectedSeasonIndex: Int = 0
     @State private var synopsis: String = ""
     @State private var isBookmarked: Bool = false
     @State private var showingSearchResults = false
     @State private var showingAddToCollection = false
-    @State private var showingNoServicesAlert = false
     @State private var selectedEpisodeForSearch: TMDBEpisode?
     @State private var romajiTitle: String?
     @State private var logoURL: String?
@@ -41,7 +38,6 @@ struct MediaDetailView: View {
     
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.verticalSizeClass) private var verticalSizeClass
-    @AppStorage("useSolidBackgroundBehindHero") private var useSolidBackgroundBehindHero = false
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
 
     private var headerHeight: CGFloat {
@@ -61,10 +57,6 @@ struct MediaDetailView: View {
 #endif
     }
 
-    private var isCompactLayout: Bool {
-        return verticalSizeClass == .compact
-    }
-    
     private var playButtonText: String {
         if searchResult.isMovie {
             return "Play"
@@ -144,11 +136,6 @@ struct MediaDetailView: View {
         }
         .sheet(isPresented: $showingAddToCollection) {
             AddToCollectionView(searchResult: searchResult)
-        }
-        .alert("No Active Services", isPresented: $showingNoServicesAlert) {
-            Button("OK") { }
-        } message: {
-            Text("You don't have any active services. Please go to the Services tab to download and activate services.")
         }
     }
     

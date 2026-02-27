@@ -9,14 +9,8 @@ import Kingfisher
 
 #if !os(tvOS)
 struct KanzenModuleView: View {
-    @AppStorage("selectedModuleId") private var selectedModuleId: String?
     @EnvironmentObject var moduleManager : ModuleManager
     @State var copySelectedModule: String? = nil
-    private var fallbackCircle: some View {
-        Circle()
-            .fill(Color.black)
-            .frame(width: 60, height: 60)
-    }
     func metaDataInfo(title: String, value: String ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
                     Text(title)

@@ -615,12 +615,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             vlc.loadExternalSubtitles(urls: urls)
         }
     }
-    
-    private func rendererClearSubtitleCache() {
-        if let vlc = vlcRenderer {
-            vlc.clearSubtitleCache()
-        }
-    }
 
     private var vlcSubtitleOverlayBottomConstant: CGFloat {
         if let value = UserDefaults.standard.object(forKey: "vlcSubtitleOverlayBottomConstant") as? Double {
@@ -1174,11 +1168,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if let subs = initialSubtitles, !subs.isEmpty {
             loadSubtitles(subs)
         }
-    }
-    
-    // Convenience wrapper for SwiftUI
-    func loadMedia(url: URL, preset: PlayerPreset, headers: [String: String]? = nil) {
-        load(url: url, preset: preset, headers: headers)
     }
     
     private func prepareSeekToLastPosition(for mediaInfo: MediaInfo) {
@@ -3089,19 +3078,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             ProgressManager.shared.updateMovieProgress(movieId: id, title: title, currentTime: safePosition, totalDuration: safeDuration)
         case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, let showPosterURL, _):
             ProgressManager.shared.updateEpisodeProgress(showId: showId, seasonNumber: seasonNumber, episodeNumber: episodeNumber, currentTime: safePosition, totalDuration: safeDuration, showTitle: showTitle, showPosterURL: showPosterURL)
-        }
-    }
-    
-    private func formatTime(_ seconds: Double) -> String {
-        guard seconds.isFinite && seconds > 0 else { return "00:00" }
-        let total = Int(round(seconds))
-        let s = total % 60
-        let m = (total / 60) % 60
-        let h = total / 3600
-        if h > 0 {
-            return String(format: "%d:%02d:%02d", h, m, s)
-        } else {
-            return String(format: "%02d:%02d", m, s)
         }
     }
 }

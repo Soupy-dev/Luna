@@ -97,15 +97,6 @@ struct EpisodeProgressEntry: Codable, Identifiable {
     }
 }
 
-// Helper for episode resume context
-struct EpisodeProgressSnapshot {
-    let showId: Int
-    let seasonNumber: Int
-    let episodeNumber: Int
-    let progress: Double
-    let lastUpdated: Date
-}
-
 // Continue watching item
 struct ContinueWatchingItem: Identifiable {
     let id: String
@@ -275,18 +266,6 @@ final class ProgressManager: ObservableObject {
         }
         debouncedSave()
     }
-    
-    func updateMoviePoster(movieId: Int, posterURL: String) {
-        accessQueue.async(flags: .barrier) { [weak self] in
-            guard let self = self else { return }
-            if var entry = self.progressData.findMovie(id: movieId) {
-                entry.posterURL = posterURL
-                self.progressData.updateMovie(entry)
-                self.publishCurrentData()
-                self.debouncedSave()
-            }
-        }
-    }
 
     func getMovieProgress(movieId: Int, title: String) -> Double {
         var result: Double = 0.0
@@ -302,46 +281,6 @@ final class ProgressManager: ObservableObject {
             result = self.progressData.findMovie(id: movieId)?.currentTime ?? 0.0
         }
         return result
-    }
-
-    func isMovieWatched(movieId: Int, title: String) -> Bool {
-        var result: Bool = false
-        accessQueue.sync {
-            if let entry = self.progressData.findMovie(id: movieId) {
-                result = entry.isWatched || entry.progress >= 0.85
-            }
-        }
-        return result
-    }
-
-    func markMovieAsWatched(movieId: Int, title: String) {
-        accessQueue.async(flags: .barrier) { [weak self] in
-            guard let self = self else { return }
-            if var entry = self.progressData.findMovie(id: movieId) {
-                entry.isWatched = true
-                entry.currentTime = entry.totalDuration
-                entry.lastUpdated = Date()
-                self.progressData.updateMovie(entry)
-                self.publishCurrentData()
-                Logger.shared.log("Marked movie as watched: \(title)", type: "Progress")
-            }
-        }
-        saveProgressData()
-    }
-
-    func resetMovieProgress(movieId: Int, title: String) {
-        accessQueue.async(flags: .barrier) { [weak self] in
-            guard let self = self else { return }
-            if var entry = self.progressData.findMovie(id: movieId) {
-                entry.currentTime = 0
-                entry.isWatched = false
-                entry.lastUpdated = Date()
-                self.progressData.updateMovie(entry)
-                self.publishCurrentData()
-                Logger.shared.log("Reset movie progress: \(title)", type: "Progress")
-            }
-        }
-        saveProgressData()
     }
 
     // MARK: - Record last service/href used for playback
@@ -430,15 +369,6 @@ final class ProgressManager: ObservableObject {
         }
         debouncedSave()
     }
-    
-    func updateShowMetadata(showId: Int, title: String, posterURL: String?) {
-        accessQueue.async(flags: .barrier) { [weak self] in
-            guard let self = self else { return }
-            self.progressData.updateShowMetadata(showId: showId, title: title, posterURL: posterURL)
-            self.publishCurrentData()
-            self.debouncedSave()
-        }
-    }
 
     func getEpisodeProgress(showId: Int, seasonNumber: Int, episodeNumber: Int) -> Double {
         var result: Double = 0.0
@@ -454,24 +384,6 @@ final class ProgressManager: ObservableObject {
             result = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber)?.currentTime ?? 0.0
         }
         return result
-    }
-
-    /// Returns the most recently updated episode progress for a given show (if any).
-    func latestEpisodeProgress(for showId: Int) -> EpisodeProgressSnapshot? {
-        var snapshot: EpisodeProgressSnapshot? = nil
-        accessQueue.sync {
-            let entries = self.progressData.episodeProgress.filter { $0.showId == showId }
-            if let latest = entries.max(by: { $0.lastUpdated < $1.lastUpdated }) {
-                snapshot = EpisodeProgressSnapshot(
-                    showId: latest.showId,
-                    seasonNumber: latest.seasonNumber,
-                    episodeNumber: latest.episodeNumber,
-                    progress: latest.progress,
-                    lastUpdated: latest.lastUpdated
-                )
-            }
-        }
-        return snapshot
     }
 
     func isEpisodeWatched(showId: Int, seasonNumber: Int, episodeNumber: Int) -> Bool {

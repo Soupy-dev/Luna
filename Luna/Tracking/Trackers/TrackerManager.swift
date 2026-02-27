@@ -20,7 +20,6 @@ final class TrackerManager: NSObject, ObservableObject {
     @Published var authError: String?
 
     private let trackerStateURL: URL
-    private var cancellables = Set<AnyCancellable>()
     #if !os(tvOS)
     private var webAuthSession: ASWebAuthenticationSession?
     #endif
@@ -663,7 +662,6 @@ final class TrackerManager: NSObject, ObservableObject {
 
         // Determine status: COMPLETED if >= 85%, otherwise CURRENT for in-progress
         let status = progress >= 85 ? "COMPLETED" : "CURRENT"
-        _ = ISO8601DateFormatter().string(from: Date())  // Unused in AniList mutation
 
         let mutation = """
         mutation {

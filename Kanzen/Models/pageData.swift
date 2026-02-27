@@ -94,7 +94,7 @@ struct chapterView: View {
                     
                     KFImage(url)
                         .placeholder{
-                            CircularLoader(progress: 0)
+                            CircularLoader()
                         }
                         .resizable()
                         .scaledToFit()

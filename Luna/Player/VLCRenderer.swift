@@ -508,10 +508,6 @@ final class VLCRenderer: NSObject {
             }
         }
     }
-    
-    func clearSubtitleCache() {
-        // VLC handles subtitle caching internally
-    }
 
     func applySubtitleStyle(_ style: SubtitleStyle) {
         currentSubtitleStyle = style
@@ -557,46 +553,9 @@ final class VLCRenderer: NSObject {
         return String(format: "%02X%02X%02X", ri, gi, bi)
     }
     
-    func getSubtitleTracksDetailed() -> [(Int, String)] {
-        return getSubtitleTracks()
-    }
-    
     func getCurrentSubtitleTrackId() -> Int {
         guard let player = mediaPlayer else { return -1 }
         return Int(player.currentVideoSubTitleIndex)
-    }
-    
-    func getAvailableSubtitles() -> [String] {
-        return getSubtitleTracks().map { $0.1 }
-    }
-    
-    // MARK: - Anime Audio & Auto Subtitle Features
-    
-    // These methods are called by VLCPlayer but VLC handles track selection
-    // through the standard track APIs. We keep these for compatibility.
-    
-    func enableAutoSubtitles(_ enable: Bool) {
-        // Auto-subtitle selection is handled through track selection UI
-        // VLC automatically detects and lists all subtitle tracks
-        Logger.shared.log("[VLCRenderer] Auto subtitles \(enable ? "enabled" : "disabled")", type: "Info")
-    }
-    
-    func setPreferredAudioLanguage(_ language: String) {
-        // Store preference for future use, but VLC doesn't auto-select by language
-        Logger.shared.log("[VLCRenderer] Preferred audio language set to: \(language)", type: "Info")
-    }
-    
-    func setAnimeAudioLanguage(_ language: String) {
-        // Store anime audio preference
-        Logger.shared.log("[VLCRenderer] Anime audio language set to: \(language)", type: "Info")
-    }
-    
-    func togglePlayPause() {
-        togglePause()
-    }
-
-    func setPictureInPictureActive(_ active: Bool) {
-        // Intentionally no-op: PiP frame bridging is handled in PlayerViewController.
     }
 
     // MARK: - Event Handlers
@@ -783,20 +742,12 @@ final class VLCRenderer {
     func getCurrentAudioTrackId() -> Int { -1 }
     func setAudioTrack(id: Int) { }
     func getSubtitleTracks() -> [(Int, String)] { [] }
-    func getSubtitleTracksDetailed() -> [(Int, String)] { [] }
     func getCurrentSubtitleTrackId() -> Int { -1 }
     func setSubtitleTrack(id: Int) { }
     func disableSubtitles() { }
     func refreshSubtitleOverlay() { }
     func loadExternalSubtitles(urls: [String]) { }
-    func clearSubtitleCache() { }
     func applySubtitleStyle(_ style: SubtitleStyle) { }
-    func getAvailableSubtitles() -> [String] { [] }
-    func enableAutoSubtitles(_ enable: Bool) { }
-    func setPreferredAudioLanguage(_ language: String) { }
-    func setAnimeAudioLanguage(_ language: String) { }
-    func togglePlayPause() { }
-    func setPictureInPictureActive(_ active: Bool) { }
     var isPausedState: Bool { true }
     weak var delegate: VLCRendererDelegate?
 }

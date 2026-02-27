@@ -329,14 +329,3 @@ struct ModernTextFieldStyle: TextFieldStyle {
             .applyLiquidGlassBackground(cornerRadius: 10)
     }
 }
-
-extension ServiceSetting.SettingType {
-    var displayName: String {
-        switch self {
-        case .string: return "Text"
-        case .bool: return "Boolean"
-        case .int: return "Number"
-        case .float: return "Decimal"
-        }
-    }
-}

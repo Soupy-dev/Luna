@@ -8,7 +8,6 @@
 // circular progress bar
 import SwiftUI
 struct CircularLoader: View {
-    var progress: Double
     @State private var rotation: Double = 0
     var body: some View {
         ZStack {

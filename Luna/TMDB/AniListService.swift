@@ -1,4 +1,4 @@
-import Foundation
+﻿import Foundation
 
 final class AniListService {
     static let shared = AniListService()
@@ -147,41 +147,6 @@ final class AniListService {
             }
     }
     
-    // MARK: - Fetch Anime Details
-
-    /// Fetch minimal anime info (title and cover) by AniList ID
-    func fetchAnimeBasicInfo(anilistId: Int) async throws -> AniListBasicInfo {
-        let query = """
-        query {
-            Media(id: \(anilistId), type: ANIME) {
-                id
-                title { romaji english native }
-                coverImage { large medium }
-            }
-        }
-        """
-
-        struct Response: Codable {
-            let data: DataWrapper
-            struct DataWrapper: Codable { let Media: MediaData? }
-            struct MediaData: Codable {
-                let id: Int
-                let title: AniListAnime.AniListTitle
-                let coverImage: AniListAnime.AniListCoverImage?
-            }
-        }
-
-        let data = try await executeGraphQLQuery(query, token: nil)
-        let decoded = try JSONDecoder().decode(Response.self, from: data)
-        guard let media = decoded.data.Media else {
-            throw NSError(domain: "AniListService", code: -1, userInfo: [NSLocalizedDescriptionKey: "AniList title not found for id \(anilistId)"])
-        }
-
-        let title = AniListTitlePicker.title(from: media.title, preferredLanguageCode: preferredLanguageCode)
-        let cover = media.coverImage?.large ?? media.coverImage?.medium
-        return AniListBasicInfo(id: media.id, title: title, coverImage: cover)
-    }
-    
     /// Fetch full anime details with seasons and episodes from AniList + TMDB
     /// Uses AniList for season structure and sequels, TMDB for episode details
     func fetchAnimeDetailsWithEpisodes(
@@ -326,19 +291,19 @@ final class AniListService {
                 Logger.shared.log("  Edge: type=\(edge.relationType) nodeType=\(edge.node.type ?? "nil") format=\(edge.node.format ?? "nil") title=\(edgeTitle)", type: "AniList")
                 
                 guard allowedRelationTypes.contains(edge.relationType), edge.node.type == "ANIME" else {
-                    Logger.shared.log("    → Skipped: relationType or nodeType mismatch", type: "AniList")
+                    Logger.shared.log("    â†’ Skipped: relationType or nodeType mismatch", type: "AniList")
                     continue
                 }
                 if let format = edge.node.format, !(format == "TV" || format == "TV_SHORT" || format == "ONA") {
-                    Logger.shared.log("    → Skipped: format not TV/TV_SHORT/ONA (\(format))", type: "AniList")
+                    Logger.shared.log("    â†’ Skipped: format not TV/TV_SHORT/ONA (\(format))", type: "AniList")
                     continue
                 }
                 if !seenIds.insert(edge.node.id).inserted {
-                    Logger.shared.log("    → Skipped: already processed", type: "AniList")
+                    Logger.shared.log("    â†’ Skipped: already processed", type: "AniList")
                     continue
                 }
 
-                Logger.shared.log("    → Added sequel: \(edgeTitle)", type: "AniList")
+                Logger.shared.log("    â†’ Added sequel: \(edgeTitle)", type: "AniList")
 
                 // Ensure we have this node's relations for deeper traversal
                 let fullNode: AniListAnime
@@ -567,44 +532,6 @@ final class AniListService {
         
         _ = try await executeGraphQLQuery(mutation, token: token)
     }
-    
-    // MARK: - Search Anime
-    
-    func searchAnime(query: String, token: String?) async throws -> [AniListSearchResult] {
-        let graphQLQuery = """
-        query {
-            Page(perPage: 10) {
-                media(search: "\(query.replacingOccurrences(of: "\"", with: "\\\""))", type: ANIME, sort: POPULARITY_DESC) {
-                    id
-                    title {
-                        romaji
-                        english
-                    }
-                    episodes
-                    coverImage {
-                        medium
-                    }
-                    status
-                }
-            }
-        }
-        """
-        
-        let response = try await executeGraphQLQuery(graphQLQuery, token: token)
-        
-        struct Response: Codable {
-            let data: DataWrapper
-            struct DataWrapper: Codable {
-                let Page: PageData
-                struct PageData: Codable {
-                    let media: [AniListAnime]
-                }
-            }
-        }
-        
-        let result = try JSONDecoder().decode(Response.self, from: response)
-        return result.data.Page.media.map { AniListSearchResult(from: $0, preferredLanguageCode: preferredLanguageCode) }
-    }
 
     // MARK: - Catalog Mapping Helpers
 
@@ -713,7 +640,7 @@ final class AniListService {
 
                     if let bestMatch = bestMatch {
                         let aniTitle = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: langCode)
-                        Logger.shared.log("AniListService: Matched '\(aniTitle)' → TMDB '\(bestMatch.name)' (ID: \(bestMatch.id))", type: "AniList")
+                        Logger.shared.log("AniListService: Matched '\(aniTitle)' â†’ TMDB '\(bestMatch.name)' (ID: \(bestMatch.id))", type: "AniList")
                     }
                     return bestMatch?.asSearchResult
                 }
@@ -837,209 +764,6 @@ final class AniListService {
         return decoded.data.Media
     }
 
-    /// Search for a TV/TV_SHORT anime by title, preferring those formats
-    private func fetchAniListAnimeBySearch(
-        _ title: String,
-        formats: [String],
-        expectedEpisodeCount: Int?,
-        preferredSeasonYear: Int?
-    ) async throws -> AniListAnime? {
-        let query = """
-        query {
-            Page(perPage: 25) {
-                media(search: \"\(title.replacingOccurrences(of: "\"", with: "\\\""))\", type: ANIME, sort: POPULARITY_DESC) {
-                    id
-                    title { romaji english native }
-                    episodes
-                    status
-                    seasonYear
-                    season
-                    format
-                    type
-                    coverImage { large medium }
-                    relations {
-                        edges {
-                            relationType
-                            node {
-                                id
-                                title { romaji english native }
-                                episodes
-                                status
-                                seasonYear
-                                season
-                                format
-                                type
-                                coverImage { large medium }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        """
-
-        struct Response: Codable {
-            let data: DataWrapper
-            struct DataWrapper: Codable {
-                let Page: PageData
-                struct PageData: Codable {
-                    let media: [AniListAnime]
-                }
-            }
-        }
-
-        let data = try await executeGraphQLQuery(query, token: nil)
-        let decoded = try JSONDecoder().decode(Response.self, from: data)
-        
-        // Filter results to only those with the requested formats
-        let allowedFormats = Set(formats)
-        var results = decoded.data.Page.media.filter { allowedFormats.contains($0.format ?? "") }
-        
-        // Log all found results for debugging
-        Logger.shared.log("AniListService: TV search found \(results.count) results (from \(decoded.data.Page.media.count) total)", type: "AniList")
-        for (idx, result) in results.prefix(3).enumerated() {
-            let resultTitle = AniListTitlePicker.title(from: result.title, preferredLanguageCode: preferredLanguageCode)
-            let formatText = result.format ?? "nil"
-            let episodeText = result.episodes ?? 0
-            Logger.shared.log("  [\(idx+1)] ID: \(result.id), Format: \(formatText), Episodes: \(episodeText), Title: \(resultTitle)", type: "AniList")
-        }
-
-        guard !results.isEmpty else { return nil }
- 
-        func normalized(_ value: String) -> String {
-            return value.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
-        }
- 
-        let queryKey = normalized(title)
-        let queryHasPart = queryKey.contains("part")
-        let queryHasSeason = queryKey.contains("season")
-        let queryHasDigits = queryKey.rangeOfCharacter(from: .decimalDigits) != nil
-        let queryHasQualifier = queryHasPart || queryHasSeason || queryHasDigits
-        func titleMatchScore(for anime: AniListAnime) -> Int {
-            let candidates = AniListTitlePicker.titleCandidates(from: anime.title)
-            for candidate in candidates {
-                let candidateKey = normalized(candidate)
-                if candidateKey.contains(queryKey) || queryKey.contains(candidateKey) {
-                    return 120
-                }
-            }
-            return 0
-        }
-
-        func statusScore(_ status: String?) -> Int {
-            switch status ?? "" {
-            case "FINISHED": return 60
-            case "RELEASING": return 40
-            case "NOT_YET_RELEASED": return queryHasQualifier ? -60 : -120
-            default: return 0
-            }
-        }
-
-        func formatScore(for anime: AniListAnime) -> Int {
-            switch anime.format ?? "" {
-            case "TV": return 120
-            case "TV_SHORT": return 60
-            case "ONA": return -40
-            default: return -20
-            }
-        }
- 
-        func seasonYearScore(for anime: AniListAnime) -> Int {
-            guard let expectedYear = preferredSeasonYear, let year = anime.seasonYear else { return 0 }
-            
-            // Exact year match for Season 1 gets massive bonus - this properly handles remakes
-            if expectedYear == year {
-                return 500  // Exact match - strongly prefer this version
-            }
-            
-            // Year difference penalty
-            let diff = abs(expectedYear - year)
-            if diff <= 2 {
-                return 200 - diff * 50  // Within 2 years is still good
-            } else if diff <= 5 {
-                return 100 - diff * 20  // Within 5 years is okay
-            } else {
-                return max(0, 50 - diff * 10)  // More than 5 years apart
-            }
-        }
- 
-        func episodesHintScore(for anime: AniListAnime) -> Int {
-            guard let expected = expectedEpisodeCount, expected > 0 else { return 0 }
-            let candidate = anime.episodes ?? 0
-            if candidate == 0 { return -180 }
-            let diff = abs(expected - candidate)
-            let closeness = max(0, 240 - min(diff, expected) * 3)
-            return closeness
-        }
- 
-        func penalty(for anime: AniListAnime) -> Int {
-            let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode).lowercased()
-            var total = 0
- 
-            if !queryHasPart && title.contains("part") {
-                total += 260
-            }
-            if !queryHasSeason && title.contains("season") {
-                total += 160
-            }
- 
-            if !queryHasDigits {
-                let regex = try? NSRegularExpression(pattern: "\\d+", options: [])
-                let range = NSRange(location: 0, length: title.utf16.count)
-                let digitMatches = regex?.matches(in: title, options: [], range: range) ?? []
- 
-                let nonYearDigits = digitMatches.contains { match in
-                    let matchRange = match.range
-                    guard let swiftRange = Range(matchRange, in: title) else { return false }
-                    let chunk = String(title[swiftRange])
-                    if chunk.count == 4, let year = Int(chunk), (1980...2050).contains(year) {
-                        return false
-                    }
-                    return true
-                }
- 
-                if nonYearDigits {
-                    total += 80
-                }
-            }
- 
-            if !queryHasQualifier, let status = anime.status, status == "NOT_YET_RELEASED" {
-                total += 220
-            }
- 
-            return total
-        }
- 
-        func score(for anime: AniListAnime) -> Int {
-            let episodesScore = (anime.episodes ?? 0) * 6
-            let titleScore = titleMatchScore(for: anime)
- 
-            let exactMatchBonus: Int = {
-                let candidateKey = normalized(AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode))
-                return candidateKey == queryKey ? 200 : 0
-            }()
- 
-            return episodesScore
-                + statusScore(anime.status)
-                + titleScore
-                + exactMatchBonus
-                + formatScore(for: anime)
-                + seasonYearScore(for: anime)
-                + episodesHintScore(for: anime)
-                - penalty(for: anime)
-        }
-
-        let best = results.max { lhs, rhs in
-            return score(for: lhs) < score(for: rhs)
-        }
-
-        if let best = best {
-            let pickedTitle = AniListTitlePicker.title(from: best.title, preferredLanguageCode: preferredLanguageCode)
-            Logger.shared.log("AniListService: Picked TV candidate ID \(best.id) (score: \(score(for: best))) title: \(pickedTitle)", type: "AniList")
-        }
-
-        return best
-    }
 }
 
 // MARK: - Helper Models
@@ -1073,7 +797,7 @@ struct AniListAiringScheduleEntry: Identifiable {
 struct AniListSeasonWithPoster {
     let seasonNumber: Int
     let anilistId: Int             // AniList anime ID for this specific season
-    let title: String              // Full AniList title for this season (e.g., "SPY×FAMILY Season 2")
+    let title: String              // Full AniList title for this season (e.g., "SPYÃ—FAMILY Season 2")
     let episodes: [AniListEpisode]
     let posterUrl: String?
 }
@@ -1084,48 +808,6 @@ struct AniListAnimeWithSeasons {
     let seasons: [AniListSeasonWithPoster]
     let totalEpisodes: Int
     let status: String
-}
-
-struct AniListAnimeWithEpisodes {
-    let id: Int
-    let title: String
-    let episodes: [AniListEpisode]
-    let totalEpisodes: Int
-    let status: String
-}
-
-struct AniListAnimeDetails {
-    let id: Int
-    let title: String
-    let episodes: Int?
-    let status: String
-
-    init(from anime: AniListAnime, preferredLanguageCode: String) {
-        self.id = anime.id
-        self.title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
-        self.episodes = anime.episodes
-        self.status = ""
-    }
-}
-
-struct AniListSearchResult {
-    let id: Int
-    let title: String
-    let episodes: Int?
-    let coverImage: String?
-
-    init(from anime: AniListAnime, preferredLanguageCode: String) {
-        self.id = anime.id
-        self.title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
-        self.episodes = anime.episodes
-        self.coverImage = nil
-    }
-}
-
-struct AniListBasicInfo {
-    let id: Int
-    let title: String
-    let coverImage: String?
 }
 
 // MARK: - AniList Codable Models

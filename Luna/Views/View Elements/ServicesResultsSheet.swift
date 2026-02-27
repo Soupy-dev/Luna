@@ -53,7 +53,6 @@ final class ModulesSearchResultsViewModel: ObservableObject {
     var pendingJSController: JSController?
     var pendingStreamURL: String?
     var pendingHeaders: [String: String]?
-    var pendingDefaultSubtitle: String?
     var pendingServiceHref: String?
     
     init() {
@@ -862,10 +861,6 @@ struct ModulesSearchResultsSheet: View {
         }
     }
     
-    private func getResultCount(for service: Service) -> Int {
-        return viewModel.moduleResults[service.id]?.count ?? 0
-    }
-    
     private func proceedWithSelectedEpisode(_ episode: EpisodeLink) {
         viewModel.showingEpisodePicker = false
         
@@ -1183,7 +1178,6 @@ struct ModulesSearchResultsSheet: View {
         viewModel.pendingHeaders = headers
         viewModel.pendingService = service
         viewModel.pendingServiceHref = serviceHref
-        viewModel.pendingDefaultSubtitle = defaultSubtitle
         viewModel.isFetchingStreams = false
         viewModel.showingSubtitlePicker = true
     }
@@ -1276,8 +1270,7 @@ struct ModulesSearchResultsSheet: View {
             
             if inAppPlayer == "mpv" {
                 let preset = PlayerPreset.presets.first
-                let rawSubtitles: [String]? = subtitle.map { [$0] }
-                var subtitleArray = rawSubtitles
+                let subtitleArray: [String]? = subtitle.map { [$0] }
                 
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil
@@ -1321,9 +1314,6 @@ struct ModulesSearchResultsSheet: View {
                 // VLC uses same PlayerViewController as MPV
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
-
-                let vlcURL = streamURL
-                let vlcHeaders: [String: String]? = finalHeaders
                 
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil
@@ -1335,9 +1325,9 @@ struct ModulesSearchResultsSheet: View {
                 }
                 
                 let pvc = PlayerViewController(
-                    url: vlcURL,
+                    url: streamURL,
                     preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
-                    headers: vlcHeaders,
+                    headers: finalHeaders,
                     subtitles: subtitleArray,
                     mediaInfo: playerMediaInfo
                 )

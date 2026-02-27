@@ -7,7 +7,6 @@
 
 import Foundation
 import SwiftUI
-import Combine
 
 final class HomeViewModel: ObservableObject {
     @Published var catalogResults: [String: [TMDBSearchResult]] = [:]
@@ -15,10 +14,7 @@ final class HomeViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var heroContent: TMDBSearchResult?
     @Published var ambientColor: Color = Color.black
-    @Published var heroLogoURL: String?
     @Published var hasLoadedContent = false
-    
-    private var cancellables = Set<AnyCancellable>()
     
     init() {
         // Init body can be simplified if needed
@@ -229,7 +225,6 @@ final class HomeViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         heroContent = nil
-        heroLogoURL = nil
         hasLoadedContent = false
     }
 }

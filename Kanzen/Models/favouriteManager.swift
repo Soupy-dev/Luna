@@ -52,7 +52,6 @@ class FavouriteManager: ObservableObject {
         
         print("remove favourite Called")
     }
-    func removeAllModuleFavourites(module: ModuleDataContainer){}
     func createFavouriteEntity(module: ModuleDataContainer?, content: Manga)
     {
         print("create favourite called")

@@ -19,12 +19,9 @@ struct SearchView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var searchFilter: SearchFilter = .all
-    @State private var showServiceDownloadAlert = false
-    @State private var serviceDownloadError: String?
     @State private var searchHistory: [String] = []
     @State private var selectedService: Service?
     @State private var serviceSearchResults: [SearchItem] = []
-    @State private var showSourceSelector = false
     
     @StateObject private var tmdbService = TMDBService.shared
     @StateObject private var serviceManager = ServiceManager.shared
@@ -45,17 +42,6 @@ struct SearchView: View {
             return searchResults.filter { $0.isMovie }
         case .tvShows:
             return searchResults.filter { $0.isTVShow }
-        }
-    }
-    
-    var filterIcon: String {
-        switch searchFilter {
-        case .all:
-            return "square.grid.2x2"
-        case .movies:
-            return "tv"
-        case .tvShows:
-            return "tv.fill"
         }
     }
     
@@ -367,18 +353,6 @@ struct SearchView: View {
                 serviceSelector
             }
         }
-        .alert("Service Downloaded", isPresented: $showServiceDownloadAlert) {
-            Button("OK") { }
-        } message: {
-            Text("The service has been successfully downloaded and saved to your documents folder.")
-        }
-        .alert("Download Error", isPresented: .constant(serviceDownloadError != nil)) {
-            Button("OK") {
-                serviceDownloadError = nil
-            }
-        } message: {
-            Text(serviceDownloadError ?? "")
-        }
         .onChangeComp(of: selectedLanguage) { _, _ in
             if !searchText.isEmpty && !searchResults.isEmpty {
                 performSearch()
@@ -533,7 +507,6 @@ struct ServiceSearchResultCard: View {
 }
 
 struct SearchBarLuna: View {
-    @State private var debounceTimer: Timer?
     @Binding var text: String
     var onSearchButtonClicked: () -> Void
     

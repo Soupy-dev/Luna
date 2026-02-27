@@ -208,18 +208,7 @@ struct HomeView: View {
                     }
                 }
                 
-                if let heroLogoURL = homeViewModel.heroLogoURL {
-                    KFImage(URL(string: heroLogoURL))
-                        .placeholder {
-                            heroTitleText(hero)
-                        }
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: isTvOS ? 400 : 280, maxHeight: isTvOS ? 120 : 80)
-                        .shadow(color: .black.opacity(0.6), radius: 8, x: 0, y: 4)
-                } else {
-                    heroTitleText(hero)
-                }
+                heroTitleText(hero)
                 
                 if let overview = hero.overview, !overview.isEmpty {
                     Text(String(overview.prefix(100)) + (overview.count > 100 ? "..." : ""))
@@ -355,15 +344,8 @@ struct HomeView: View {
 struct MediaSection: View {
     let title: String
     let items: [TMDBSearchResult]
-    let isLarge: Bool
     
     var gap: Double { isTvOS ? 50.0 : 20.0 }
-    
-    init(title: String, items: [TMDBSearchResult], isLarge: Bool = Bool.random()) {
-        self.title = title
-        self.items = items
-        self.isLarge = isLarge
-    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

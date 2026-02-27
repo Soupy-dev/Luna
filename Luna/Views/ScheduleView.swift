@@ -136,9 +136,6 @@ struct ScheduleView: View {
             Toggle("Local time", isOn: $showLocalScheduleTime)
                 .labelsHidden()
                 .tint(accentColorManager.currentAccentColor)
-                .onChange(of: showLocalScheduleTime) { newValue in
-                    viewModel.regroupBuckets(localTimeZone: newValue)
-                }
         }
         .padding()
         .background(Color.gray.opacity(0.15))

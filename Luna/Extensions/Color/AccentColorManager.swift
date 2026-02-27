@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Foundation
 
 class AccentColorManager: ObservableObject {
     static let shared = AccentColorManager()

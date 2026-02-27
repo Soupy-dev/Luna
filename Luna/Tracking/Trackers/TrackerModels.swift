@@ -188,8 +188,3 @@ struct TraktIds: Codable {
     let imdb: String?
     let tmdb: Int?
 }
-
-struct TraktSyncProgress: Codable {
-    let progress: Double
-    let lastUpdated: String
-}
