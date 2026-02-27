@@ -928,6 +928,7 @@
 				13F072B02E4B2D9200EF90EB /* SearchResultCard.swift in Sources */,
 				136D3E5C2EB75D7E0094210C /* LiquidGlassBackground.swift in Sources */,
 				13B6F3452EA4C6BC00DECD2B /* ProgressManager.swift in Sources */,
+				13C6F3462EA4C6BC00DECD2B /* CacheManager.swift in Sources */,
 				13E1EDF42ED9E67000087629 /* ContentModel.xcdatamodeld in Sources */,
 				13F072B42E4B2D9200EF90EB /* resized.swift in Sources */,
 				13E1EDDF2ED9E66000087629 /* KanzenEngine.swift in Sources */,
