@@ -571,9 +571,13 @@ final class AniListService {
                         orphanCandidates.append(candidate)
                     }
 
-                    // Pick the best orphan (highest episode count = most likely main continuation),
-                    // then BFS from it to discover its own sequels
-                    if let bestOrphan = orphanCandidates.max(by: { ($0.episodes ?? 0) < ($1.episodes ?? 0) }) {
+                    // Pick the best orphan: the one chronologically closest after the last BFS-found season
+                    // This ensures we grab the next continuation, not an arbitrary spinoff
+                    let lastKnownYear = allAnimeToProcess.compactMap { $0.anime.seasonYear }.max() ?? 0
+                    let sortedOrphans = orphanCandidates
+                        .filter { ($0.seasonYear ?? Int.max) >= lastKnownYear }
+                        .sorted { ($0.seasonYear ?? Int.max) < ($1.seasonYear ?? Int.max) }
+                    if let bestOrphan = sortedOrphans.first ?? orphanCandidates.first {
                         seenIds.insert(bestOrphan.id)
                         appendAnime(bestOrphan)
                         Logger.shared.log("AniListService: Best orphan entry: '\(AniListTitlePicker.title(from: bestOrphan.title, preferredLanguageCode: preferredLanguageCode))' (id: \(bestOrphan.id), episodes: \(bestOrphan.episodes ?? 0))", type: "AniList")
