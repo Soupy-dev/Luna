@@ -2052,7 +2052,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard case .episode(let showId, let seasonNumber, let episodeNumber, _, _, _) = mediaInfo else { return }
 
         aniSkipFetched = true
-        let duration = cachedDuration
 
         // Resolve AniList ID: prefer season-specific, then show-level, then async lookup
         let seasonId = trackerManager.cachedAniListSeasonId(tmdbId: showId, seasonNumber: seasonNumber)
@@ -2072,17 +2071,25 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 return
             }
 
+            // Read duration at call time; VLC may not have it yet so we pass whatever we have.
+            // Normalization into progressModel.skipSegments is deferred to updateAniSkipState
+            // where cachedDuration is guaranteed > 0.
+            let durationAtFetch = await MainActor.run { self.cachedDuration }
+
             do {
                 let segments = try await AniSkipService.shared.fetchSkipTimes(
                     anilistId: finalId,
                     episodeNumber: episodeNumber,
-                    episodeDuration: duration
+                    episodeDuration: durationAtFetch
                 )
                 await MainActor.run {
                     self.aniSkipSegments = segments
-                    guard duration > 0 else { return }
+                    Logger.shared.log("AniSkip: Fetched \(segments.count) segments for ep=\(episodeNumber), durationAtFetch=\(String(format: "%.1f", durationAtFetch))", type: "AniSkip")
+                    // Attempt normalization now; if duration is still 0 it will be retried in updateAniSkipState
+                    let liveDuration = self.cachedDuration
+                    guard liveDuration > 0 else { return }
                     self.progressModel.skipSegments = segments.map { seg in
-                        (start: seg.startTime / duration, end: seg.endTime / duration)
+                        (start: seg.startTime / liveDuration, end: seg.endTime / liveDuration)
                     }
                 }
             } catch {
@@ -2094,6 +2101,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 #if !os(tvOS)
     private func updateAniSkipState(position: Double, duration: Double) {
         guard !aniSkipSegments.isEmpty, duration > 0 else { return }
+
+        // Deferred normalization: if fetchAniSkipData completed before duration was available,
+        // progressModel.skipSegments will still be empty. Populate it now.
+        if progressModel.skipSegments.isEmpty {
+            progressModel.skipSegments = aniSkipSegments.map { seg in
+                (start: seg.startTime / duration, end: seg.endTime / duration)
+            }
+            Logger.shared.log("AniSkip: Deferred normalization applied with duration=\(String(format: "%.1f", duration))", type: "AniSkip")
+        }
 
         // Find if current position is inside any skip segment (with 1 s tolerance on entry)
         let activeSegment = aniSkipSegments.first { seg in

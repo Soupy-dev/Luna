@@ -127,6 +127,7 @@
 		DD1111112FB0000000DD1111 /* DownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111102FB0000000DD1110 /* DownloadManager.swift */; };
 		DD1111152FB0000000DD1115 /* HLSDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111142FB0000000DD1114 /* HLSDownloader.swift */; };
 		DD2222222FB0000000DD2222 /* DownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222202FB0000000DD2220 /* DownloadsView.swift */; };
+		DD4444442FB0000000DD4444 /* DownloadedShowDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444402FB0000000DD4440 /* DownloadedShowDetailView.swift */; };
 		DD3333332FB0000000DD3333 /* FloatingSearchButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333302FB0000000DD3330 /* FloatingSearchButton.swift */; };
 		AA1111112F10000000AA1111 /* TrackerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1111102F10000000AA1110 /* TrackerManager.swift */; };
 		AA2222222F10000000AA2222 /* TrackerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2222202F10000000AA2220 /* TrackerModels.swift */; };
@@ -279,6 +280,7 @@
 		DD1111102FB0000000DD1110 /* DownloadManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DownloadManager.swift; sourceTree = "<group>"; };
 		DD1111142FB0000000DD1114 /* HLSDownloader.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HLSDownloader.swift; sourceTree = "<group>"; };
 		DD2222202FB0000000DD2220 /* DownloadsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DownloadsView.swift; sourceTree = "<group>"; };
+		DD4444402FB0000000DD4440 /* DownloadedShowDetailView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DownloadedShowDetailView.swift; sourceTree = "<group>"; };
 		DD3333302FB0000000DD3330 /* FloatingSearchButton.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FloatingSearchButton.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -624,6 +626,7 @@
 				13F0727C2E4B2D9000EF90EB /* MediaDetailView.swift */,
 				AA4444402F10000000AA4440 /* ScheduleView.swift */,
 				DD2222202FB0000000DD2220 /* DownloadsView.swift */,
+				DD4444402FB0000000DD4440 /* DownloadedShowDetailView.swift */,
 				13F072C42E4B364B00EF90EB /* SettingsView */,
 				13F0727F2E4B2D9000EF90EB /* View Elements */,
 			);
@@ -951,6 +954,7 @@
 				DD1111112FB0000000DD1111 /* DownloadManager.swift in Sources */,
 				DD1111152FB0000000DD1115 /* HLSDownloader.swift in Sources */,
 				DD2222222FB0000000DD2222 /* DownloadsView.swift in Sources */,
+				DD4444442FB0000000DD4444 /* DownloadedShowDetailView.swift in Sources */,
 				DD3333332FB0000000DD3333 /* FloatingSearchButton.swift in Sources */,
 				F9A1B2C32F90000100A1B2C3 /* VLCHeaderProxy.swift in Sources */,
 				13F072AF2E4B2D9200EF90EB /* StretchyHeader.swift in Sources */,

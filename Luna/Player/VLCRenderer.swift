@@ -261,8 +261,18 @@ final class VLCRenderer: NSObject {
             // Apply subtitle styling options (best effort; depends on libvlc text renderer support)
             self.applySubtitleStyleOptions(to: media)
 
-            // Reduce buffering while keeping resume/start reasonably responsive
-            media.addOption(":network-caching=12000")  // ~12s
+            // Tune caching and demuxer for local vs. remote playback
+            if url.isFileURL {
+                media.addOption(":file-caching=300")
+                // Force MPEG-TS demuxer for .ts files (concatenated HLS segments)
+                let ext = url.pathExtension.lowercased()
+                if ext == "ts" || ext == "mts" || ext == "m2ts" {
+                    media.addOption(":demux=ts")
+                }
+            } else {
+                // Reduce buffering while keeping resume/start reasonably responsive
+                media.addOption(":network-caching=12000")  // ~12s
+            }
 
             self.currentMedia = media
             

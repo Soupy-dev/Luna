@@ -9,6 +9,9 @@
 
 import Foundation
 import CommonCrypto
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - HLS Models
 
@@ -38,6 +41,9 @@ final class HLSDownloader: @unchecked Sendable {
     private var isCancelled = false
     private var currentTask: URLSessionDataTask?
     private let session: URLSession
+    #if canImport(UIKit)
+    private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+    #endif
     
     /// Progress callback: (fractionCompleted)
     var onProgress: ((Double) -> Void)?
@@ -61,6 +67,7 @@ final class HLSDownloader: @unchecked Sendable {
     
     func start() {
         isCancelled = false
+        beginBackgroundTask()
         
         Task {
             do {
@@ -128,12 +135,14 @@ final class HLSDownloader: @unchecked Sendable {
                 
                 Logger.shared.log("HLS: Download complete -> \(destinationURL.lastPathComponent)", type: "Download")
                 onCompletion?(.success(destinationURL))
+                endBackgroundTask()
                 
             } catch {
                 if !isCancelled {
                     Logger.shared.log("HLS download failed: \(error.localizedDescription)", type: "Download")
                     onCompletion?(.failure(error))
                 }
+                endBackgroundTask()
             }
         }
     }
@@ -141,6 +150,27 @@ final class HLSDownloader: @unchecked Sendable {
     func cancel() {
         isCancelled = true
         currentTask?.cancel()
+        endBackgroundTask()
+    }
+    
+    // MARK: - Background Task Management
+    
+    private func beginBackgroundTask() {
+        #if canImport(UIKit) && !os(watchOS)
+        guard backgroundTaskId == .invalid else { return }
+        backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "HLSDownload-\(downloadId)") { [weak self] in
+            // System is about to expire the task — cancel gracefully
+            self?.cancel()
+        }
+        #endif
+    }
+    
+    private func endBackgroundTask() {
+        #if canImport(UIKit) && !os(watchOS)
+        guard backgroundTaskId != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTaskId)
+        backgroundTaskId = .invalid
+        #endif
     }
     
     // MARK: - Playlist Fetching

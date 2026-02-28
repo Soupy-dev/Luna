@@ -583,32 +583,18 @@ struct DownloadsView: View {
                                     .listRowBackground(Color.clear)
                             }
                         } else {
-                            // TV Shows grouped by season
-#if !os(tvOS)
-                            DisclosureGroup {
-                                ForEach(show.seasons) { season in
-                                    if show.seasons.count > 1 {
-                                        DisclosureGroup {
-                                            ForEach(season.episodes) { item in
-                                                libraryEpisodeRow(item)
-                                                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                                                    .listRowBackground(Color.clear)
-                                            }
-                                        } label: {
-                                            Text("Season \(season.seasonNumber)")
-                                                .font(.subheadline)
-                                                .fontWeight(.semibold)
-                                                .foregroundColor(.white)
-                                        }
-                                    } else {
-                                        ForEach(season.episodes) { item in
-                                            libraryEpisodeRow(item)
-                                                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                                                .listRowBackground(Color.clear)
-                                        }
-                                    }
+                            // TV Shows: navigate to full detail page
+                            NavigationLink(destination: DownloadedShowDetailView(
+                                showTitle: show.title,
+                                tmdbId: show.id,
+                                posterURL: show.posterURL,
+                                seasons: show.seasons.map { season in
+                                    DownloadedShowDetailView.DownloadedSeasonGroup(
+                                        seasonNumber: season.seasonNumber,
+                                        episodes: season.episodes
+                                    )
                                 }
-                            } label: {
+                            )) {
                                 HStack(spacing: 12) {
                                     posterImage(url: show.posterURL)
                                     
@@ -623,18 +609,35 @@ struct DownloadsView: View {
                                         Text("\(totalEps) episode\(totalEps == 1 ? "" : "s")")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
+                                        
+                                        let watchedCount = show.seasons.flatMap(\.episodes).filter {
+                                            ProgressManager.shared.isEpisodeWatched(
+                                                showId: $0.tmdbId,
+                                                seasonNumber: $0.seasonNumber ?? 1,
+                                                episodeNumber: $0.episodeNumber ?? 1
+                                            )
+                                        }.count
+                                        if watchedCount > 0 {
+                                            HStack(spacing: 3) {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.blue)
+                                                Text("\(watchedCount)/\(totalEps) watched")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
                                     }
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
                                 }
                             }
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                             .listRowBackground(Color.clear)
-#else
-                            ForEach(show.seasons.flatMap { $0.episodes }) { item in
-                                libraryEpisodeRow(item)
-                                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-                                    .listRowBackground(Color.clear)
-                            }
-#endif
                         }
                     }
                     
