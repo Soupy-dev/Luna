@@ -125,6 +125,7 @@
 		BB7777712F20000000BB7771 /* VLCRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7777702F20000000BB7770 /* VLCRenderer.swift */; };
 		CC8888812FA0000000CC8881 /* AniSkipService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC8888802FA0000000CC8880 /* AniSkipService.swift */; };
 		DD1111112FB0000000DD1111 /* DownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111102FB0000000DD1110 /* DownloadManager.swift */; };
+		DD1111152FB0000000DD1115 /* HLSDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111142FB0000000DD1114 /* HLSDownloader.swift */; };
 		DD2222222FB0000000DD2222 /* DownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222202FB0000000DD2220 /* DownloadsView.swift */; };
 		DD3333332FB0000000DD3333 /* FloatingSearchButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333302FB0000000DD3330 /* FloatingSearchButton.swift */; };
 		AA1111112F10000000AA1111 /* TrackerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1111102F10000000AA1110 /* TrackerManager.swift */; };
@@ -276,6 +277,7 @@
 		BB7777702F20000000BB7770 /* VLCRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VLCRenderer.swift; sourceTree = "<group>"; };
 		CC8888802FA0000000CC8880 /* AniSkipService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AniSkipService.swift; sourceTree = "<group>"; };
 		DD1111102FB0000000DD1110 /* DownloadManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DownloadManager.swift; sourceTree = "<group>"; };
+		DD1111142FB0000000DD1114 /* HLSDownloader.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HLSDownloader.swift; sourceTree = "<group>"; };
 		DD2222202FB0000000DD2220 /* DownloadsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DownloadsView.swift; sourceTree = "<group>"; };
 		DD3333302FB0000000DD3330 /* FloatingSearchButton.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FloatingSearchButton.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -798,6 +800,7 @@
 				14BBB0063FFF111100AAAAAA /* BackupManager.swift */,
 				13C6F3452EA4C6BC00DECD2B /* CacheManager.swift */,
 				DD1111102FB0000000DD1110 /* DownloadManager.swift */,
+				DD1111142FB0000000DD1114 /* HLSDownloader.swift */,
 				AA5555502F10000000AA5550 /* CatalogManager.swift */,
 				AA7777702F10000000AA7770 /* HomeViewModel.swift */,
 				AA8888802F10000000AA8880 /* ScheduleViewModel.swift */,
@@ -946,6 +949,7 @@
 				BB7777712F20000000BB7771 /* VLCRenderer.swift in Sources */,
 				CC8888812FA0000000CC8881 /* AniSkipService.swift in Sources */,
 				DD1111112FB0000000DD1111 /* DownloadManager.swift in Sources */,
+				DD1111152FB0000000DD1115 /* HLSDownloader.swift in Sources */,
 				DD2222222FB0000000DD2222 /* DownloadsView.swift in Sources */,
 				DD3333332FB0000000DD3333 /* FloatingSearchButton.swift in Sources */,
 				F9A1B2C32F90000100A1B2C3 /* VLCHeaderProxy.swift in Sources */,
