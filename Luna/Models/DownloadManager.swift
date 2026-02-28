@@ -7,7 +7,6 @@
 
 import Foundation
 import Combine
-import AVFoundation
 
 // MARK: - Download Item Model
 
@@ -86,10 +85,7 @@ final class DownloadManager: NSObject, ObservableObject {
     private var activeTasks: [String: URLSessionDownloadTask] = [:]
     private var resumeDataStore: [String: Data] = [:]
     private var lastProgressUpdate: [String: Date] = [:]
-    #if !os(tvOS)
-    private var hlsSession: AVAssetDownloadURLSession?
-    #endif
-    private var activeHLSTasks: [String: URLSessionTask] = [:]
+    private var activeHLSDownloaders: [String: HLSDownloader] = [:]
     
     private let maxConcurrentDownloads = 2
     private let fileManager = FileManager.default
@@ -120,18 +116,6 @@ final class DownloadManager: NSObject, ObservableObject {
         config.allowsCellularAccess = true
         config.httpMaximumConnectionsPerHost = 4
         backgroundSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        
-        #if !targetEnvironment(simulator) && !os(tvOS)
-        let hlsConfig = URLSessionConfiguration.background(withIdentifier: "com.luna.hls-downloads")
-        hlsConfig.isDiscretionary = false
-        hlsConfig.sessionSendsLaunchEvents = true
-        hlsConfig.allowsCellularAccess = true
-        hlsSession = AVAssetDownloadURLSession(
-            configuration: hlsConfig,
-            assetDownloadDelegate: self,
-            delegateQueue: OperationQueue.main
-        )
-        #endif
         
         loadDownloads()
         
@@ -235,10 +219,10 @@ final class DownloadManager: NSObject, ObservableObject {
                 }
             })
             activeTasks.removeValue(forKey: id)
-        } else if let task = activeHLSTasks[id] {
-            // HLS tasks don't support resume data — cancel and restart on resume
-            task.cancel()
-            activeHLSTasks.removeValue(forKey: id)
+        } else if let downloader = activeHLSDownloaders[id] {
+            // HLS downloads don't support resume — cancel and restart on resume
+            downloader.cancel()
+            activeHLSDownloaders.removeValue(forKey: id)
         }
         
         DispatchQueue.main.async {
@@ -274,9 +258,9 @@ final class DownloadManager: NSObject, ObservableObject {
             task.cancel()
             activeTasks.removeValue(forKey: id)
         }
-        if let task = activeHLSTasks[id] {
-            task.cancel()
-            activeHLSTasks.removeValue(forKey: id)
+        if let downloader = activeHLSDownloaders[id] {
+            downloader.cancel()
+            activeHLSDownloaders.removeValue(forKey: id)
         }
         resumeDataStore.removeValue(forKey: id)
         removeDownload(id: id, deleteFile: true)
@@ -315,10 +299,10 @@ final class DownloadManager: NSObject, ObservableObject {
             task.cancel()
         }
         activeTasks.removeAll()
-        for (_, task) in activeHLSTasks {
-            task.cancel()
+        for (_, downloader) in activeHLSDownloaders {
+            downloader.cancel()
         }
-        activeHLSTasks.removeAll()
+        activeHLSDownloaders.removeAll()
         resumeDataStore.removeAll()
         
         DispatchQueue.main.async {
@@ -423,28 +407,13 @@ final class DownloadManager: NSObject, ObservableObject {
         for item in downloads where item.status == .completed {
             if let fileName = item.localFileName {
                 let url = downloadsDirectory.appendingPathComponent(fileName)
-                if fileName.hasSuffix(".movpkg") {
-                    total += calculateDirectorySize(at: url)
-                } else if let attrs = try? fileManager.attributesOfItem(atPath: url.path),
+                if let attrs = try? fileManager.attributesOfItem(atPath: url.path),
                    let size = attrs[.size] as? Int64 {
                     total += size
                 }
             }
         }
         return total
-    }
-    
-    private func calculateDirectorySize(at url: URL) -> Int64 {
-        var totalSize: Int64 = 0
-        guard let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey]) else {
-            return 0
-        }
-        for case let fileURL as URL in enumerator {
-            guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]),
-                  values.isDirectory != true else { continue }
-            totalSize += Int64(values.fileSize ?? 0)
-        }
-        return totalSize
     }
     
     // MARK: - Queue Processing
@@ -514,34 +483,54 @@ final class DownloadManager: NSObject, ObservableObject {
             return
         }
         
-        #if targetEnvironment(simulator) || os(tvOS)
-        markFailed(id: item.id, error: "HLS downloads are not supported on Simulator or tvOS")
-        #else
-        guard let hlsSession = hlsSession else {
-            markFailed(id: item.id, error: "HLS download session not available")
-            return
+        let fileName = "\(item.id).ts"
+        let destURL = downloadsDirectory.appendingPathComponent(fileName)
+        
+        let downloader = HLSDownloader(
+            streamURL: url,
+            headers: item.headers,
+            destinationURL: destURL,
+            downloadId: item.id
+        )
+        
+        downloader.onProgress = { [weak self] progress in
+            guard let self = self else { return }
+            if let index = self.downloads.firstIndex(where: { $0.id == item.id }) {
+                self.downloads[index].progress = progress
+            }
         }
         
-        let asset: AVURLAsset
-        if !item.headers.isEmpty {
-            let options: [String: Any] = ["AVURLAssetHTTPHeaderFieldsKey": item.headers]
-            asset = AVURLAsset(url: url, options: options)
-        } else {
-            asset = AVURLAsset(url: url)
+        downloader.onCompletion = { [weak self] result in
+            guard let self = self else { return }
+            self.activeHLSDownloaders.removeValue(forKey: item.id)
+            
+            switch result {
+            case .success(let fileURL):
+                DispatchQueue.main.async {
+                    if let index = self.downloads.firstIndex(where: { $0.id == item.id }) {
+                        self.downloads[index].status = .completed
+                        self.downloads[index].progress = 1.0
+                        self.downloads[index].localFileName = fileName
+                        self.downloads[index].dateCompleted = Date()
+                        
+                        if let attrs = try? self.fileManager.attributesOfItem(atPath: fileURL.path),
+                           let size = attrs[.size] as? Int64 {
+                            self.downloads[index].totalBytes = size
+                            self.downloads[index].downloadedBytes = size
+                        }
+                        
+                        self.saveDownloads()
+                        self.processQueue()
+                    }
+                }
+                Logger.shared.log("HLS download completed: \(item.displayTitle) -> \(fileName)", type: "Download")
+                
+            case .failure(let error):
+                self.markFailed(id: item.id, error: error.localizedDescription)
+            }
         }
         
-        guard let task = hlsSession.makeAssetDownloadTask(
-            asset: asset,
-            assetTitle: item.displayTitle,
-            assetArtworkData: nil,
-            options: nil
-        ) else {
-            markFailed(id: item.id, error: "Failed to create HLS download task")
-            return
-        }
-        
-        task.taskDescription = item.id
-        activeHLSTasks[item.id] = task
+        activeHLSDownloaders[item.id] = downloader
         
         if let index = downloads.firstIndex(where: { $0.id == item.id }) {
             DispatchQueue.main.async {
@@ -550,7 +539,7 @@ final class DownloadManager: NSObject, ObservableObject {
             }
         }
         
-        task.resume()
+        downloader.start()
         
         // Also download subtitle if available
         if let subtitleURLString = item.subtitleURL, let subtitleURL = URL(string: subtitleURLString) {
@@ -558,7 +547,6 @@ final class DownloadManager: NSObject, ObservableObject {
         }
         
         Logger.shared.log("Started HLS download: \(item.displayTitle)", type: "Download")
-        #endif
     }
     
     /// Known video file extensions that VLC/mpv can play
@@ -768,10 +756,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
         if let error = error as NSError? {
             // Don't mark as failed if user cancelled
             if error.code == NSURLErrorCancelled {
-                activeHLSTasks.removeValue(forKey: downloadId)
                 return
             }
-            activeHLSTasks.removeValue(forKey: downloadId)
             markFailed(id: downloadId, error: error.localizedDescription)
         }
     }
@@ -802,106 +788,4 @@ extension DownloadManager: URLSessionDownloadDelegate {
     }
 }
 
-// MARK: - AVAsset Download Delegate (HLS)
 
-#if !os(tvOS)
-extension DownloadManager: AVAssetDownloadDelegate {
-    func urlSession(_ session: URLSession, assetDownloadTask: AVAssetDownloadTask, didFinishDownloadingTo location: URL) {
-        guard let downloadId = assetDownloadTask.taskDescription else { return }
-        
-        // Move .movpkg to our downloads directory temporarily
-        let movpkgName = "\(downloadId).movpkg"
-        let movpkgURL = downloadsDirectory.appendingPathComponent(movpkgName)
-        
-        try? fileManager.removeItem(at: movpkgURL)
-        
-        do {
-            try fileManager.moveItem(at: location, to: movpkgURL)
-        } catch {
-            markFailed(id: downloadId, error: "Failed to save HLS download: \(error.localizedDescription)")
-            return
-        }
-        
-        Logger.shared.log("HLS download saved, converting to MP4: \(downloadId)", type: "Download")
-        
-        // Convert .movpkg → .mp4 so VLC/mpv can play it (passthrough = remux, no re-encoding)
-        let asset = AVURLAsset(url: movpkgURL)
-        let mp4Name = "\(downloadId).mp4"
-        let mp4URL = downloadsDirectory.appendingPathComponent(mp4Name)
-        try? fileManager.removeItem(at: mp4URL)
-        
-        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
-            try? fileManager.removeItem(at: movpkgURL)
-            markFailed(id: downloadId, error: "MP4 conversion unavailable")
-            return
-        }
-        
-        exportSession.outputURL = mp4URL
-        exportSession.outputFileType = .mp4
-        
-        exportSession.exportAsynchronously { [weak self] in
-            guard let self = self else { return }
-            
-            switch exportSession.status {
-            case .completed:
-                // Conversion succeeded — delete .movpkg, use .mp4
-                try? self.fileManager.removeItem(at: movpkgURL)
-                self.finishHLSDownload(id: downloadId, fileName: mp4Name, fileURL: mp4URL, isDirectory: false)
-                Logger.shared.log("HLS converted to MP4: \(downloadId) -> \(mp4Name)", type: "Download")
-                
-            default:
-                // Conversion failed — clean up and mark as failed so user can retry
-                try? self.fileManager.removeItem(at: mp4URL)
-                try? self.fileManager.removeItem(at: movpkgURL)
-                self.markFailed(id: downloadId, error: "MP4 conversion failed: \(exportSession.error?.localizedDescription ?? "unknown")")
-            }
-        }
-    }
-    
-    /// Finalizes an HLS download by updating the download item metadata
-    private func finishHLSDownload(id: String, fileName: String, fileURL: URL, isDirectory: Bool) {
-        let size: Int64
-        if isDirectory {
-            size = calculateDirectorySize(at: fileURL)
-        } else {
-            size = (try? fileManager.attributesOfItem(atPath: fileURL.path))?[.size] as? Int64 ?? 0
-        }
-        
-        DispatchQueue.main.async {
-            if let index = self.downloads.firstIndex(where: { $0.id == id }) {
-                self.downloads[index].status = .completed
-                self.downloads[index].progress = 1.0
-                self.downloads[index].localFileName = fileName
-                self.downloads[index].dateCompleted = Date()
-                self.downloads[index].totalBytes = size
-                self.downloads[index].downloadedBytes = size
-                self.saveDownloads()
-                self.activeHLSTasks.removeValue(forKey: id)
-                self.processQueue()
-            }
-        }
-    }
-    
-    func urlSession(_ session: URLSession, assetDownloadTask: AVAssetDownloadTask, didLoad timeRange: CMTimeRange, totalTimeRangesLoaded loadedTimeRanges: [NSValue], timeRangeExpectedToLoad: CMTimeRange) {
-        guard let downloadId = assetDownloadTask.taskDescription else { return }
-        
-        // Throttle progress updates
-        let now = Date()
-        if let lastUpdate = lastProgressUpdate[downloadId],
-           now.timeIntervalSince(lastUpdate) < 0.5 {
-            return
-        }
-        lastProgressUpdate[downloadId] = now
-        
-        let progress = loadedTimeRanges
-            .map { $0.timeRangeValue.duration.seconds / timeRangeExpectedToLoad.duration.seconds }
-            .reduce(0, +)
-        
-        DispatchQueue.main.async {
-            if let index = self.downloads.firstIndex(where: { $0.id == downloadId }) {
-                self.downloads[index].progress = min(progress, 1.0)
-            }
-        }
-    }
-}
-#endif

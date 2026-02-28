@@ -97,6 +97,10 @@ struct ModulesSearchResultsSheet: View {
     let posterPath: String?
     /// When true, selecting a stream downloads instead of playing
     var downloadMode: Bool = false
+    /// Called when a download has been enqueued (for Download All flow)
+    var onDownloadEnqueued: (() -> Void)? = nil
+    /// Called when user taps "Skip" (for Download All flow)
+    var onSkipRequested: (() -> Void)? = nil
     
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var viewModel = ModulesSearchResultsViewModel()
@@ -624,8 +628,17 @@ struct ModulesSearchResultsSheet: View {
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
+                    HStack(spacing: 12) {
+                        if downloadMode && onSkipRequested != nil {
+                            Button("Skip") {
+                                onSkipRequested?()
+                                presentationMode.wrappedValue.dismiss()
+                            }
+                        }
+                        
+                        Button("Done") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
                     }
                 }
             }
@@ -1472,6 +1485,9 @@ struct ModulesSearchResultsSheet: View {
         )
         
         Logger.shared.log("Download enqueued: \(displayTitle)", type: "Download")
+        
+        // Notify parent that download was enqueued (for Download All flow)
+        onDownloadEnqueued?()
         
         // Dismiss the sheet after enqueuing
         presentationMode.wrappedValue.dismiss()

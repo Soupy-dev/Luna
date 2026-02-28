@@ -13,6 +13,12 @@ struct DownloadsView: View {
     @StateObject private var downloadManager = DownloadManager.shared
     @State private var showingDeleteAllConfirmation = false
     @State private var showingDeleteCompletedConfirmation = false
+    @State private var selectedTab: DownloadsTab = .downloads
+    
+    private enum DownloadsTab: String, CaseIterable {
+        case downloads = "Downloads"
+        case library = "Library"
+    }
     
     private var activeDownloads: [DownloadItem] {
         downloadManager.downloads.filter { $0.status == .downloading || $0.status == .queued || $0.status == .paused }
@@ -44,7 +50,23 @@ struct DownloadsView: View {
             if downloadManager.downloads.isEmpty {
                 emptyState
             } else {
-                downloadsList
+                VStack(spacing: 0) {
+                    Picker("View", selection: $selectedTab) {
+                        ForEach(DownloadsTab.allCases, id: \.self) { tab in
+                            Text(tab.rawValue).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    
+                    switch selectedTab {
+                    case .downloads:
+                        downloadsList
+                    case .library:
+                        libraryView
+                    }
+                }
             }
         }
         .navigationTitle("Downloads")
@@ -277,7 +299,7 @@ struct DownloadsView: View {
             
             Spacer()
             
-            downloadActionButton(item)
+            downloadActionButtons(item)
         }
         .padding(10)
         .applyLiquidGlassBackground(cornerRadius: 12)
@@ -298,23 +320,35 @@ struct DownloadsView: View {
         }
     }
     
-    private func downloadActionButton(_ item: DownloadItem) -> some View {
-        Button(action: {
-            switch item.status {
-            case .downloading:
-                downloadManager.pauseDownload(id: item.id)
-            case .paused:
-                downloadManager.resumeDownload(id: item.id)
-            case .queued:
-                downloadManager.cancelDownload(id: item.id)
-            default:
-                break
+    private func downloadActionButtons(_ item: DownloadItem) -> some View {
+        HStack(spacing: 4) {
+            // Pause / Resume / Queued button
+            Button(action: {
+                switch item.status {
+                case .downloading:
+                    downloadManager.pauseDownload(id: item.id)
+                case .paused:
+                    downloadManager.resumeDownload(id: item.id)
+                default:
+                    break
+                }
+            }) {
+                Image(systemName: actionIcon(for: item.status))
+                    .font(.title3)
+                    .foregroundColor(actionColor(for: item.status))
+                    .frame(width: 32, height: 32)
             }
-        }) {
-            Image(systemName: actionIcon(for: item.status))
-                .font(.title2)
-                .foregroundColor(actionColor(for: item.status))
-                .frame(width: 36, height: 36)
+            .disabled(item.status == .queued)
+            
+            // Cancel / Delete button
+            Button(action: {
+                downloadManager.cancelDownload(id: item.id)
+            }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundColor(.red.opacity(0.8))
+                    .frame(width: 32, height: 32)
+            }
         }
     }
     
@@ -462,6 +496,190 @@ struct DownloadsView: View {
             .aspectRatio(2/3, contentMode: .fill)
             .frame(width: 55, height: 82)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+    
+    // MARK: - Library View (Grouped by Show/Season)
+    
+    /// Groups completed downloads by show (tmdbId) then by season
+    private struct ShowGroup: Identifiable {
+        let id: Int  // tmdbId
+        let title: String
+        let posterURL: String?
+        let isMovie: Bool
+        var seasons: [SeasonGroup]
+    }
+    
+    private struct SeasonGroup: Identifiable {
+        var id: Int { seasonNumber }
+        let seasonNumber: Int
+        var episodes: [DownloadItem]
+    }
+    
+    private var groupedDownloads: [ShowGroup] {
+        var showMap: [Int: ShowGroup] = [:]
+        
+        for item in completedDownloads {
+            if showMap[item.tmdbId] == nil {
+                showMap[item.tmdbId] = ShowGroup(
+                    id: item.tmdbId,
+                    title: item.title,
+                    posterURL: item.posterURL,
+                    isMovie: item.isMovie,
+                    seasons: []
+                )
+            }
+            
+            let seasonNum = item.seasonNumber ?? 0
+            if let index = showMap[item.tmdbId]?.seasons.firstIndex(where: { $0.seasonNumber == seasonNum }) {
+                showMap[item.tmdbId]?.seasons[index].episodes.append(item)
+            } else {
+                showMap[item.tmdbId]?.seasons.append(SeasonGroup(seasonNumber: seasonNum, episodes: [item]))
+            }
+        }
+        
+        // Sort shows by title, seasons by number, episodes by episode number
+        return showMap.values
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            .map { group in
+                var g = group
+                g.seasons = g.seasons
+                    .sorted { $0.seasonNumber < $1.seasonNumber }
+                    .map { season in
+                        var s = season
+                        s.episodes.sort { ($0.episodeNumber ?? 0) < ($1.episodeNumber ?? 0) }
+                        return s
+                    }
+                return g
+            }
+    }
+    
+    private var libraryView: some View {
+        Group {
+            if completedDownloads.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "rectangle.stack")
+                        .font(.system(size: 48))
+                        .foregroundColor(.secondary.opacity(0.5))
+                    
+                    Text("No Downloaded Content")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
+                    
+                    Text("Completed downloads will appear here\ngrouped by show and season.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(groupedDownloads) { show in
+                        if show.isMovie {
+                            // Movies show directly
+                            if let item = show.seasons.first?.episodes.first {
+                                completedDownloadRow(item)
+                                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                    .listRowBackground(Color.clear)
+                            }
+                        } else {
+                            // TV Shows grouped by season
+                            DisclosureGroup {
+                                ForEach(show.seasons) { season in
+                                    if show.seasons.count > 1 {
+                                        DisclosureGroup {
+                                            ForEach(season.episodes) { item in
+                                                libraryEpisodeRow(item)
+                                                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                                                    .listRowBackground(Color.clear)
+                                            }
+                                        } label: {
+                                            Text("Season \(season.seasonNumber)")
+                                                .font(.subheadline)
+                                                .fontWeight(.semibold)
+                                                .foregroundColor(.white)
+                                        }
+                                    } else {
+                                        ForEach(season.episodes) { item in
+                                            libraryEpisodeRow(item)
+                                                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                                                .listRowBackground(Color.clear)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    posterImage(url: show.posterURL)
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(show.title)
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.white)
+                                            .lineLimit(2)
+                                        
+                                        let totalEps = show.seasons.reduce(0) { $0 + $1.episodes.count }
+                                        Text("\(totalEps) episode\(totalEps == 1 ? "" : "s")")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .listRowBackground(Color.clear)
+                        }
+                    }
+                    
+                    Section {
+                        storageFooter
+                            .listRowBackground(Color.clear)
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+    }
+    
+    private func libraryEpisodeRow(_ item: DownloadItem) -> some View {
+        Button(action: { playDownloadedItem(item) }) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let ep = item.episodeNumber {
+                        Text("Episode \(ep)")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                    }
+                    
+                    if let name = item.episodeName, !name.isEmpty {
+                        Text(name)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    
+                    let formatter = ByteCountFormatter()
+                    Text(formatter.string(fromByteCount: item.totalBytes))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "play.circle.fill")
+                    .font(.title3)
+                    .foregroundColor(.white)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .contextMenu {
+            Button(action: { playDownloadedItem(item) }) {
+                Label("Play", systemImage: "play.fill")
+            }
+            Button(role: .destructive, action: { downloadManager.removeDownload(id: item.id, deleteFile: true) }) {
+                Label("Delete", systemImage: "trash")
+            }
+        }
     }
     
     // MARK: - Management Menu

@@ -419,20 +419,22 @@ struct MediaDetailView: View {
                     .cornerRadius(8)
             }
             
-            Button(action: {
-                downloadInServices()
-            }) {
-                Image(systemName: downloadButtonIcon)
-                    .font(.title2)
-                    .frame(width: 42, height: 42)
-                    .applyLiquidGlassBackground(
-                        cornerRadius: 12,
-                        glassTint: downloadButtonTint
-                    )
-                    .foregroundColor(downloadButtonColor)
-                    .cornerRadius(8)
+            if searchResult.isMovie {
+                Button(action: {
+                    downloadInServices()
+                }) {
+                    Image(systemName: downloadButtonIcon)
+                        .font(.title2)
+                        .frame(width: 42, height: 42)
+                        .applyLiquidGlassBackground(
+                            cornerRadius: 12,
+                            glassTint: downloadButtonTint
+                        )
+                        .foregroundColor(downloadButtonColor)
+                        .cornerRadius(8)
+                }
+                .disabled(serviceManager.activeServices.isEmpty || isCurrentlyDownloading)
             }
-            .disabled(serviceManager.activeServices.isEmpty || isCurrentlyDownloading)
             
             Button(action: {
                 showingAddToCollection = true

@@ -25,21 +25,7 @@ struct FloatingSettingsButton: View {
 }
 
 struct FloatingSettingsOverlay: View {
-    @State private var showingSettings = false
-    
-    private var settingsSheetContent: some View {
-        SettingsView()
-#if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-#endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        showingSettings = false
-                    }
-                }
-            }
-    }
+    @Binding var showingSettings: Bool
     
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -49,18 +35,6 @@ struct FloatingSettingsOverlay: View {
             FloatingSettingsButton(isPresented: $showingSettings)
                 .padding(.trailing, 16)
                 .padding(.top, 8)
-        }
-        .sheet(isPresented: $showingSettings) {
-            if #available(iOS 16.0, *) {
-                NavigationStack {
-                    settingsSheetContent
-                }
-            } else {
-                NavigationView {
-                    settingsSheetContent
-                }
-                .navigationViewStyle(StackNavigationViewStyle())
-            }
         }
     }
 }

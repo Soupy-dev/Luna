@@ -24,6 +24,8 @@ struct TVShowSeasonsSection: View {
     @State private var downloadEpisode: TMDBEpisode? = nil
     @State private var downloadAllQueue: [TMDBEpisode] = []
     @State private var isDownloadingAll = false
+    @State private var downloadWasEnqueued = false
+    @State private var downloadWasSkipped = false
     @State private var showingNoServicesAlert = false
     @State private var romajiTitle: String?
     @State private var currentSeasonTitle: String?
@@ -160,12 +162,23 @@ struct TVShowSeasonsSection: View {
             )
         }
         .sheet(isPresented: $showingDownloadSheet, onDismiss: {
-            if isDownloadingAll && !downloadAllQueue.isEmpty {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    showNextDownloadSheet()
+            if isDownloadingAll {
+                if downloadWasEnqueued || downloadWasSkipped {
+                    // Download enqueued or skipped — advance to next episode
+                    downloadWasEnqueued = false
+                    downloadWasSkipped = false
+                    if !downloadAllQueue.isEmpty {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            showNextDownloadSheet()
+                        }
+                    } else {
+                        isDownloadingAll = false
+                    }
+                } else {
+                    // "Done" was tapped without download/skip — cancel entire queue
+                    downloadAllQueue.removeAll()
+                    isDownloadingAll = false
                 }
-            } else if isDownloadingAll {
-                isDownloadingAll = false
             }
         }) {
             ModulesSearchResultsSheet(
@@ -178,7 +191,13 @@ struct TVShowSeasonsSection: View {
                 tmdbId: tvShow?.id ?? 0,
                 animeSeasonTitle: isAnime ? currentSeasonTitle : nil,
                 posterPath: tvShow?.posterPath,
-                downloadMode: true
+                downloadMode: true,
+                onDownloadEnqueued: isDownloadingAll ? {
+                    downloadWasEnqueued = true
+                } : nil,
+                onSkipRequested: isDownloadingAll ? {
+                    downloadWasSkipped = true
+                } : nil
             )
         }
         .alert("No Active Services", isPresented: $showingNoServicesAlert) {

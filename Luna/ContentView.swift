@@ -15,32 +15,57 @@ struct ContentView: View {
     @StateObject private var accentColorManager = AccentColorManager.shared
     @ObservedObject private var downloadManager = DownloadManager.shared
     @State private var selectedTab: AppTab = .home
+    @State private var showingSettings = false
     
     var body: some View {
 #if compiler(>=6.0)
         if #available(iOS 26.0, tvOS 26.0, *) {
-            modernTabView
-                .accentColor(accentColorManager.currentAccentColor)
-                .overlay(alignment: .topTrailing) {
-                    if selectedTab == .home || selectedTab == .schedule {
-                        FloatingSettingsOverlay()
+            ZStack {
+                modernTabView
+                    .accentColor(accentColorManager.currentAccentColor)
+                    .overlay(alignment: .topTrailing) {
+                        if (selectedTab == .home || selectedTab == .schedule) && !showingSettings {
+                            FloatingSettingsOverlay(showingSettings: $showingSettings)
+                        }
                     }
-                }
-        } else {
-            olderTabView
-                .overlay {
-                    if selectedTab == .home || selectedTab == .schedule {
-                        FloatingSettingsOverlay()
-                    }
-                }
-        }
-#else
-        olderTabView
-            .overlay {
-                if selectedTab == .home || selectedTab == .schedule {
-                    FloatingSettingsOverlay()
+                
+                if showingSettings {
+                    settingsFullScreen
+                        .transition(.move(edge: .trailing))
                 }
             }
+            .animation(.easeInOut(duration: 0.25), value: showingSettings)
+        } else {
+            ZStack {
+                olderTabView
+                    .overlay {
+                        if (selectedTab == .home || selectedTab == .schedule) && !showingSettings {
+                            FloatingSettingsOverlay(showingSettings: $showingSettings)
+                        }
+                    }
+                
+                if showingSettings {
+                    settingsFullScreen
+                        .transition(.move(edge: .trailing))
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: showingSettings)
+        }
+#else
+        ZStack {
+            olderTabView
+                .overlay {
+                    if (selectedTab == .home || selectedTab == .schedule) && !showingSettings {
+                        FloatingSettingsOverlay(showingSettings: $showingSettings)
+                    }
+                }
+            
+            if showingSettings {
+                settingsFullScreen
+                    .transition(.move(edge: .trailing))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: showingSettings)
 #endif
     }
     
@@ -76,6 +101,42 @@ struct ContentView: View {
 #endif
     }
 #endif
+    
+    private var settingsFullScreen: some View {
+        Group {
+            if #available(iOS 16.0, *) {
+                NavigationStack {
+                    SettingsView()
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button(action: { showingSettings = false }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "chevron.left")
+                                        Text("Back")
+                                    }
+                                }
+                            }
+                        }
+                }
+            } else {
+                NavigationView {
+                    SettingsView()
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button(action: { showingSettings = false }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "chevron.left")
+                                        Text("Back")
+                                    }
+                                }
+                            }
+                        }
+                }
+                .navigationViewStyle(StackNavigationViewStyle())
+            }
+        }
+        .background(Color(.systemBackground))
+    }
     
     private var olderTabView: some View {
         TabView(selection: $selectedTab) {
