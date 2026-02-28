@@ -6,7 +6,7 @@
 private actor AniListRateLimiter {
     static let shared = AniListRateLimiter()
     
-    private let minInterval: TimeInterval = 0.7 // ~85 req/min max, safely under AniList's 90 req/min
+    private let minInterval: TimeInterval = 0.5 // ~120 req/min max, safely under AniList's 90 req/min (batched queries reduce actual call count)
     private var nextAvailableTime: Date = .distantPast
     
     func waitForSlot() async {
@@ -43,7 +43,110 @@ final class AniListService {
 
     // MARK: - Catalog Fetching
 
-    /// Fetch a lightweight AniList catalog and hydrate entries with TMDB matches for posters/details.
+    /// Fetch all anime catalogs in a single AniList GraphQL query using aliases.
+    /// Returns a dictionary keyed by AniListCatalogKind.
+    func fetchAllAnimeCatalogs(
+        limit: Int = 20,
+        tmdbService: TMDBService
+    ) async throws -> [AniListCatalogKind: [TMDBSearchResult]] {
+        // Single aliased query fetches all 5 catalogs at once (1 API call instead of 5)
+        let query = """
+        query {
+            trending: Page(perPage: \(limit)) {
+                media(type: ANIME, sort: [TRENDING_DESC]) {
+                    id
+                    title { romaji english native }
+                    episodes status seasonYear season
+                    coverImage { large medium }
+                    format
+                }
+            }
+            popular: Page(perPage: \(limit)) {
+                media(type: ANIME, sort: [POPULARITY_DESC]) {
+                    id
+                    title { romaji english native }
+                    episodes status seasonYear season
+                    coverImage { large medium }
+                    format
+                }
+            }
+            topRated: Page(perPage: \(limit)) {
+                media(type: ANIME, sort: [SCORE_DESC]) {
+                    id
+                    title { romaji english native }
+                    episodes status seasonYear season
+                    coverImage { large medium }
+                    format
+                }
+            }
+            airing: Page(perPage: \(limit)) {
+                media(type: ANIME, sort: [POPULARITY_DESC], status: RELEASING) {
+                    id
+                    title { romaji english native }
+                    episodes status seasonYear season
+                    coverImage { large medium }
+                    format
+                }
+            }
+            upcoming: Page(perPage: \(limit)) {
+                media(type: ANIME, sort: [POPULARITY_DESC], status: NOT_YET_RELEASED) {
+                    id
+                    title { romaji english native }
+                    episodes status seasonYear season
+                    coverImage { large medium }
+                    format
+                }
+            }
+        }
+        """
+
+        struct PageData: Codable { let media: [AniListAnime] }
+        struct AllCatalogsResponse: Codable {
+            let data: DataWrapper
+            struct DataWrapper: Codable {
+                let trending: PageData
+                let popular: PageData
+                let topRated: PageData
+                let airing: PageData
+                let upcoming: PageData
+            }
+        }
+
+        let data = try await executeGraphQLQuery(query, token: nil)
+        let decoded = try JSONDecoder().decode(AllCatalogsResponse.self, from: data)
+
+        // Hydrate all unique anime with TMDB matches in parallel (deduped)
+        var allAnime: [AniListAnime] = []
+        let lists: [(AniListCatalogKind, [AniListAnime])] = [
+            (.trending, decoded.data.trending.media),
+            (.popular, decoded.data.popular.media),
+            (.topRated, decoded.data.topRated.media),
+            (.airing, decoded.data.airing.media),
+            (.upcoming, decoded.data.upcoming.media),
+        ]
+        var seenIds = Set<Int>()
+        for (_, animeList) in lists {
+            for anime in animeList {
+                if seenIds.insert(anime.id).inserted {
+                    allAnime.append(anime)
+                }
+            }
+        }
+
+        // Batch TMDB hydration for all unique anime
+        let tmdbMap = await batchMapAniListToTMDB(allAnime, tmdbService: tmdbService)
+
+        // Reassemble per-catalog results preserving order
+        var result: [AniListCatalogKind: [TMDBSearchResult]] = [:]
+        for (kind, animeList) in lists {
+            result[kind] = animeList.compactMap { tmdbMap[$0.id] }
+        }
+
+        Logger.shared.log("AniListService: Fetched all 5 anime catalogs in 1 query (\(allAnime.count) unique anime)", type: "AniList")
+        return result
+    }
+
+    /// Fetch a single anime catalog (kept for backward compatibility).
     func fetchAnimeCatalog(
         _ kind: AniListCatalogKind,
         limit: Int = 20,
@@ -324,51 +427,65 @@ final class AniListService {
         // Allowed relation types we treat as season/continuation
         let allowedRelationTypes: Set<String> = ["SEQUEL", "PREQUEL", "SEASON"]
 
-        // BFS over sequels/prequels/seasons, recursively fetching relations when needed (format must be TV/TV_SHORT)
+        // BFS over sequels/prequels/seasons, batch-fetching nodes that need deeper relations per level
         var queue: [AniListAnime] = [anime]
         var seenIds = Set<Int>([anime.id])
 
-        while let current = queue.first {
-            queue.removeFirst()
+        while !queue.isEmpty {
+            let currentLevel = queue
+            queue.removeAll()
 
-            let currentTitle = AniListTitlePicker.title(from: current.title, preferredLanguageCode: preferredLanguageCode)
-            let edges = current.relations?.edges ?? []
-            Logger.shared.log("AniListService: Checking relations for '\(currentTitle)': \(edges.count) edges total", type: "AniList")
-            
-            for edge in edges {
-                let edgeTitle = AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode)
-                Logger.shared.log("  Edge: type=\(edge.relationType) nodeType=\(edge.node.type ?? "nil") format=\(edge.node.format ?? "nil") title=\(edgeTitle)", type: "AniList")
-                
-                guard allowedRelationTypes.contains(edge.relationType), edge.node.type == "ANIME" else {
-                    Logger.shared.log("    â†’ Skipped: relationType or nodeType mismatch", type: "AniList")
-                    continue
-                }
-                if let format = edge.node.format, !(format == "TV" || format == "TV_SHORT" || format == "ONA") {
-                    Logger.shared.log("    â†’ Skipped: format not TV/TV_SHORT/ONA (\(format))", type: "AniList")
-                    continue
-                }
-                if !seenIds.insert(edge.node.id).inserted {
-                    Logger.shared.log("    â†’ Skipped: already processed", type: "AniList")
-                    continue
-                }
+            var idsToFetch: [Int] = []
+            var shallowNodes: [Int: AniListRelationNode] = [:]
 
-                Logger.shared.log("    â†’ Added sequel: \(edgeTitle)", type: "AniList")
+            for current in currentLevel {
+                let currentTitle = AniListTitlePicker.title(from: current.title, preferredLanguageCode: preferredLanguageCode)
+                let edges = current.relations?.edges ?? []
+                Logger.shared.log("AniListService: Checking relations for '\(currentTitle)': \(edges.count) edges total", type: "AniList")
 
-                // Ensure we have this node's relations for deeper traversal
-                let fullNode: AniListAnime
-                if edge.node.relations != nil {
-                    fullNode = edge.node.asAnime()
-                } else if let fetched = try? await fetchAniListAnimeNode(id: edge.node.id) {
-                    fullNode = fetched
-                } else {
-                    fullNode = edge.node.asAnime()
+                for edge in edges {
+                    guard allowedRelationTypes.contains(edge.relationType), edge.node.type == "ANIME" else {
+                        continue
+                    }
+                    if let format = edge.node.format, !(format == "TV" || format == "TV_SHORT" || format == "ONA") {
+                        continue
+                    }
+                    if !seenIds.insert(edge.node.id).inserted {
+                        continue
+                    }
+
+                    let edgeTitle = AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode)
+                    Logger.shared.log("    \u2192 Added sequel: \(edgeTitle)", type: "AniList")
+
+                    if edge.node.relations != nil {
+                        let fullNode = edge.node.asAnime()
+                        appendAnime(fullNode)
+                        queue.append(fullNode)
+                    } else {
+                        idsToFetch.append(edge.node.id)
+                        shallowNodes[edge.node.id] = edge.node
+                    }
                 }
+            }
 
-                appendAnime(fullNode)
-                queue.append(fullNode)
+            if !idsToFetch.isEmpty {
+                Logger.shared.log("AniListService: Batch-fetching \(idsToFetch.count) sequel nodes in 1 query", type: "AniList")
+                let fetchedNodes = await batchFetchAniListNodes(ids: idsToFetch)
+                for id in idsToFetch {
+                    let fullNode: AniListAnime
+                    if let fetched = fetchedNodes[id] {
+                        fullNode = fetched
+                    } else if let shallow = shallowNodes[id] {
+                        fullNode = shallow.asAnime()
+                    } else {
+                        continue
+                    }
+                    appendAnime(fullNode)
+                    queue.append(fullNode)
+                }
             }
         }
-        
+
         // Fetch all TMDB season data in parallel (excluding Season 0 specials)
         // Build an absolute episode index so we can map stills/runtime even when seasons reset numbering
         var tmdbEpisodesByAbsolute: [Int: TMDBEpisode] = [:]
@@ -730,6 +847,88 @@ final class AniListService {
             return results
         }
     }
+
+    /// Batch map AniList anime to TMDB, returning a dict keyed by AniList ID for fast lookup.
+    private func batchMapAniListToTMDB(_ animeList: [AniListAnime], tmdbService: TMDBService) async -> [Int: TMDBSearchResult] {
+        func normalized(_ value: String) -> String {
+            return value.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+        }
+
+        let langCode = self.preferredLanguageCode
+
+        return await withTaskGroup(of: (Int, TMDBSearchResult?).self) { group in
+            for anime in animeList {
+                group.addTask {
+                    let titleCandidates = AniListTitlePicker.titleCandidates(from: anime.title)
+                    let expectedYear = anime.seasonYear
+                    var bestMatch: TMDBTVShow?
+
+                    for candidate in titleCandidates where !candidate.isEmpty {
+                        guard let results = try? await tmdbService.searchTVShows(query: candidate), !results.isEmpty else { continue }
+                        let candidateKey = normalized(candidate)
+
+                        let exactMatches = results.filter { normalized($0.name) == candidateKey }
+                        if !exactMatches.isEmpty {
+                            let bestExact = exactMatches.min { a, b in
+                                if let expectedYear = expectedYear {
+                                    let aDiff = Int(a.firstAirDate?.prefix(4) ?? "").map { abs($0 - expectedYear) } ?? 10000
+                                    let bDiff = Int(b.firstAirDate?.prefix(4) ?? "").map { abs($0 - expectedYear) } ?? 10000
+                                    if aDiff != bDiff { return aDiff < bDiff }
+                                }
+                                let aAnim = a.genreIds?.contains(16) == true
+                                let bAnim = b.genreIds?.contains(16) == true
+                                if aAnim != bAnim { return aAnim }
+                                return a.popularity > b.popularity
+                            }
+                            if let best = bestExact { bestMatch = best; break }
+                        }
+
+                        let partialMatches = results.filter {
+                            let nameKey = normalized($0.name)
+                            return nameKey.contains(candidateKey) || candidateKey.contains(nameKey)
+                        }
+                        if !partialMatches.isEmpty {
+                            let best = partialMatches.min { a, b in
+                                if let expectedYear = expectedYear {
+                                    let aDiff = Int(a.firstAirDate?.prefix(4) ?? "").map { abs($0 - expectedYear) } ?? 10000
+                                    let bDiff = Int(b.firstAirDate?.prefix(4) ?? "").map { abs($0 - expectedYear) } ?? 10000
+                                    if aDiff != bDiff { return aDiff < bDiff }
+                                }
+                                let aAnim = a.genreIds?.contains(16) == true
+                                let bAnim = b.genreIds?.contains(16) == true
+                                if aAnim != bAnim { return aAnim }
+                                return a.popularity > b.popularity
+                            }
+                            if let best = best { bestMatch = best; break }
+                        }
+
+                        if bestMatch == nil {
+                            bestMatch = results.min { a, b in
+                                let aAnim = a.genreIds?.contains(16) == true
+                                let bAnim = b.genreIds?.contains(16) == true
+                                if aAnim != bAnim { return aAnim }
+                                return a.popularity > b.popularity
+                            }
+                        }
+                    }
+
+                    if let bestMatch = bestMatch {
+                        let aniTitle = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: langCode)
+                        Logger.shared.log("AniListService: Matched '\(aniTitle)' → TMDB '\(bestMatch.name)' (ID: \(bestMatch.id))", type: "AniList")
+                    }
+                    return (anime.id, bestMatch?.asSearchResult)
+                }
+            }
+
+            var dict: [Int: TMDBSearchResult] = [:]
+            for await (anilistId, match) in group {
+                if let match = match {
+                    dict[anilistId] = match
+                }
+            }
+            return dict
+        }
+    }
     
     // MARK: - MAL ID to AniList ID Conversion
     
@@ -810,6 +1009,65 @@ final class AniListService {
         }
         
         throw lastError ?? NSError(domain: "AniList", code: 429, userInfo: [NSLocalizedDescriptionKey: "AniList rate limited after \(maxRetries) retries"])
+    }
+
+    /// Batch-fetch multiple anime nodes with relations in a single aliased GraphQL query
+    private func batchFetchAniListNodes(ids: [Int]) async -> [Int: AniListAnime] {
+        guard !ids.isEmpty else { return [:] }
+
+        let fragment = """
+            id
+            title { romaji english native }
+            episodes
+            status
+            seasonYear
+            season
+            format
+            type
+            coverImage { large medium }
+            relations {
+                edges {
+                    relationType
+                    node {
+                        id
+                        title { romaji english native }
+                        episodes
+                        status
+                        seasonYear
+                        season
+                        format
+                        type
+                        coverImage { large medium }
+                    }
+                }
+            }
+        """
+
+        let aliases = ids.enumerated().map { i, id in
+            "m\(i): Media(id: \(id), type: ANIME) { \(fragment) }"
+        }.joined(separator: "\n")
+
+        let query = "query { \(aliases) }"
+
+        do {
+            let data = try await executeGraphQLQuery(query, token: nil)
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            guard let dataDict = json?["data"] as? [String: Any] else { return [:] }
+
+            var result: [Int: AniListAnime] = [:]
+            for (i, id) in ids.enumerated() {
+                let key = "m\(i)"
+                if let mediaJSON = dataDict[key],
+                   let mediaData = try? JSONSerialization.data(withJSONObject: mediaJSON),
+                   let anime = try? JSONDecoder().decode(AniListAnime.self, from: mediaData) {
+                    result[id] = anime
+                }
+            }
+            return result
+        } catch {
+            Logger.shared.log("AniListService: Batch fetch failed for \(ids.count) nodes: \(error.localizedDescription)", type: "AniList")
+            return [:]
+        }
     }
 
     /// Fetch a single anime node with relations for deeper traversal

@@ -49,12 +49,13 @@ final class HomeViewModel: ObservableObject {
                     airingTodayTV, topRatedTV, topRatedM
                 )
                 
-                // Fetch anime catalogs sequentially to respect AniList rate limits
-                let trendingAnime = (try? await AniListService.shared.fetchAnimeCatalog(.trending, tmdbService: tmdbService)) ?? []
-                let popularAnime = (try? await AniListService.shared.fetchAnimeCatalog(.popular, tmdbService: tmdbService)) ?? []
-                let topRatedAnime = (try? await AniListService.shared.fetchAnimeCatalog(.topRated, tmdbService: tmdbService)) ?? []
-                let airingAnime = (try? await AniListService.shared.fetchAnimeCatalog(.airing, tmdbService: tmdbService)) ?? []
-                let upcomingAnime = (try? await AniListService.shared.fetchAnimeCatalog(.upcoming, tmdbService: tmdbService)) ?? []
+                // Fetch all anime catalogs in a single AniList query (1 API call instead of 5)
+                let animeCatalogs = (try? await AniListService.shared.fetchAllAnimeCatalogs(tmdbService: tmdbService)) ?? [:]
+                let trendingAnime = animeCatalogs[.trending] ?? []
+                let popularAnime = animeCatalogs[.popular] ?? []
+                let topRatedAnime = animeCatalogs[.topRated] ?? []
+                let airingAnime = animeCatalogs[.airing] ?? []
+                let upcomingAnime = animeCatalogs[.upcoming] ?? []
                 
                 await MainActor.run {
                     self.catalogResults = [
