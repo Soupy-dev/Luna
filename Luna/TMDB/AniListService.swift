@@ -1,5 +1,23 @@
 ﻿import Foundation
 
+/// Ensures AniList API calls are spaced out to stay under the 90 req/min rate limit.
+private actor AniListRateLimiter {
+    static let shared = AniListRateLimiter()
+    
+    private let minInterval: TimeInterval = 0.7 // ~85 req/min max
+    private var lastRequestTime: Date = .distantPast
+    
+    func waitForSlot() async {
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastRequestTime)
+        if elapsed < minInterval {
+            let delay = minInterval - elapsed
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+        lastRequestTime = Date()
+    }
+}
+
 final class AniListService {
     static let shared = AniListService()
 
@@ -113,8 +131,9 @@ final class AniListService {
         var allSchedules: [Response.AiringSchedule] = []
         var currentPage = 1
         var hasNextPage = true
+        let maxPages = 10
 
-        while hasNextPage {
+        while hasNextPage && currentPage <= maxPages {
             let query = """
             query {
                 Page(page: \(currentPage), perPage: \(perPage)) {
@@ -139,6 +158,11 @@ final class AniListService {
             allSchedules.append(contentsOf: decoded.data.Page.airingSchedules)
             hasNextPage = decoded.data.Page.pageInfo.hasNextPage
             currentPage += 1
+
+            // Brief pause between pages to avoid rate limiting
+            if hasNextPage && currentPage <= maxPages {
+                try await Task.sleep(nanoseconds: 400_000_000) // 0.4s
+            }
         }
 
         let start = today
@@ -707,11 +731,14 @@ final class AniListService {
     
     // MARK: - Private Helpers
     
-    private func executeGraphQLQuery(_ query: String, token: String?) async throws -> Data {
+    private func executeGraphQLQuery(_ query: String, token: String?, maxRetries: Int = 3) async throws -> Data {
+        // Throttle all AniList requests to stay under rate limit
+        await AniListRateLimiter.shared.waitForSlot()
+        
         var request = URLRequest(url: graphQLEndpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 30 // 30 second timeout for AniList requests
+        request.timeoutInterval = 30
         
         if let token = token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -720,17 +747,34 @@ final class AniListService {
         let body: [String: Any] = ["query": query]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+        var lastError: Error?
+        for attempt in 0..<maxRetries {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
             if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 200 {
+                    return data
+                }
+                
+                // Rate limited — wait and retry
+                if httpResponse.statusCode == 429 {
+                    let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                        .flatMap(Double.init) ?? Double(2 * (attempt + 1))
+                    let delay = min(retryAfter, 10)
+                    Logger.shared.log("AniList rate limited (429), retry \(attempt + 1)/\(maxRetries) after \(delay)s", type: "AniList")
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    lastError = NSError(domain: "AniList", code: 429, userInfo: [NSLocalizedDescriptionKey: "AniList rate limited (HTTP 429)"])
+                    continue
+                }
+                
                 let error = "AniList error (HTTP \(httpResponse.statusCode))"
                 throw NSError(domain: "AniList", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: error])
             }
+            
             throw NSError(domain: "AniList", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to fetch from AniList"])
         }
         
-        return data
+        throw lastError ?? NSError(domain: "AniList", code: 429, userInfo: [NSLocalizedDescriptionKey: "AniList rate limited after \(maxRetries) retries"])
     }
 
     /// Fetch a single anime node with relations for deeper traversal

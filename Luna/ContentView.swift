@@ -10,18 +10,26 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var accentColorManager = AccentColorManager.shared
     @ObservedObject private var downloadManager = DownloadManager.shared
-    @State private var showingSearch = false
     
     var body: some View {
 #if compiler(>=6.0)
         if #available(iOS 26.0, tvOS 26.0, *) {
             modernTabView
                 .accentColor(accentColorManager.currentAccentColor)
+                .overlay(alignment: .topTrailing) {
+                    FloatingSettingsOverlay()
+                }
         } else {
             olderTabView
+                .overlay(
+                    FloatingSettingsOverlay()
+                )
         }
 #else
         olderTabView
+            .overlay(
+                FloatingSettingsOverlay()
+            )
 #endif
     }
     
@@ -50,10 +58,6 @@ struct ContentView: View {
             
             Tab("Search", systemImage: "magnifyingglass", role: .search) {
                 SearchView()
-            }
-            
-            Tab("Settings", systemImage: "gear") {
-                SettingsView()
             }
         }
 #if !os(tvOS)
@@ -95,12 +99,6 @@ struct ContentView: View {
                 .tabItem {
                     Image(systemName: "magnifyingglass")
                     Text("Search")
-                }
-            
-            SettingsView()
-                .tabItem {
-                    Image(systemName: "gear")
-                    Text("Settings")
                 }
         }
         .accentColor(accentColorManager.currentAccentColor)
