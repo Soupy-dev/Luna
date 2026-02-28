@@ -2045,10 +2045,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
     }
 
-    // MARK: - AniSkip Integration (VLC-only)
+    // MARK: - AniSkip Integration
 
     private func fetchAniSkipData() {
-        guard isVLCPlayer, !aniSkipFetched, isAnimeContent() else { return }
+        guard !aniSkipFetched, isAnimeContent() else { return }
         guard case .episode(let showId, let seasonNumber, let episodeNumber, _, _, _) = mediaInfo else { return }
 
         aniSkipFetched = true
@@ -2093,7 +2093,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
 #if !os(tvOS)
     private func updateAniSkipState(position: Double, duration: Double) {
-        guard isVLCPlayer, !aniSkipSegments.isEmpty, duration > 0 else { return }
+        guard !aniSkipSegments.isEmpty, duration > 0 else { return }
 
         // Find if current position is inside any skip segment (with 1 s tolerance on entry)
         let activeSegment = aniSkipSegments.first { seg in
@@ -3375,6 +3375,9 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
                 Logger.shared.log("Resumed MPV playback from \(Int(seekTime))s", type: "Progress")
                 self.pendingSeekTime = nil
             }
+
+            // Fetch AniSkip data once MPV is ready
+            self.fetchAniSkipData()
         }
     }
 

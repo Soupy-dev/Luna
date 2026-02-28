@@ -101,43 +101,105 @@ struct DownloadsView: View {
     // MARK: - Downloads List
     
     private var downloadsList: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                if !activeDownloads.isEmpty {
-                    sectionHeader("Active", count: activeDownloads.count)
-                    
+        List {
+            if !activeDownloads.isEmpty {
+                Section {
                     ForEach(activeDownloads) { item in
                         activeDownloadRow(item)
-                            .padding(.horizontal)
-                            .padding(.vertical, 4)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    downloadManager.cancelDownload(id: item.id)
+                                } label: {
+                                    Label("Cancel", systemImage: "xmark.circle")
+                                }
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                if item.status == .downloading {
+                                    Button {
+                                        downloadManager.pauseDownload(id: item.id)
+                                    } label: {
+                                        Label("Pause", systemImage: "pause.circle")
+                                    }
+                                    .tint(.orange)
+                                } else if item.status == .paused {
+                                    Button {
+                                        downloadManager.resumeDownload(id: item.id)
+                                    } label: {
+                                        Label("Resume", systemImage: "play.circle")
+                                    }
+                                    .tint(.green)
+                                }
+                            }
                     }
+                } header: {
+                    sectionHeader("Active", count: activeDownloads.count)
                 }
-                
-                if !failedDownloads.isEmpty {
-                    sectionHeader("Failed", count: failedDownloads.count)
-                    
+            }
+            
+            if !failedDownloads.isEmpty {
+                Section {
                     ForEach(failedDownloads) { item in
                         failedDownloadRow(item)
-                            .padding(.horizontal)
-                            .padding(.vertical, 4)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    downloadManager.removeDownload(id: item.id, deleteFile: true)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    downloadManager.resumeDownload(id: item.id)
+                                } label: {
+                                    Label("Retry", systemImage: "arrow.clockwise")
+                                }
+                                .tint(.orange)
+                            }
                     }
+                } header: {
+                    sectionHeader("Failed", count: failedDownloads.count)
                 }
-                
-                if !completedDownloads.isEmpty {
-                    sectionHeader("Completed", count: completedDownloads.count)
-                    
+            }
+            
+            if !completedDownloads.isEmpty {
+                Section {
                     ForEach(completedDownloads) { item in
                         completedDownloadRow(item)
-                            .padding(.horizontal)
-                            .padding(.vertical, 4)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    downloadManager.removeDownload(id: item.id, deleteFile: true)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                if downloadManager.localFileURL(for: item) != nil {
+                                    Button {
+                                        shareDownloadedItem(item)
+                                    } label: {
+                                        Label("Share", systemImage: "square.and.arrow.up")
+                                    }
+                                    .tint(.blue)
+                                }
+                            }
                     }
+                } header: {
+                    sectionHeader("Completed", count: completedDownloads.count)
                 }
-                
+            }
+            
+            Section {
                 storageFooter
-                    .padding(.top, 16)
-                    .padding(.bottom, 32)
+                    .listRowBackground(Color.clear)
             }
         }
+        .listStyle(.plain)
     }
     
     // MARK: - Section Header
@@ -342,7 +404,7 @@ struct DownloadsView: View {
                             Text("•")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
-                            Text(date, style: .relative)
+                            Text(Self.completedDateString(from: date))
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -363,6 +425,11 @@ struct DownloadsView: View {
         .contextMenu {
             Button(action: { playDownloadedItem(item) }) {
                 Label("Play", systemImage: "play.fill")
+            }
+            if downloadManager.localFileURL(for: item) != nil {
+                Button(action: { shareDownloadedItem(item) }) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
             }
             Button(role: .destructive, action: { downloadManager.removeDownload(id: item.id, deleteFile: true) }) {
                 Label("Delete", systemImage: "trash")
@@ -411,6 +478,12 @@ struct DownloadsView: View {
                 }
             }
             
+            if !activeDownloads.isEmpty {
+                Button(role: .destructive, action: { downloadManager.cancelAllActive() }) {
+                    Label("Cancel All Active", systemImage: "xmark.circle")
+                }
+            }
+            
             Divider()
             
             if !completedDownloads.isEmpty {
@@ -447,6 +520,29 @@ struct DownloadsView: View {
     }
     
     // MARK: - Playback
+    
+    private static func completedDateString(from date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        if interval < 60 { return "Just now" }
+        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        if interval < 86400 { return "\(Int(interval / 3600))h ago" }
+        let formatter = DateFormatter()
+        formatter.doesRelativeDateFormatting = true
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+    
+    private func shareDownloadedItem(_ item: DownloadItem) {
+        guard let fileURL = downloadManager.localFileURL(for: item) else { return }
+        let activityVC = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let rootVC = windowScene.windows.first?.rootViewController,
+           let topmostVC = rootVC.topmostViewController() as UIViewController? {
+            activityVC.popoverPresentationController?.sourceView = topmostVC.view
+            topmostVC.present(activityVC, animated: true)
+        }
+    }
     
     private func playDownloadedItem(_ item: DownloadItem) {
         guard let fileURL = downloadManager.localFileURL(for: item) else {

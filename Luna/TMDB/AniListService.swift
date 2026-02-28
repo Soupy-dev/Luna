@@ -4,7 +4,7 @@
 private actor AniListRateLimiter {
     static let shared = AniListRateLimiter()
     
-    private let minInterval: TimeInterval = 0.7 // ~85 req/min max
+    private let minInterval: TimeInterval = 0.5 // ~120 req/min max, 429 retry handles bursts
     private var lastRequestTime: Date = .distantPast
     
     func waitForSlot() async {
@@ -359,26 +359,46 @@ final class AniListService {
             }
         }
         
-        // Fetch all TMDB season data (excluding Season 0 specials)
+        // Fetch all TMDB season data in parallel (excluding Season 0 specials)
         // Build an absolute episode index so we can map stills/runtime even when seasons reset numbering
         var tmdbEpisodesByAbsolute: [Int: TMDBEpisode] = [:]
         if let tvShowDetail {
-            var absoluteIndex = 1
             // Sort seasons by seasonNumber to keep ordering consistent
             let realSeasons = tvShowDetail.seasons.filter { $0.seasonNumber > 0 }.sorted { $0.seasonNumber < $1.seasonNumber }
-            for season in realSeasons {
-                do {
-                    let seasonDetail = try await tmdbService.getSeasonDetails(tvShowId: tmdbShowId, seasonNumber: season.seasonNumber)
-                    Logger.shared.log("AniListService: TMDB season \(season.seasonNumber) returned \(seasonDetail.episodes.count) episodes", type: "AniList")
-                    for episode in seasonDetail.episodes.sorted(by: { $0.episodeNumber < $1.episodeNumber }) {
-                        tmdbEpisodesByAbsolute[absoluteIndex] = episode
-                        if absoluteIndex <= 3 {
-                            Logger.shared.log("  Episode \(episode.episodeNumber): '\(episode.name)', overview: \(episode.overview?.isEmpty == false ? "YES" : "NO"), stillPath: \(episode.stillPath != nil ? "YES" : "NO")", type: "AniList")
+            
+            // Fetch all seasons in parallel for speed
+            var seasonResults: [(seasonNumber: Int, episodes: [TMDBEpisode])] = []
+            await withTaskGroup(of: (Int, [TMDBEpisode]?).self) { group in
+                for season in realSeasons {
+                    group.addTask {
+                        do {
+                            let detail = try await tmdbService.getSeasonDetails(tvShowId: tmdbShowId, seasonNumber: season.seasonNumber)
+                            return (season.seasonNumber, detail.episodes)
+                        } catch {
+                            Logger.shared.log("AniListService: Failed to fetch TMDB season \(season.seasonNumber): \(error.localizedDescription)", type: "AniList")
+                            return (season.seasonNumber, nil)
                         }
-                        absoluteIndex += 1
                     }
-                } catch {
-                    Logger.shared.log("AniListService: Failed to fetch TMDB season \(season.seasonNumber): \(error.localizedDescription)", type: "AniList")
+                }
+                for await (seasonNum, episodes) in group {
+                    if let episodes {
+                        seasonResults.append((seasonNum, episodes))
+                    }
+                }
+            }
+            
+            // Process results in season order
+            seasonResults.sort { $0.seasonNumber < $1.seasonNumber }
+            var absoluteIndex = 1
+            for (seasonNum, episodes) in seasonResults {
+                let sorted = episodes.sorted(by: { $0.episodeNumber < $1.episodeNumber })
+                Logger.shared.log("AniListService: TMDB season \(seasonNum) returned \(sorted.count) episodes", type: "AniList")
+                for episode in sorted {
+                    tmdbEpisodesByAbsolute[absoluteIndex] = episode
+                    if absoluteIndex <= 3 {
+                        Logger.shared.log("  Episode \(episode.episodeNumber): '\(episode.name)', overview: \(episode.overview?.isEmpty == false ? "YES" : "NO"), stillPath: \(episode.stillPath != nil ? "YES" : "NO")", type: "AniList")
+                    }
+                    absoluteIndex += 1
                 }
             }
         }

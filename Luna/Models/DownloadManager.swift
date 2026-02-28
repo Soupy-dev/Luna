@@ -80,6 +80,7 @@ final class DownloadManager: NSObject, ObservableObject {
     private var backgroundSession: URLSession!
     private var activeTasks: [String: URLSessionDownloadTask] = [:]
     private var resumeDataStore: [String: Data] = [:]
+    private var lastProgressUpdate: [String: Date] = [:]
     
     private let maxConcurrentDownloads = 2
     private let fileManager = FileManager.default
@@ -329,6 +330,13 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
     
+    func cancelAllActive() {
+        let active = downloads.filter { $0.status == .downloading || $0.status == .queued || $0.status == .paused }
+        for item in active {
+            cancelDownload(id: item.id)
+        }
+    }
+    
     func localFileURL(for item: DownloadItem) -> URL? {
         guard let fileName = item.localFileName else { return nil }
         let url = downloadsDirectory.appendingPathComponent(fileName)
@@ -413,6 +421,11 @@ final class DownloadManager: NSObject, ObservableObject {
             request.setValue(value, forHTTPHeaderField: key)
         }
         
+        // Warn about HLS streams - background sessions download the manifest only
+        if url.pathExtension.lowercased() == "m3u8" || item.streamURL.contains(".m3u8") {
+            Logger.shared.log("Warning: HLS stream detected for \(item.displayTitle). Background download will save the manifest file, not the full video.", type: "Download")
+        }
+        
         let task: URLSessionDownloadTask
         if let resumeData = resumeDataStore[item.id] {
             task = backgroundSession.downloadTask(withResumeData: resumeData)
@@ -441,11 +454,41 @@ final class DownloadManager: NSObject, ObservableObject {
         Logger.shared.log("Started download: \(item.displayTitle)", type: "Download")
     }
     
+    /// Known video file extensions that VLC/mpv can play
+    private static let knownVideoExtensions: Set<String> = [
+        "mp4", "mkv", "webm", "mov", "avi", "wmv", "flv", "ts", "m2ts",
+        "mpg", "mpeg", "ogv", "3gp", "m4v", "vob", "divx", "asf", "rm",
+        "rmvb", "f4v", "mts"
+    ]
+    
+    /// Known subtitle file extensions supported by the players
+    private static let knownSubtitleExtensions: Set<String> = [
+        "srt", "vtt", "ass", "ssa", "sub", "idx", "sup", "smi", "mks", "dfxp", "ttml"
+    ]
+    
     private func downloadSubtitle(for downloadId: String, from url: URL) {
-        let subtitleTask = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, _, error in
+        let subtitleTask = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
             guard let self = self, let tempURL = tempURL, error == nil else { return }
             
-            let ext = url.pathExtension.isEmpty ? "srt" : url.pathExtension
+            // Determine subtitle extension from URL, Content-Type, or default to srt
+            var ext = url.pathExtension.lowercased()
+            if ext.isEmpty || !Self.knownSubtitleExtensions.contains(ext) {
+                // Try Content-Type header
+                if let httpResp = response as? HTTPURLResponse,
+                   let contentType = httpResp.value(forHTTPHeaderField: "Content-Type")?.lowercased() {
+                    if contentType.contains("vtt") || contentType.contains("webvtt") {
+                        ext = "vtt"
+                    } else if contentType.contains("ass") || contentType.contains("ssa") {
+                        ext = "ass"
+                    } else if contentType.contains("subrip") {
+                        ext = "srt"
+                    } else {
+                        ext = "srt"
+                    }
+                } else {
+                    ext = "srt"
+                }
+            }
             let fileName = "\(downloadId)_sub.\(ext)"
             let destURL = self.downloadsDirectory.appendingPathComponent(fileName)
             
@@ -524,19 +567,34 @@ extension DownloadManager: URLSessionDownloadDelegate {
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let downloadId = downloadTask.taskDescription else { return }
         
-        // Determine file extension from response
+        // Determine file extension from response MIME type or URL
         let ext: String
-        if let mimeType = downloadTask.response?.mimeType {
+        let urlExt = (downloadTask.currentRequest?.url?.pathExtension ?? downloadTask.originalRequest?.url?.pathExtension ?? "").lowercased()
+        if let mimeType = downloadTask.response?.mimeType?.lowercased() {
             switch mimeType {
-            case "video/mp4": ext = "mp4"
-            case "video/x-matroska": ext = "mkv"
-            case "video/webm": ext = "webm"
-            case "application/x-mpegURL", "application/vnd.apple.mpegurl": ext = "m3u8"
-            default: ext = "mp4"
+            // Video formats
+            case "video/mp4":                                       ext = "mp4"
+            case "video/x-matroska":                                ext = "mkv"
+            case "video/webm":                                      ext = "webm"
+            case "video/quicktime":                                  ext = "mov"
+            case "video/x-msvideo":                                  ext = "avi"
+            case "video/x-ms-wmv":                                   ext = "wmv"
+            case "video/x-flv", "video/flv":                         ext = "flv"
+            case "video/mp2t", "video/m2ts", "video/vnd.dlna.mpeg-tts": ext = "ts"
+            case "video/3gpp":                                       ext = "3gp"
+            case "video/ogg":                                        ext = "ogv"
+            case "video/mpeg":                                       ext = "mpg"
+            // HLS manifests
+            case "application/x-mpegurl", "application/vnd.apple.mpegurl": ext = "m3u8"
+            // Generic binary — trust the URL extension if it's a known video format
+            case "application/octet-stream":
+                ext = Self.knownVideoExtensions.contains(urlExt) ? urlExt : (urlExt.isEmpty ? "mp4" : urlExt)
+            default:
+                // Unknown MIME — prefer URL extension if it's a known format
+                ext = Self.knownVideoExtensions.contains(urlExt) ? urlExt : "mp4"
             }
         } else {
-            let urlExt = downloadTask.originalRequest?.url?.pathExtension ?? "mp4"
-            ext = urlExt.isEmpty ? "mp4" : urlExt
+            ext = Self.knownVideoExtensions.contains(urlExt) ? urlExt : (urlExt.isEmpty ? "mp4" : urlExt)
         }
         
         let fileName = "\(downloadId).\(ext)"
@@ -576,6 +634,14 @@ extension DownloadManager: URLSessionDownloadDelegate {
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         guard let downloadId = downloadTask.taskDescription else { return }
         
+        // Throttle progress updates to max every 0.5 seconds to reduce UI churn
+        let now = Date()
+        if let lastUpdate = lastProgressUpdate[downloadId],
+           now.timeIntervalSince(lastUpdate) < 0.5 {
+            return
+        }
+        lastProgressUpdate[downloadId] = now
+        
         let progress = totalBytesExpectedToWrite > 0
             ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
             : 0
@@ -606,5 +672,23 @@ extension DownloadManager: URLSessionDownloadDelegate {
             self.backgroundCompletionHandler?()
             self.backgroundCompletionHandler = nil
         }
+    }
+    
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        // Re-attach custom headers that get stripped on redirect by background sessions
+        guard let downloadId = task.taskDescription,
+              let item = downloads.first(where: { $0.id == downloadId }),
+              !item.headers.isEmpty else {
+            completionHandler(request)
+            return
+        }
+        
+        var updatedRequest = request
+        for (key, value) in item.headers {
+            if updatedRequest.value(forHTTPHeaderField: key) == nil {
+                updatedRequest.setValue(value, forHTTPHeaderField: key)
+            }
+        }
+        completionHandler(updatedRequest)
     }
 }
