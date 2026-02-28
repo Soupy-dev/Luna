@@ -2049,27 +2049,67 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
     private func fetchAniSkipData() {
         guard !aniSkipFetched, isAnimeContent() else { return }
-        guard case .episode(let showId, let seasonNumber, let episodeNumber, _, _, _) = mediaInfo else { return }
+        guard case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _, _) = mediaInfo else { return }
 
         aniSkipFetched = true
 
-        // Resolve AniList ID: prefer season-specific, then show-level, then async lookup
-        let seasonId = trackerManager.cachedAniListSeasonId(tmdbId: showId, seasonNumber: seasonNumber)
-        let showLevelId = trackerManager.cachedAniListId(for: showId)
-        let resolvedId = seasonId ?? showLevelId
-
         Task { [weak self] in
             guard let self else { return }
-            var anilistId = resolvedId
 
+            // Step 1: Check season-specific cache (populated when user visited the detail page)
+            var anilistId = self.trackerManager.cachedAniListSeasonId(tmdbId: showId, seasonNumber: seasonNumber)
+            if let id = anilistId {
+                Logger.shared.log("AniSkip: Step 1 hit – cached season ID \(id) for tmdbId=\(showId) s=\(seasonNumber)", type: "AniSkip")
+            }
+
+            // Step 2: Fall back to show-level cache
             if anilistId == nil {
+                anilistId = self.trackerManager.cachedAniListId(for: showId)
+                if let id = anilistId {
+                    Logger.shared.log("AniSkip: Step 2 hit – cached show-level ID \(id) for tmdbId=\(showId)", type: "AniSkip")
+                }
+            }
+
+            // Step 3: Full AniList resolution (same path MediaDetailView uses)
+            // This resolves season-specific AniList IDs via sequel chain traversal
+            if anilistId == nil, let title = showTitle {
+                Logger.shared.log("AniSkip: Step 3 – resolving via AniListService for '\(title)' tmdbId=\(showId)", type: "AniSkip")
+                do {
+                    let animeData = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
+                        title: title,
+                        tmdbShowId: showId,
+                        tmdbService: TMDBService.shared,
+                        tmdbShowPoster: nil,
+                        token: nil
+                    )
+                    // Cache all season mappings for future use
+                    let seasonMappings = animeData.seasons.map { (seasonNumber: $0.seasonNumber, anilistId: $0.anilistId) }
+                    self.trackerManager.registerAniListAnimeData(tmdbId: showId, seasons: seasonMappings)
+
+                    // Pick our season
+                    anilistId = animeData.seasons.first(where: { $0.seasonNumber == seasonNumber })?.anilistId
+                    if let id = anilistId {
+                        Logger.shared.log("AniSkip: Step 3 resolved season \(seasonNumber) → anilistId=\(id)", type: "AniSkip")
+                    } else {
+                        Logger.shared.log("AniSkip: Step 3 resolved \(animeData.seasons.count) seasons but none matched s=\(seasonNumber)", type: "AniSkip")
+                    }
+                } catch {
+                    Logger.shared.log("AniSkip: Step 3 failed: \(error.localizedDescription)", type: "AniSkip")
+                }
+            }
+
+            // Step 4: Last resort – simple title search (show-level only)
+            if anilistId == nil {
+                Logger.shared.log("AniSkip: Step 4 – fallback getAniListMediaId for tmdbId=\(showId)", type: "AniSkip")
                 anilistId = await self.trackerManager.getAniListMediaId(tmdbId: showId)
             }
 
             guard let finalId = anilistId else {
-                Logger.shared.log("AniSkip: No AniList ID found for tmdbId=\(showId) season=\(seasonNumber)", type: "AniSkip")
+                Logger.shared.log("AniSkip: No AniList ID found after all steps for tmdbId=\(showId) season=\(seasonNumber)", type: "AniSkip")
                 return
             }
+
+            Logger.shared.log("AniSkip: Using anilistId=\(finalId) for tmdbId=\(showId) s=\(seasonNumber) ep=\(episodeNumber)", type: "AniSkip")
 
             // Read duration at call time; VLC may not have it yet so we pass whatever we have.
             // Normalization into progressModel.skipSegments is deferred to updateAniSkipState
@@ -2662,6 +2702,25 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard currentSubtitleIndex < subtitleURLs.count else { return }
         let urlString = subtitleURLs[currentSubtitleIndex]
         Logger.shared.log("[PlayerVC.Subtitles] loadCurrentSubtitle index=\(currentSubtitleIndex) renderer=\(isVLCPlayer ? "VLC" : "MPV")", type: "Stream")
+
+        // Handle local file:// URLs directly (e.g. downloaded media subtitles)
+        if let url = URL(string: urlString), url.isFileURL {
+            Logger.shared.log("[PlayerVC.Subtitles] Loading local subtitle file: \(url.path)", type: "Stream")
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                do {
+                    let data = try Data(contentsOf: url)
+                    guard let subtitleContent = String(data: data, encoding: .utf8) else {
+                        Logger.shared.log("Failed to decode local subtitle data as UTF-8", type: "Error")
+                        return
+                    }
+                    self.parseAndDisplaySubtitles(subtitleContent)
+                } catch {
+                    Logger.shared.log("Failed to read local subtitle file: \(error.localizedDescription)", type: "Error")
+                }
+            }
+            return
+        }
 
         if !isVLCPlayer {
             guard let url = URL(string: urlString) else {

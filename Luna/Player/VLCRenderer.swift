@@ -508,8 +508,10 @@ final class VLCRenderer: NSObject {
             Logger.shared.log("VLCRenderer: Adding external subtitles count=\(urls.count)", type: "Info")
             for urlString in urls {
                 if let url = URL(string: urlString) {
-                    player.addPlaybackSlave(url, type: VLCMediaPlaybackSlaveType.subtitle, enforce: false)
-                    Logger.shared.log("VLCRenderer: added playback slave subtitle=\(url.absoluteString)", type: "Info")
+                    // enforce: true for local files so VLC auto-selects the subtitle track
+                    let shouldEnforce = url.isFileURL
+                    player.addPlaybackSlave(url, type: VLCMediaPlaybackSlaveType.subtitle, enforce: shouldEnforce)
+                    Logger.shared.log("VLCRenderer: added playback slave subtitle=\(url.absoluteString) enforce=\(shouldEnforce)", type: "Info")
                 }
             }
             DispatchQueue.main.async { [weak self] in
