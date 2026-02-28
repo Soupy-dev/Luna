@@ -28,7 +28,7 @@ struct HLSEncryptionKey {
 
 // MARK: - HLS Downloader
 
-final class HLSDownloader {
+final class HLSDownloader: @unchecked Sendable {
     
     private let streamURL: URL
     private let headers: [String: String]

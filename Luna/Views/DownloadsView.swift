@@ -584,6 +584,7 @@ struct DownloadsView: View {
                             }
                         } else {
                             // TV Shows grouped by season
+#if !os(tvOS)
                             DisclosureGroup {
                                 ForEach(show.seasons) { season in
                                     if show.seasons.count > 1 {
@@ -627,6 +628,13 @@ struct DownloadsView: View {
                             }
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                             .listRowBackground(Color.clear)
+#else
+                            ForEach(show.seasons.flatMap { $0.episodes }) { item in
+                                libraryEpisodeRow(item)
+                                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                                    .listRowBackground(Color.clear)
+                            }
+#endif
                         }
                     }
                     

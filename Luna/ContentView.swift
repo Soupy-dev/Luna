@@ -135,7 +135,11 @@ struct ContentView: View {
                 .navigationViewStyle(StackNavigationViewStyle())
             }
         }
+#if os(iOS)
         .background(Color(.systemBackground))
+#else
+        .background(Color.black)
+#endif
     }
     
     private var olderTabView: some View {
