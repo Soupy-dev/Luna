@@ -486,6 +486,71 @@ final class AniListService {
             }
         }
 
+        // Fix B: If BFS found fewer seasons than TMDB has, search AniList for orphaned entries
+        // Handles disconnected AniList graphs (e.g. SAO where S2→S3 relation edge is missing)
+        if let tvShowDetail, !allAnimeToProcess.isEmpty {
+            let tmdbSeasonCount = tvShowDetail.seasons.filter { $0.seasonNumber > 0 }.count
+            if allAnimeToProcess.count < tmdbSeasonCount {
+                Logger.shared.log("AniListService: BFS found \(allAnimeToProcess.count) seasons but TMDB has \(tmdbSeasonCount) — searching for orphaned entries", type: "AniList")
+                let searchTitle = tvShowDetail.name
+                let orphanQuery = """
+                query {
+                    Page(perPage: 20) {
+                        media(search: "\(searchTitle.replacingOccurrences(of: "\"", with: "\\\""))", type: ANIME, sort: POPULARITY_DESC) {
+                            id
+                            title { romaji english native }
+                            episodes
+                            status
+                            seasonYear
+                            season
+                            coverImage { large medium }
+                            format
+                            type
+                        }
+                    }
+                }
+                """
+
+                struct OrphanResponse: Codable {
+                    let data: DataWrapper
+                    struct DataWrapper: Codable {
+                        let Page: PageData
+                        struct PageData: Codable { let media: [AniListAnime] }
+                    }
+                }
+
+                if let orphanData = try? await executeGraphQLQuery(orphanQuery, token: token),
+                   let orphanDecoded = try? JSONDecoder().decode(OrphanResponse.self, from: orphanData) {
+                    let orphanAllowedFormats: Set<String> = ["TV", "TV_SHORT", "ONA"]
+                    let rootTitle = title.lowercased()
+                    let rootWords = rootTitle.split(separator: " ").prefix(3).joined(separator: " ")
+
+                    for candidate in orphanDecoded.data.Page.media {
+                        guard !seenIds.contains(candidate.id) else { continue }
+                        guard candidate.type == "ANIME" else { continue }
+                        if let format = candidate.format, !orphanAllowedFormats.contains(format) { continue }
+
+                        let candidateTitle = AniListTitlePicker.title(from: candidate.title, preferredLanguageCode: preferredLanguageCode).lowercased()
+                        let candidateRomaji = candidate.title.romaji?.lowercased() ?? ""
+                        guard candidateTitle.contains(rootWords) || candidateRomaji.contains(rootWords) else { continue }
+
+                        seenIds.insert(candidate.id)
+                        appendAnime(candidate)
+                        Logger.shared.log("AniListService: Found orphaned entry: '\(AniListTitlePicker.title(from: candidate.title, preferredLanguageCode: preferredLanguageCode))' (id: \(candidate.id), episodes: \(candidate.episodes ?? 0))", type: "AniList")
+                    }
+                }
+            }
+        }
+
+        // Fix A: Sort collected anime chronologically so seasons are in correct order
+        // regardless of BFS traversal order or orphan discovery order
+        allAnimeToProcess.sort { lhs, rhs in
+            let lhsYear = lhs.anime.seasonYear ?? Int.max
+            let rhsYear = rhs.anime.seasonYear ?? Int.max
+            if lhsYear != rhsYear { return lhsYear < rhsYear }
+            return lhs.anime.id < rhs.anime.id
+        }
+
         // Fetch all TMDB season data in parallel (excluding Season 0 specials)
         // Build an absolute episode index so we can map stills/runtime even when seasons reset numbering
         var tmdbEpisodesByAbsolute: [Int: TMDBEpisode] = [:]
