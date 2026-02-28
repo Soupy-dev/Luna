@@ -455,7 +455,7 @@ final class AniListService {
                     }
 
                     let edgeTitle = AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode)
-                    Logger.shared.log("    \u2192 Added sequel: \(edgeTitle)", type: "AniList")
+                    Logger.shared.log("    \u{2192} Added sequel: \(edgeTitle)", type: "AniList")
 
                     if edge.node.relations != nil {
                         let fullNode = edge.node.asAnime()
