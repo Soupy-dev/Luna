@@ -1201,6 +1201,22 @@ final class AniListService {
                         format
                         type
                         coverImage { large medium }
+                        relations {
+                            edges {
+                                relationType
+                                node {
+                                    id
+                                    title { romaji english native }
+                                    episodes
+                                    status
+                                    seasonYear
+                                    season
+                                    format
+                                    type
+                                    coverImage { large medium }
+                                }
+                            }
+                        }
                     }
                 }
             }
