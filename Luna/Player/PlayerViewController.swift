@@ -2115,10 +2115,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
             Logger.shared.log("AniSkip: Using anilistId=\(finalId) for tmdbId=\(showId) s=\(seasonNumber) ep=\(episodeNumber)", type: "AniSkip")
 
-            // Read duration at call time; VLC may not have it yet so we pass whatever we have.
-            // Normalization into progressModel.skipSegments is deferred to updateAniSkipState
-            // where cachedDuration is guaranteed > 0.
-            let durationAtFetch = await MainActor.run { self.cachedDuration }
+            // Wait for renderer to report a valid duration (VLC often hasn't parsed it yet at didBecomeReadyToSeek)
+            var durationAtFetch: Double = 0
+            for attempt in 1...20 { // up to ~10 seconds
+                durationAtFetch = await MainActor.run { self.cachedDuration }
+                if durationAtFetch > 0 { break }
+                Logger.shared.log("AniSkip: Waiting for duration (attempt \(attempt)/20)…", type: "AniSkip")
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
+            }
+
+            if durationAtFetch <= 0 {
+                Logger.shared.log("AniSkip: Duration still 0 after waiting — calling API without episodeLength", type: "AniSkip")
+            }
 
             do {
                 let segments = try await AniSkipService.shared.fetchSkipTimes(
