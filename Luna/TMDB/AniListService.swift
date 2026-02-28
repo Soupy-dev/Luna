@@ -436,7 +436,7 @@ final class AniListService {
             queue.removeAll()
 
             var idsToFetch: [Int] = []
-            var shallowNodes: [Int: AniListRelationNode] = [:]
+            var shallowNodes: [Int: AniListAnime.AniListRelationNode] = [:]
 
             for current in currentLevel {
                 let currentTitle = AniListTitlePicker.title(from: current.title, preferredLanguageCode: preferredLanguageCode)
