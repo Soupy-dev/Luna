@@ -23,6 +23,7 @@ struct MediaDetailView: View {
     @State private var synopsis: String = ""
     @State private var isBookmarked: Bool = false
     @State private var showingSearchResults = false
+    @State private var showingDownloadSheet = false
     @State private var showingAddToCollection = false
     @State private var selectedEpisodeForSearch: TMDBEpisode?
     @State private var romajiTitle: String?
@@ -151,6 +152,32 @@ struct MediaDetailView: View {
                 tmdbId: searchResult.id,
                 animeSeasonTitle: isAnimeShow ? "anime" : nil,
                 posterPath: searchResult.isMovie ? movieDetail?.posterPath : tvShowDetail?.posterPath
+            )
+        }
+        .sheet(isPresented: $showingDownloadSheet) {
+            ModulesSearchResultsSheet(
+                mediaTitle: {
+                    if isAnimeShow, let episode = selectedEpisodeForSearch,
+                       let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                        return seasonTitle
+                    }
+                    return searchResult.displayTitle
+                }(),
+                seasonTitleOverride: {
+                    if isAnimeShow, let episode = selectedEpisodeForSearch,
+                       let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                        return seasonTitle
+                    }
+                    return nil
+                }(),
+                originalTitle: romajiTitle,
+                isMovie: searchResult.isMovie,
+                isAnimeContent: isAnimeShow,
+                selectedEpisode: selectedEpisodeForSearch,
+                tmdbId: searchResult.id,
+                animeSeasonTitle: isAnimeShow ? "anime" : nil,
+                posterPath: searchResult.isMovie ? movieDetail?.posterPath : tvShowDetail?.posterPath,
+                downloadMode: true
             )
         }
         .sheet(isPresented: $showingAddToCollection) {
@@ -391,6 +418,21 @@ struct MediaDetailView: View {
             }
             
             Button(action: {
+                downloadInServices()
+            }) {
+                Image(systemName: downloadButtonIcon)
+                    .font(.title2)
+                    .frame(width: 42, height: 42)
+                    .applyLiquidGlassBackground(
+                        cornerRadius: 12,
+                        glassTint: downloadButtonTint
+                    )
+                    .foregroundColor(downloadButtonColor)
+                    .cornerRadius(8)
+            }
+            .disabled(serviceManager.activeServices.isEmpty || isCurrentlyDownloading)
+            
+            Button(action: {
                 showingAddToCollection = true
             }) {
                 Image(systemName: "plus")
@@ -447,6 +489,66 @@ struct MediaDetailView: View {
         }
         
         showingSearchResults = true
+    }
+    
+    private func downloadInServices() {
+        if !searchResult.isMovie {
+            if selectedEpisodeForSearch != nil {
+            } else if let seasonDetail = seasonDetail, !seasonDetail.episodes.isEmpty {
+                selectedEpisodeForSearch = seasonDetail.episodes.first
+            } else {
+                selectedEpisodeForSearch = nil
+            }
+        } else {
+            selectedEpisodeForSearch = nil
+        }
+        
+        showingDownloadSheet = true
+    }
+    
+    private var isCurrentlyDownloading: Bool {
+        if searchResult.isMovie {
+            return DownloadManager.shared.isDownloading(tmdbId: searchResult.id, isMovie: true)
+        } else if let ep = selectedEpisodeForSearch {
+            return DownloadManager.shared.isDownloading(tmdbId: searchResult.id, isMovie: false, seasonNumber: ep.seasonNumber, episodeNumber: ep.episodeNumber)
+        }
+        return false
+    }
+    
+    private var isAlreadyDownloaded: Bool {
+        if searchResult.isMovie {
+            return DownloadManager.shared.isDownloaded(tmdbId: searchResult.id, isMovie: true)
+        } else if let ep = selectedEpisodeForSearch {
+            return DownloadManager.shared.isDownloaded(tmdbId: searchResult.id, isMovie: false, seasonNumber: ep.seasonNumber, episodeNumber: ep.episodeNumber)
+        }
+        return false
+    }
+    
+    private var downloadButtonIcon: String {
+        if isAlreadyDownloaded {
+            return "checkmark.circle.fill"
+        } else if isCurrentlyDownloading {
+            return "arrow.down.circle"
+        }
+        return "arrow.down.circle"
+    }
+    
+    private var downloadButtonColor: Color {
+        if isAlreadyDownloaded {
+            return .green
+        } else if isCurrentlyDownloading {
+            return .blue
+        }
+        return .white
+    }
+    
+    private var downloadButtonTint: Color? {
+        if isAlreadyDownloaded {
+            return Color.green.opacity(0.2)
+        } else if isCurrentlyDownloading {
+            return Color.blue.opacity(0.2)
+        }
+        return nil
     }
     
     private func loadMediaDetails() {

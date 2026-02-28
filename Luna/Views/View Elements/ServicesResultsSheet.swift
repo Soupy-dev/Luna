@@ -95,6 +95,8 @@ struct ModulesSearchResultsSheet: View {
     /// Non-nil for anime to force E## format
     let animeSeasonTitle: String?
     let posterPath: String?
+    /// When true, selecting a stream downloads instead of playing
+    var downloadMode: Bool = false
     
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var viewModel = ModulesSearchResultsViewModel()
@@ -373,9 +375,11 @@ struct ModulesSearchResultsSheet: View {
         }
     }
     
+    private var actionVerb: String { downloadMode ? "Download" : "Play" }
+    
     @ViewBuilder
     private var playAlertButtons: some View {
-        Button("Play") {
+        Button(actionVerb) {
             viewModel.showingPlayAlert = false
             if let result = viewModel.selectedResult {
                 Task {
@@ -392,9 +396,9 @@ struct ModulesSearchResultsSheet: View {
     @ViewBuilder
     private var playAlertMessage: some View {
         if let result = viewModel.selectedResult, let episode = selectedEpisode {
-            Text("Play Episode \(episode.episodeNumber) of '\(result.title)'?")
+            Text("\(actionVerb) Episode \(episode.episodeNumber) of '\(result.title)'?")
         } else if let result = viewModel.selectedResult {
-            Text("Play '\(result.title)'?")
+            Text("\(actionVerb) '\(result.title)'?")
         }
     }
     
@@ -529,7 +533,7 @@ struct ModulesSearchResultsSheet: View {
                 viewModel.showingSubtitlePicker = false
                 if let service = viewModel.pendingService,
                    let streamURL = viewModel.pendingStreamURL {
-                    playStreamURL(streamURL, service: service, subtitle: option.url, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
+                    dispatchStreamAction(streamURL, service: service, subtitle: option.url, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
                 }
             }
         }
@@ -537,7 +541,7 @@ struct ModulesSearchResultsSheet: View {
             viewModel.showingSubtitlePicker = false
             if let service = viewModel.pendingService,
                let streamURL = viewModel.pendingStreamURL {
-                playStreamURL(streamURL, service: service, subtitle: nil, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
+                dispatchStreamAction(streamURL, service: service, subtitle: nil, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
             }
         }
         Button("Cancel", role: .cancel) {
@@ -578,7 +582,7 @@ struct ModulesSearchResultsSheet: View {
                     servicesResultsSection
                 }
             }
-            .navigationTitle("Services Result")
+            .navigationTitle(downloadMode ? "Download Source" : "Services Result")
 #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif
@@ -626,7 +630,7 @@ struct ModulesSearchResultsSheet: View {
                 }
             }
         }
-        .alert("Play Content", isPresented: $viewModel.showingPlayAlert) {
+        .alert(downloadMode ? "Download Content" : "Play Content", isPresented: $viewModel.showingPlayAlert) {
             playAlertButtons
         } message: {
             playAlertMessage
@@ -1162,18 +1166,18 @@ struct ModulesSearchResultsSheet: View {
     @MainActor
     private func resolveSubtitleSelection(subtitles: [String]?, defaultSubtitle: String?, service: Service, streamURL: String, headers: [String: String]?, serviceHref: String? = nil) {
         guard let subtitles = subtitles, !subtitles.isEmpty else {
-            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
+            dispatchStreamAction(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
             return
         }
         
         let options = parseSubtitleOptions(from: subtitles)
         guard !options.isEmpty else {
-            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
+            dispatchStreamAction(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
             return
         }
         
         if options.count == 1 {
-            playStreamURL(streamURL, service: service, subtitle: options[0].url, headers: headers, serviceHref: serviceHref)
+            dispatchStreamAction(streamURL, service: service, subtitle: options[0].url, headers: headers, serviceHref: serviceHref)
             return
         }
         
@@ -1184,6 +1188,15 @@ struct ModulesSearchResultsSheet: View {
         viewModel.pendingServiceHref = serviceHref
         viewModel.isFetchingStreams = false
         viewModel.showingSubtitlePicker = true
+    }
+    
+    /// Routes to either play or download based on downloadMode
+    private func dispatchStreamAction(_ url: String, service: Service, subtitle: String?, headers: [String: String]?, serviceHref: String? = nil) {
+        if downloadMode {
+            downloadStreamURL(url, service: service, subtitle: subtitle, headers: headers)
+        } else {
+            playStreamURL(url, service: service, subtitle: subtitle, headers: headers, serviceHref: serviceHref)
+        }
     }
     
     private func parseSubtitleOptions(from subtitles: [String]) -> [(title: String, url: String)] {
@@ -1395,6 +1408,62 @@ struct ModulesSearchResultsSheet: View {
                 }
             }
         }
+    }
+    
+    private func downloadStreamURL(_ url: String, service: Service, subtitle: String?, headers: [String: String]?) {
+        viewModel.resetStreamState()
+        
+        let serviceURL = service.metadata.baseUrl
+        var finalHeaders: [String: String] = [
+            "Origin": serviceURL,
+            "Referer": serviceURL,
+            "User-Agent": URLSession.randomUserAgent
+        ]
+        
+        if let custom = headers {
+            for (k, v) in custom {
+                finalHeaders[k] = v
+            }
+            if finalHeaders["User-Agent"] == nil {
+                finalHeaders["User-Agent"] = URLSession.randomUserAgent
+            }
+        }
+        
+        let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+        
+        let displayTitle: String
+        if isMovie {
+            displayTitle = mediaTitle
+        } else if let ep = selectedEpisode {
+            if isAnimeContent || animeSeasonTitle != nil {
+                displayTitle = "\(animeEffectiveTitle) E\(ep.episodeNumber)"
+            } else {
+                displayTitle = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
+            }
+        } else {
+            displayTitle = mediaTitle
+        }
+        
+        DownloadManager.shared.enqueueDownload(
+            tmdbId: tmdbId,
+            isMovie: isMovie,
+            title: mediaTitle,
+            displayTitle: displayTitle,
+            posterURL: posterURL,
+            seasonNumber: selectedEpisode?.seasonNumber,
+            episodeNumber: selectedEpisode?.episodeNumber,
+            episodeName: selectedEpisode?.name,
+            streamURL: url,
+            headers: finalHeaders,
+            subtitleURL: subtitle,
+            serviceBaseURL: serviceURL,
+            isAnime: isAnimeContent
+        )
+        
+        Logger.shared.log("Download enqueued: \(displayTitle)", type: "Download")
+        
+        // Dismiss the sheet after enqueuing
+        presentationMode.wrappedValue.dismiss()
     }
     
     private func safeConvertToHeaders(_ value: Any?) -> [String: String]? {

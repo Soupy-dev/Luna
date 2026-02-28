@@ -124,6 +124,9 @@
 		14BBB0053FFF111100AAAAAA /* BackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14BBB0063FFF111100AAAAAA /* BackupManager.swift */; };
 		BB7777712F20000000BB7771 /* VLCRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7777702F20000000BB7770 /* VLCRenderer.swift */; };
 		CC8888812FA0000000CC8881 /* AniSkipService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC8888802FA0000000CC8880 /* AniSkipService.swift */; };
+		DD1111112FB0000000DD1111 /* DownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111102FB0000000DD1110 /* DownloadManager.swift */; };
+		DD2222222FB0000000DD2222 /* DownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222202FB0000000DD2220 /* DownloadsView.swift */; };
+		DD3333332FB0000000DD3333 /* FloatingSearchButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333302FB0000000DD3330 /* FloatingSearchButton.swift */; };
 		AA1111112F10000000AA1111 /* TrackerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1111102F10000000AA1110 /* TrackerManager.swift */; };
 		AA2222222F10000000AA2222 /* TrackerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2222202F10000000AA2220 /* TrackerModels.swift */; };
 		AA3333332F10000000AA3333 /* TrackersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3333302F10000000AA3330 /* TrackersSettingsView.swift */; };
@@ -272,6 +275,9 @@
 		AA6666602F10000000AA6660 /* CatalogsSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogsSettingsView.swift; sourceTree = "<group>"; };
 		BB7777702F20000000BB7770 /* VLCRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VLCRenderer.swift; sourceTree = "<group>"; };
 		CC8888802FA0000000CC8880 /* AniSkipService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AniSkipService.swift; sourceTree = "<group>"; };
+		DD1111102FB0000000DD1110 /* DownloadManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DownloadManager.swift; sourceTree = "<group>"; };
+		DD2222202FB0000000DD2220 /* DownloadsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = DownloadsView.swift; sourceTree = "<group>"; };
+		DD3333302FB0000000DD3330 /* FloatingSearchButton.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FloatingSearchButton.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -615,6 +621,7 @@
 				13F0727B2E4B2D9000EF90EB /* LibraryView.swift */,
 				13F0727C2E4B2D9000EF90EB /* MediaDetailView.swift */,
 				AA4444402F10000000AA4440 /* ScheduleView.swift */,
+				DD2222202FB0000000DD2220 /* DownloadsView.swift */,
 				13F072C42E4B364B00EF90EB /* SettingsView */,
 				13F0727F2E4B2D9000EF90EB /* View Elements */,
 			);
@@ -631,6 +638,7 @@
 				13F072892E4B2D9000EF90EB /* NormalPlayer.swift */,
 				13F0728A2E4B2D9000EF90EB /* FallbackImageView.swift */,
 				13F0728B2E4B2D9000EF90EB /* ServicesResultsSheet.swift */,
+				DD3333302FB0000000DD3330 /* FloatingSearchButton.swift */,
 			);
 			path = "View Elements";
 			sourceTree = "<group>";
@@ -789,6 +797,7 @@
 				13F5B5912E73090000565E75 /* HomeSection.swift */,
 				14BBB0063FFF111100AAAAAA /* BackupManager.swift */,
 				13C6F3452EA4C6BC00DECD2B /* CacheManager.swift */,
+				DD1111102FB0000000DD1110 /* DownloadManager.swift */,
 				AA5555502F10000000AA5550 /* CatalogManager.swift */,
 				AA7777702F10000000AA7770 /* HomeViewModel.swift */,
 				AA8888802F10000000AA8880 /* ScheduleViewModel.swift */,
@@ -936,6 +945,9 @@
 				13F072B12E4B2D9200EF90EB /* NormalPlayer.swift in Sources */,
 				BB7777712F20000000BB7771 /* VLCRenderer.swift in Sources */,
 				CC8888812FA0000000CC8881 /* AniSkipService.swift in Sources */,
+				DD1111112FB0000000DD1111 /* DownloadManager.swift in Sources */,
+				DD2222222FB0000000DD2222 /* DownloadsView.swift in Sources */,
+				DD3333332FB0000000DD3333 /* FloatingSearchButton.swift in Sources */,
 				F9A1B2C32F90000100A1B2C3 /* VLCHeaderProxy.swift in Sources */,
 				13F072AF2E4B2D9200EF90EB /* StretchyHeader.swift in Sources */,
 				13F0729D2E4B2D9200EF90EB /* JSController-Search.swift in Sources */,

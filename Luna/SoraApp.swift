@@ -7,8 +7,19 @@
 
 import SwiftUI
 
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        if identifier == "com.luna.downloads" {
+            DownloadManager.shared.backgroundCompletionHandler = completionHandler
+        }
+    }
+}
+
 @main
 struct SoraApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var settings = Settings()
     @StateObject private var moduleManager = ModuleManager.shared
     @StateObject private var favouriteManager = FavouriteManager.shared
@@ -23,6 +34,8 @@ struct SoraApp: App {
         DispatchQueue.global(qos: .background).async {
             CacheManager.shared.checkAndAutoClearIfNeeded()
         }
+        // Initialize download manager early to reconnect background session
+        _ = DownloadManager.shared
     }
 
     var body: some Scene {

@@ -20,6 +20,8 @@ struct TVShowSeasonsSection: View {
     
     @State private var isLoadingSeason = false
     @State private var showingSearchResults = false
+    @State private var showingDownloadSheet = false
+    @State private var downloadEpisode: TMDBEpisode? = nil
     @State private var showingNoServicesAlert = false
     @State private var romajiTitle: String?
     @State private var currentSeasonTitle: String?
@@ -143,6 +145,20 @@ struct TVShowSeasonsSection: View {
                 tmdbId: tvShow?.id ?? 0,
                 animeSeasonTitle: isAnime ? currentSeasonTitle : nil,
                 posterPath: tvShow?.posterPath
+            )
+        }
+        .sheet(isPresented: $showingDownloadSheet) {
+            ModulesSearchResultsSheet(
+                mediaTitle: getSearchTitle(),
+                seasonTitleOverride: currentSeasonTitle,
+                originalTitle: romajiTitle,
+                isMovie: false,
+                isAnimeContent: isAnime,
+                selectedEpisode: downloadEpisode ?? selectedEpisodeForSearch,
+                tmdbId: tvShow?.id ?? 0,
+                animeSeasonTitle: isAnime ? currentSeasonTitle : nil,
+                posterPath: tvShow?.posterPath,
+                downloadMode: true
             )
         }
         .alert("No Active Services", isPresented: $showingNoServicesAlert) {
@@ -312,7 +328,14 @@ struct TVShowSeasonsSection: View {
                 isSelected: isSelected,
                 onTap: { episodeTapAction(episode: episode) },
                 onMarkWatched: { markAsWatched(episode: episode) },
-                onResetProgress: { resetProgress(episode: episode) }
+                onResetProgress: { resetProgress(episode: episode) },
+                onDownload: {
+                    if !serviceManager.activeServices.isEmpty {
+                        downloadEpisode = episode
+                        selectedEpisodeForSearch = episode
+                        showingDownloadSheet = true
+                    }
+                }
             )
         } else {
             EmptyView()
