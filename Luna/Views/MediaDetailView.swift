@@ -588,11 +588,13 @@ struct MediaDetailView: View {
                     let isJapanese = detail.originCountry?.contains("JP") ?? false
                     let isAnimation = detail.genres.contains { $0.id == 16 }
                     let detectedAsAnime = isJapanese && isAnimation
+                    Logger.shared.log("MediaDetailView: \(detail.name) — isJapanese=\(isJapanese) isAnimation=\(isAnimation) detectedAsAnime=\(detectedAsAnime) originCountry=\(detail.originCountry ?? []) genres=\(detail.genres.map { $0.id })", type: "AniList")
                     
                     // Fetch AniList hybrid seasons/episodes if anime
                     var animeData: AniListAnimeWithSeasons? = nil
                     if detectedAsAnime {
                         do {
+                            Logger.shared.log("MediaDetailView: Starting AniList fetch for \(detail.name) (tmdbId=\(detail.id))", type: "AniList")
                             animeData = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
                                 title: detail.name,
                                 tmdbShowId: detail.id,
@@ -600,7 +602,7 @@ struct MediaDetailView: View {
                                 tmdbShowPoster: detail.fullPosterURL,
                                 token: nil
                             )
-                            Logger.shared.log("MediaDetailView: Fetched AniList hybrid data for \(detail.name) with \(animeData?.seasons.count ?? 0) seasons", type: "AniList")
+                            Logger.shared.log("MediaDetailView: Fetched AniList hybrid data for \(detail.name) with \(animeData?.seasons.count ?? 0) seasons, \(animeData?.totalEpisodes ?? 0) total episodes", type: "AniList")
                             
                             // Register AniList season IDs with tracker for accurate syncing
                             if let animeData = animeData {
@@ -608,8 +610,10 @@ struct MediaDetailView: View {
                                 TrackerManager.shared.registerAniListAnimeData(tmdbId: detail.id, seasons: seasonMappings)
                             }
                         } catch {
-                            Logger.shared.log("MediaDetailView: Failed to fetch AniList data: \(error.localizedDescription)", type: "AniList")
+                            Logger.shared.log("MediaDetailView: FAILED AniList fetch for \(detail.name): \(error.localizedDescription)", type: "Error")
                         }
+                    } else {
+                        Logger.shared.log("MediaDetailView: Skipping AniList fetch — not detected as anime", type: "AniList")
                     }
                     
                     await MainActor.run {
@@ -618,6 +622,7 @@ struct MediaDetailView: View {
                         self.isAnimeShow = detectedAsAnime
                         
                         if let animeData = animeData {
+                            Logger.shared.log("MediaDetailView: Using AniList structure — \(animeData.seasons.count) seasons", type: "AniList")
                             // Build AniList seasons list with TMDB-compatible fields
                             let aniSeasons: [TMDBSeason] = animeData.seasons.map { aniSeason in
                                 var posterPath: String?
@@ -688,6 +693,7 @@ struct MediaDetailView: View {
                             }
                         } else {
                             // Fallback to TMDB seasons
+                            Logger.shared.log("MediaDetailView: animeData is nil — falling back to pure TMDB seasons (\(detail.seasons.count) seasons)", type: "AniList")
                             self.tvShowDetail = detail
                             if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
                                 self.selectedSeason = firstSeason

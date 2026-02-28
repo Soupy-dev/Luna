@@ -1,20 +1,26 @@
 ﻿import Foundation
 
 /// Ensures AniList API calls are spaced out to stay under the 90 req/min rate limit.
+/// Uses a slot-reservation pattern: each caller claims a future time slot BEFORE sleeping,
+/// so concurrent callers queue up instead of bunching together.
 private actor AniListRateLimiter {
     static let shared = AniListRateLimiter()
     
-    private let minInterval: TimeInterval = 0.5 // ~120 req/min max, 429 retry handles bursts
-    private var lastRequestTime: Date = .distantPast
+    private let minInterval: TimeInterval = 0.7 // ~85 req/min max, safely under AniList's 90 req/min
+    private var nextAvailableTime: Date = .distantPast
     
     func waitForSlot() async {
         let now = Date()
-        let elapsed = now.timeIntervalSince(lastRequestTime)
-        if elapsed < minInterval {
-            let delay = minInterval - elapsed
+        // Claim the next available slot
+        let slotTime = max(now, nextAvailableTime)
+        // Reserve it immediately so the next caller queues AFTER this one
+        nextAvailableTime = slotTime.addingTimeInterval(minInterval)
+        
+        // Sleep until our reserved slot arrives
+        let delay = slotTime.timeIntervalSince(now)
+        if delay > 0.001 {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
-        lastRequestTime = Date()
     }
 }
 
@@ -195,6 +201,7 @@ final class AniListService {
         tmdbShowPoster: String?,
         token: String?
     ) async throws -> AniListAnimeWithSeasons {
+        Logger.shared.log("AniListService: fetchAnimeDetailsWithEpisodes START for '\(title)' tmdbId=\(tmdbShowId)", type: "AniList")
         // Query AniList for anime structure + sequels + coverImage (multiple candidates for better matching)
         let query = """
         query {
@@ -263,6 +270,7 @@ final class AniListService {
         }
         """
         
+        Logger.shared.log("AniListService: Sending AniList GraphQL query for '\(title)'", type: "AniList")
         let response = try await executeGraphQLQuery(query, token: token)
         
         struct Response: Codable {
@@ -275,7 +283,9 @@ final class AniListService {
         
         let result = try JSONDecoder().decode(Response.self, from: response)
         let candidates = result.data.Page.media
+        Logger.shared.log("AniListService: AniList returned \(candidates.count) candidates for '\(title)'", type: "AniList")
         guard !candidates.isEmpty else {
+            Logger.shared.log("AniListService: NO candidates from AniList for '\(title)' — throwing", type: "Error")
             throw NSError(domain: "AniListService", code: -1, userInfo: [NSLocalizedDescriptionKey: "AniList did not return any matches for \(title)"])
         }
 
@@ -792,6 +802,7 @@ final class AniListService {
                 }
                 
                 let error = "AniList error (HTTP \(httpResponse.statusCode))"
+                Logger.shared.log("AniListService: GraphQL request failed with HTTP \(httpResponse.statusCode)", type: "Error")
                 throw NSError(domain: "AniList", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: error])
             }
             
