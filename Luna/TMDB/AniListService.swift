@@ -402,7 +402,68 @@ final class AniListService {
             }
         }()
 
-        let anime = pickBestAniListMatch(from: candidates, tmdbShow: tvShowDetail)
+        var anime = pickBestAniListMatch(from: candidates, tmdbShow: tvShowDetail)
+
+        // If the best match looks suspicious (e.g. OVA with 2 eps when TMDB has 86),
+        // retry search using the matched anime's romaji title (stripped of OVA/Special suffixes).
+        // Handles cases where TMDB's English title doesn't match AniList's primary entry
+        // (e.g. "Food Wars! Shokugeki no Soma" → AniList OVA, but romaji "Shokugeki no Souma" → main TV series)
+        if let tmdbEps = tvShowDetail?.numberOfEpisodes, tmdbEps > 12,
+           let selectedEps = anime.episodes, selectedEps < tmdbEps / 4,
+           let romaji = anime.title.romaji {
+            let cleanedRomaji = romaji
+                .replacingOccurrences(of: " OVA", with: "")
+                .replacingOccurrences(of: " Special", with: "")
+                .replacingOccurrences(of: " Specials", with: "")
+            if cleanedRomaji != title {
+                Logger.shared.log("AniListService: Match looks suspicious (\(selectedEps) eps vs TMDB \(tmdbEps)) \u{2014} retrying with romaji '\(cleanedRomaji)'", type: "AniList")
+                let retryQuery = """
+                query {
+                    Page(perPage: 6) {
+                        media(search: "\(cleanedRomaji.replacingOccurrences(of: "\"", with: "\\\""))", type: ANIME, sort: POPULARITY_DESC) {
+                            id
+                            title { romaji english native }
+                            episodes status seasonYear season
+                            coverImage { large medium }
+                            format
+                            nextAiringEpisode { episode airingAt }
+                            relations { edges { relationType node {
+                                id
+                                title { romaji english native }
+                                episodes status seasonYear season format type
+                                coverImage { large medium }
+                                relations { edges { relationType node {
+                                    id
+                                    title { romaji english native }
+                                    episodes status seasonYear season format type
+                                    coverImage { large medium }
+                                } } }
+                            } } }
+                        }
+                    }
+                }
+                """
+
+                struct RetryResponse: Codable {
+                    let data: DataWrapper
+                    struct DataWrapper: Codable {
+                        let Page: PageData
+                        struct PageData: Codable { let media: [AniListAnime] }
+                    }
+                }
+
+                if let retryData = try? await executeGraphQLQuery(retryQuery, token: token),
+                   let retryDecoded = try? JSONDecoder().decode(RetryResponse.self, from: retryData),
+                   !retryDecoded.data.Page.media.isEmpty {
+                    let retryMatch = pickBestAniListMatch(from: retryDecoded.data.Page.media, tmdbShow: tvShowDetail)
+                    let retryEps = retryMatch.episodes ?? 0
+                    if retryEps > selectedEps {
+                        Logger.shared.log("AniListService: Retry found better match '\(AniListTitlePicker.title(from: retryMatch.title, preferredLanguageCode: preferredLanguageCode))' with \(retryEps) eps", type: "AniList")
+                        anime = retryMatch
+                    }
+                }
+            }
+        }
 
         let title = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)
         Logger.shared.log("AniListService: Selected AniList match '\(title)' (id: \(anime.id))", type: "AniList")
@@ -492,7 +553,7 @@ final class AniListService {
         if let tvShowDetail, !allAnimeToProcess.isEmpty, let tmdbTotalEps = tvShowDetail.numberOfEpisodes, tmdbTotalEps > 0 {
             let anilistTotalEps = allAnimeToProcess.reduce(0) { $0 + ($1.anime.episodes ?? 0) }
             if anilistTotalEps < Int(Double(tmdbTotalEps) * 0.75) {
-                Logger.shared.log("AniListService: BFS found \(anilistTotalEps) episodes but TMDB has \(tmdbTotalEps) — searching for orphaned entries", type: "AniList")
+                Logger.shared.log("AniListService: BFS found \(anilistTotalEps) episodes but TMDB has \(tmdbTotalEps) \u{2014} searching for orphaned entries", type: "AniList")
                 let searchTitle = tvShowDetail.name
                 let orphanQuery = """
                 query {
@@ -525,7 +586,10 @@ final class AniListService {
                     let orphanAllowedFormats: Set<String> = ["TV", "TV_SHORT", "ONA"]
                     let rootTitle = title.lowercased()
                     let rootWords = rootTitle.split(separator: " ").prefix(3).joined(separator: " ")
+                    let spinoffKeywords = ["alternative", "movie", "special", "ova", "recap", "summary", "picture drama", "pilot"]
 
+                    // Filter to valid orphan candidates (franchise match + no spinoffs)
+                    var orphanCandidates: [AniListAnime] = []
                     for candidate in orphanDecoded.data.Page.media {
                         guard !seenIds.contains(candidate.id) else { continue }
                         guard candidate.type == "ANIME" else { continue }
@@ -535,9 +599,77 @@ final class AniListService {
                         let candidateRomaji = candidate.title.romaji?.lowercased() ?? ""
                         guard candidateTitle.contains(rootWords) || candidateRomaji.contains(rootWords) else { continue }
 
-                        seenIds.insert(candidate.id)
-                        appendAnime(candidate)
-                        Logger.shared.log("AniListService: Found orphaned entry: '\(AniListTitlePicker.title(from: candidate.title, preferredLanguageCode: preferredLanguageCode))' (id: \(candidate.id), episodes: \(candidate.episodes ?? 0))", type: "AniList")
+                        // Skip spinoffs/alternatives — only want direct continuations
+                        let checkTitle = candidateTitle + " " + candidateRomaji
+                        if spinoffKeywords.contains(where: { checkTitle.contains($0) }) { continue }
+
+                        orphanCandidates.append(candidate)
+                    }
+
+                    // Pick the best orphan (highest episode count = most likely main continuation),
+                    // then BFS from it to discover its own sequels
+                    if let bestOrphan = orphanCandidates.max(by: { ($0.episodes ?? 0) < ($1.episodes ?? 0) }) {
+                        seenIds.insert(bestOrphan.id)
+                        appendAnime(bestOrphan)
+                        Logger.shared.log("AniListService: Best orphan entry: '\(AniListTitlePicker.title(from: bestOrphan.title, preferredLanguageCode: preferredLanguageCode))' (id: \(bestOrphan.id), episodes: \(bestOrphan.episodes ?? 0))", type: "AniList")
+
+                        // Fetch full relations for the orphan so we can BFS from it
+                        let orphanWithRelations: AniListAnime
+                        if bestOrphan.relations != nil {
+                            orphanWithRelations = bestOrphan
+                        } else if let fetched = (await batchFetchAniListNodes(ids: [bestOrphan.id]))[bestOrphan.id] {
+                            orphanWithRelations = fetched
+                        } else {
+                            orphanWithRelations = bestOrphan
+                        }
+
+                        // BFS from orphan to discover its sequels (e.g. SAO Alicization → War of Underworld)
+                        var orphanQueue: [AniListAnime] = [orphanWithRelations]
+                        while !orphanQueue.isEmpty {
+                            let currentOrphanLevel = orphanQueue
+                            orphanQueue.removeAll()
+
+                            var orphanIdsToFetch: [Int] = []
+                            var orphanShallowNodes: [Int: AniListAnime.AniListRelationNode] = [:]
+
+                            for current in currentOrphanLevel {
+                                let edges = current.relations?.edges ?? []
+                                for edge in edges {
+                                    guard allowedRelationTypes.contains(edge.relationType), edge.node.type == "ANIME" else { continue }
+                                    if let format = edge.node.format, !(format == "TV" || format == "TV_SHORT" || format == "ONA") { continue }
+                                    if !seenIds.insert(edge.node.id).inserted { continue }
+
+                                    let edgeTitle = AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode)
+                                    Logger.shared.log("    \u{2192} Added orphan sequel: \(edgeTitle)", type: "AniList")
+
+                                    if edge.node.relations != nil {
+                                        let fullNode = edge.node.asAnime()
+                                        appendAnime(fullNode)
+                                        orphanQueue.append(fullNode)
+                                    } else {
+                                        orphanIdsToFetch.append(edge.node.id)
+                                        orphanShallowNodes[edge.node.id] = edge.node
+                                    }
+                                }
+                            }
+
+                            if !orphanIdsToFetch.isEmpty {
+                                Logger.shared.log("AniListService: Batch-fetching \(orphanIdsToFetch.count) orphan sequel nodes", type: "AniList")
+                                let fetchedOrphans = await batchFetchAniListNodes(ids: orphanIdsToFetch)
+                                for id in orphanIdsToFetch {
+                                    let fullNode: AniListAnime
+                                    if let fetched = fetchedOrphans[id] {
+                                        fullNode = fetched
+                                    } else if let shallow = orphanShallowNodes[id] {
+                                        fullNode = shallow.asAnime()
+                                    } else {
+                                        continue
+                                    }
+                                    appendAnime(fullNode)
+                                    orphanQueue.append(fullNode)
+                                }
+                            }
+                        }
                     }
                 }
             }
