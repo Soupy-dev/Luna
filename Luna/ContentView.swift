@@ -40,7 +40,9 @@ struct ContentView: View {
             Tab("Downloads", systemImage: "arrow.down.circle.fill") {
                 DownloadsView()
             }
+#if !os(tvOS)
             .badge(downloadManager.activeDownloadCount > 0 ? downloadManager.activeDownloadCount : 0)
+#endif
             
             Tab("Library", systemImage: "books.vertical.fill") {
                 LibraryView()
@@ -79,7 +81,9 @@ struct ContentView: View {
                     Image(systemName: "arrow.down.circle.fill")
                     Text("Downloads")
                 }
+#if !os(tvOS)
                 .badge(downloadManager.activeDownloadCount > 0 ? downloadManager.activeDownloadCount : 0)
+#endif
             
             LibraryView()
                 .tabItem {
