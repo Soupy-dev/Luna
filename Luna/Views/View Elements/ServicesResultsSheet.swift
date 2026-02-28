@@ -95,6 +95,9 @@ struct ModulesSearchResultsSheet: View {
     /// Non-nil for anime to force E## format
     let animeSeasonTitle: String?
     let posterPath: String?
+    /// Original TMDB season/episode numbers for anime (before AniList restructuring), used by TheIntroDB.
+    var originalTMDBSeasonNumber: Int? = nil
+    var originalTMDBEpisodeNumber: Int? = nil
     /// When true, selecting a stream downloads instead of playing
     var downloadMode: Bool = false
     /// Called when a download has been enqueued (for Download All flow)
@@ -1313,8 +1316,8 @@ struct ModulesSearchResultsSheet: View {
                 )
                 let isAnimeHint = isAnimeContent || animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
                 pvc.isAnimeHint = isAnimeHint
-                pvc.originalTMDBSeasonNumber = selectedEpisode?.originalTMDBSeasonNumber
-                pvc.originalTMDBEpisodeNumber = selectedEpisode?.originalTMDBEpisodeNumber
+                pvc.originalTMDBSeasonNumber = originalTMDBSeasonNumber
+                pvc.originalTMDBEpisodeNumber = originalTMDBEpisodeNumber
                 pvc.onRequestNextEpisode = { seasonNumber, nextEpisodeNumber in
                     NotificationCenter.default.post(
                         name: .requestNextEpisode,
@@ -1369,8 +1372,8 @@ struct ModulesSearchResultsSheet: View {
                 )
                 let isAnimeHint = isAnimeContent || animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
                 pvc.isAnimeHint = isAnimeHint
-                pvc.originalTMDBSeasonNumber = selectedEpisode?.originalTMDBSeasonNumber
-                pvc.originalTMDBEpisodeNumber = selectedEpisode?.originalTMDBEpisodeNumber
+                pvc.originalTMDBSeasonNumber = originalTMDBSeasonNumber
+                pvc.originalTMDBEpisodeNumber = originalTMDBEpisodeNumber
                 pvc.onRequestNextEpisode = { seasonNumber, nextEpisodeNumber in
                     NotificationCenter.default.post(
                         name: .requestNextEpisode,

@@ -378,11 +378,6 @@ struct TMDBEpisode: Codable, Identifiable {
     let runtime: Int?
     let voteAverage: Double
     let voteCount: Int
-
-    /// Original TMDB season/episode numbers preserved through AniList restructuring.
-    /// Not in CodingKeys so they are ignored by JSON decoder — set manually for anime synthetic episodes.
-    var originalTMDBSeasonNumber: Int?
-    var originalTMDBEpisodeNumber: Int?
     
     enum CodingKeys: String, CodingKey {
         case id, name, overview, runtime

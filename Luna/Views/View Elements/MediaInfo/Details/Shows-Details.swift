@@ -158,7 +158,9 @@ struct TVShowSeasonsSection: View {
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: tvShow?.id ?? 0,
                 animeSeasonTitle: isAnime ? currentSeasonTitle : nil,
-                posterPath: tvShow?.posterPath
+                posterPath: tvShow?.posterPath,
+                originalTMDBSeasonNumber: originalTMDBNumbers?.season,
+                originalTMDBEpisodeNumber: originalTMDBNumbers?.episode
             )
         }
         .sheet(isPresented: $showingDownloadSheet, onDismiss: {
@@ -191,6 +193,8 @@ struct TVShowSeasonsSection: View {
                 tmdbId: tvShow?.id ?? 0,
                 animeSeasonTitle: isAnime ? currentSeasonTitle : nil,
                 posterPath: tvShow?.posterPath,
+                originalTMDBSeasonNumber: originalTMDBNumbers?.season,
+                originalTMDBEpisodeNumber: originalTMDBNumbers?.episode,
                 downloadMode: true,
                 onDownloadEnqueued: isDownloadingAll ? {
                     downloadWasEnqueued = true
@@ -395,6 +399,19 @@ struct TVShowSeasonsSection: View {
         searchInServicesForEpisode(episode: episode)
     }
     
+    /// Look up the original TMDB season/episode numbers for the currently selected episode.
+    /// Returns nil for non-anime or when no AniList episode match is found.
+    private var originalTMDBNumbers: (season: Int, episode: Int)? {
+        guard isAnime,
+              let ep = selectedEpisodeForSearch,
+              let animeEps = animeEpisodes,
+              let match = animeEps.first(where: { $0.seasonNumber == ep.seasonNumber && $0.number == ep.episodeNumber }),
+              let s = match.tmdbSeasonNumber,
+              let e = match.tmdbEpisodeNumber
+        else { return nil }
+        return (s, e)
+    }
+    
     private func searchInServicesForEpisode(episode: TMDBEpisode) {
         guard (tvShow?.name) != nil else { return }
         
@@ -436,7 +453,7 @@ struct TVShowSeasonsSection: View {
                     let seasonEpisodes = animeEpisodes.filter { $0.seasonNumber == season.seasonNumber }
                     
                     let tmdbEpisodes: [TMDBEpisode] = seasonEpisodes.map { aniEp in
-                        var ep = TMDBEpisode(
+                        TMDBEpisode(
                             id: tvShowId * 1000 + season.seasonNumber * 100 + aniEp.number,
                             name: aniEp.title,
                             overview: aniEp.description,
@@ -448,10 +465,6 @@ struct TVShowSeasonsSection: View {
                             voteAverage: 0,
                             voteCount: 0
                         )
-                        // Carry original TMDB numbers for TheIntroDB (before AniList restructuring)
-                        ep.originalTMDBSeasonNumber = aniEp.tmdbSeasonNumber
-                        ep.originalTMDBEpisodeNumber = aniEp.tmdbEpisodeNumber
-                        return ep
                     }
                     
                     let detail = TMDBSeasonDetail(
