@@ -52,8 +52,8 @@ struct DownloadsView: View {
         .navigationBarTitleDisplayMode(.large)
 #endif
         .toolbar {
-            if !downloadManager.downloads.isEmpty {
-                ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if !downloadManager.downloads.isEmpty {
                     managementMenu
                 }
             }

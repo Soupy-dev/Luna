@@ -80,7 +80,7 @@ final class AniListService {
     // MARK: - Airing Schedule
 
     /// Fetch upcoming airing episodes for the next `daysAhead` days (default 7).
-    func fetchAiringSchedule(daysAhead: Int = 7, perPage: Int = 100) async throws -> [AniListAiringScheduleEntry] {
+    func fetchAiringSchedule(daysAhead: Int = 7, perPage: Int = 50) async throws -> [AniListAiringScheduleEntry] {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
 
@@ -90,30 +90,17 @@ final class AniListService {
         let lowerBound = Int(today.timeIntervalSince1970)
         let upperBound = Int(upperDay.timeIntervalSince1970)
 
-        let query = """
-        query {
-            Page(perPage: \(perPage)) {
-                airingSchedules(airingAt_greater: \(lowerBound - 1), airingAt_lesser: \(upperBound), sort: TIME) {
-                    id
-                    airingAt
-                    episode
-                    media {
-                        id
-                        title { romaji english native }
-                        coverImage { large medium }
-                    }
-                }
-            }
-        }
-        """
-
         struct Response: Codable {
             let data: DataWrapper
             struct DataWrapper: Codable {
                 let Page: PageData
             }
             struct PageData: Codable {
+                let pageInfo: PageInfo
                 let airingSchedules: [AiringSchedule]
+            }
+            struct PageInfo: Codable {
+                let hasNextPage: Bool
             }
             struct AiringSchedule: Codable {
                 let id: Int
@@ -123,13 +110,41 @@ final class AniListService {
             }
         }
 
-        let data = try await executeGraphQLQuery(query, token: nil)
-        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        var allSchedules: [Response.AiringSchedule] = []
+        var currentPage = 1
+        var hasNextPage = true
+
+        while hasNextPage {
+            let query = """
+            query {
+                Page(page: \(currentPage), perPage: \(perPage)) {
+                    pageInfo { hasNextPage }
+                    airingSchedules(airingAt_greater: \(lowerBound - 1), airingAt_lesser: \(upperBound), sort: TIME) {
+                        id
+                        airingAt
+                        episode
+                        media {
+                            id
+                            title { romaji english native }
+                            coverImage { large medium }
+                        }
+                    }
+                }
+            }
+            """
+
+            let data = try await executeGraphQLQuery(query, token: nil)
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+
+            allSchedules.append(contentsOf: decoded.data.Page.airingSchedules)
+            hasNextPage = decoded.data.Page.pageInfo.hasNextPage
+            currentPage += 1
+        }
 
         let start = today
         let end = upperDay
 
-        return decoded.data.Page.airingSchedules
+        return allSchedules
             .map { schedule in
                 let title = AniListTitlePicker.title(from: schedule.media.title, preferredLanguageCode: preferredLanguageCode)
                 let cover = schedule.media.coverImage?.large ?? schedule.media.coverImage?.medium

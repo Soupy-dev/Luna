@@ -27,6 +27,20 @@ struct FloatingSearchButton: View {
 struct FloatingSearchOverlay: View {
     @State private var showingSearch = false
     
+    private var searchSheetContent: some View {
+        SearchView()
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        showingSearch = false
+                    }
+                }
+            }
+    }
+    
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Color.clear
@@ -37,16 +51,15 @@ struct FloatingSearchOverlay: View {
         }
         .allowsHitTesting(true)
         .sheet(isPresented: $showingSearch) {
-            NavigationStack {
-                SearchView()
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") {
-                                showingSearch = false
-                            }
-                        }
-                    }
+            if #available(iOS 16.0, *) {
+                NavigationStack {
+                    searchSheetContent
+                }
+            } else {
+                NavigationView {
+                    searchSheetContent
+                }
+                .navigationViewStyle(StackNavigationViewStyle())
             }
         }
     }
