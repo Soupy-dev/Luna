@@ -486,12 +486,13 @@ final class AniListService {
             }
         }
 
-        // Fix B: If BFS found fewer seasons than TMDB has, search AniList for orphaned entries
+        // Fix B: If BFS found significantly fewer episodes than TMDB has, search AniList for orphaned entries
         // Handles disconnected AniList graphs (e.g. SAO where S2→S3 relation edge is missing)
-        if let tvShowDetail, !allAnimeToProcess.isEmpty {
-            let tmdbSeasonCount = tvShowDetail.seasons.filter { $0.seasonNumber > 0 }.count
-            if allAnimeToProcess.count < tmdbSeasonCount {
-                Logger.shared.log("AniListService: BFS found \(allAnimeToProcess.count) seasons but TMDB has \(tmdbSeasonCount) — searching for orphaned entries", type: "AniList")
+        // Uses total episode count (not season count) to avoid false positives when TMDB splits seasons differently (e.g. Gintama)
+        if let tvShowDetail, !allAnimeToProcess.isEmpty, let tmdbTotalEps = tvShowDetail.numberOfEpisodes, tmdbTotalEps > 0 {
+            let anilistTotalEps = allAnimeToProcess.reduce(0) { $0 + ($1.anime.episodes ?? 0) }
+            if anilistTotalEps < Int(Double(tmdbTotalEps) * 0.75) {
+                Logger.shared.log("AniListService: BFS found \(anilistTotalEps) episodes but TMDB has \(tmdbTotalEps) — searching for orphaned entries", type: "AniList")
                 let searchTitle = tvShowDetail.name
                 let orphanQuery = """
                 query {
