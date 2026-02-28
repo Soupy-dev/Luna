@@ -2806,10 +2806,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
 
+#if os(iOS)
         if let pop = alert.popoverPresentationController {
             pop.sourceView = subtitleButton
             pop.sourceRect = subtitleButton.bounds
         }
+#endif
 
         present(alert, animated: true)
         showControlsTemporarily()
@@ -2840,10 +2842,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let cancelAction = UIAlertAction(title: "Cancel", style: .cancel, handler: nil)
         alert.addAction(cancelAction)
         
+#if os(iOS)
         if let popover = alert.popoverPresentationController {
             popover.sourceView = subtitleButton
             popover.sourceRect = subtitleButton.bounds
         }
+#endif
         
         present(alert, animated: true, completion: nil)
     }

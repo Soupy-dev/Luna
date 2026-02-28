@@ -22,14 +22,14 @@ struct ContentView: View {
             modernTabView
                 .accentColor(accentColorManager.currentAccentColor)
                 .overlay(alignment: .topTrailing) {
-                    if selectedTab != .downloads {
+                    if selectedTab == .home || selectedTab == .schedule {
                         FloatingSettingsOverlay()
                     }
                 }
         } else {
             olderTabView
                 .overlay {
-                    if selectedTab != .downloads {
+                    if selectedTab == .home || selectedTab == .schedule {
                         FloatingSettingsOverlay()
                     }
                 }
@@ -37,7 +37,7 @@ struct ContentView: View {
 #else
         olderTabView
             .overlay {
-                if selectedTab != .downloads {
+                if selectedTab == .home || selectedTab == .schedule {
                     FloatingSettingsOverlay()
                 }
             }

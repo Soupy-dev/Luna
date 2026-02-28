@@ -22,6 +22,8 @@ struct TVShowSeasonsSection: View {
     @State private var showingSearchResults = false
     @State private var showingDownloadSheet = false
     @State private var downloadEpisode: TMDBEpisode? = nil
+    @State private var downloadAllQueue: [TMDBEpisode] = []
+    @State private var isDownloadingAll = false
     @State private var showingNoServicesAlert = false
     @State private var romajiTitle: String?
     @State private var currentSeasonTitle: String?
@@ -110,7 +112,17 @@ struct TVShowSeasonsSection: View {
                             Text("Episodes")
                                 .font(.title2)
                                 .fontWeight(.bold)
+                            
                             Spacer()
+                            
+                            if seasonDetail != nil && !serviceManager.activeServices.isEmpty {
+                                Button(action: startDownloadAllSeason) {
+                                    Image(systemName: "arrow.down.circle")
+                                        .font(.title3)
+                                        .foregroundColor(.white)
+                                }
+                                .disabled(isDownloadingAll)
+                            }
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal)
@@ -147,7 +159,15 @@ struct TVShowSeasonsSection: View {
                 posterPath: tvShow?.posterPath
             )
         }
-        .sheet(isPresented: $showingDownloadSheet) {
+        .sheet(isPresented: $showingDownloadSheet, onDismiss: {
+            if isDownloadingAll && !downloadAllQueue.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    showNextDownloadSheet()
+                }
+            } else if isDownloadingAll {
+                isDownloadingAll = false
+            }
+        }) {
             ModulesSearchResultsSheet(
                 mediaTitle: getSearchTitle(),
                 seasonTitleOverride: currentSeasonTitle,
@@ -177,6 +197,15 @@ struct TVShowSeasonsSection: View {
                 .foregroundColor(.white)
             
             Spacer()
+            
+            if seasonDetail != nil && !serviceManager.activeServices.isEmpty {
+                Button(action: startDownloadAllSeason) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.title3)
+                        .foregroundColor(.white)
+                }
+                .disabled(isDownloadingAll)
+            }
             
             if let tvShow = tvShow, isGroupedBySeasons && useSeasonMenu {
                 seasonMenu(for: tvShow)
@@ -454,5 +483,27 @@ struct TVShowSeasonsSection: View {
         }
         
         return nil
+    }
+    
+    private func startDownloadAllSeason() {
+        guard let episodes = seasonDetail?.episodes, !episodes.isEmpty else { return }
+        isDownloadingAll = true
+        downloadAllQueue = Array(episodes.dropFirst())
+        if let first = episodes.first {
+            downloadEpisode = first
+            selectedEpisodeForSearch = first
+            showingDownloadSheet = true
+        }
+    }
+    
+    private func showNextDownloadSheet() {
+        guard !downloadAllQueue.isEmpty else {
+            isDownloadingAll = false
+            return
+        }
+        let next = downloadAllQueue.removeFirst()
+        downloadEpisode = next
+        selectedEpisodeForSearch = next
+        showingDownloadSheet = true
     }
 }

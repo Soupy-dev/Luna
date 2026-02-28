@@ -108,6 +108,7 @@ struct DownloadsView: View {
                         activeDownloadRow(item)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                             .listRowBackground(Color.clear)
+#if os(iOS)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     downloadManager.cancelDownload(id: item.id)
@@ -132,6 +133,7 @@ struct DownloadsView: View {
                                     .tint(.green)
                                 }
                             }
+#endif
                     }
                 } header: {
                     sectionHeader("Active", count: activeDownloads.count)
@@ -144,6 +146,7 @@ struct DownloadsView: View {
                         failedDownloadRow(item)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                             .listRowBackground(Color.clear)
+#if os(iOS)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     downloadManager.removeDownload(id: item.id, deleteFile: true)
@@ -159,6 +162,7 @@ struct DownloadsView: View {
                                 }
                                 .tint(.orange)
                             }
+#endif
                     }
                 } header: {
                     sectionHeader("Failed", count: failedDownloads.count)
@@ -171,6 +175,7 @@ struct DownloadsView: View {
                         completedDownloadRow(item)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                             .listRowBackground(Color.clear)
+#if os(iOS)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     downloadManager.removeDownload(id: item.id, deleteFile: true)
@@ -188,6 +193,7 @@ struct DownloadsView: View {
                                     .tint(.blue)
                                 }
                             }
+#endif
                     }
                 } header: {
                     sectionHeader("Completed", count: completedDownloads.count)
@@ -426,11 +432,13 @@ struct DownloadsView: View {
             Button(action: { playDownloadedItem(item) }) {
                 Label("Play", systemImage: "play.fill")
             }
+#if os(iOS)
             if downloadManager.localFileURL(for: item) != nil {
                 Button(action: { shareDownloadedItem(item) }) {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }
             }
+#endif
             Button(role: .destructive, action: { downloadManager.removeDownload(id: item.id, deleteFile: true) }) {
                 Label("Delete", systemImage: "trash")
             }
@@ -534,6 +542,7 @@ struct DownloadsView: View {
     }
     
     private func shareDownloadedItem(_ item: DownloadItem) {
+#if os(iOS)
         guard let fileURL = downloadManager.localFileURL(for: item) else { return }
         let activityVC = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -542,6 +551,7 @@ struct DownloadsView: View {
             activityVC.popoverPresentationController?.sourceView = topmostVC.view
             topmostVC.present(activityVC, animated: true)
         }
+#endif
     }
     
     private func playDownloadedItem(_ item: DownloadItem) {
