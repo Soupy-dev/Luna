@@ -405,62 +405,27 @@ final class AniListService {
         var anime = pickBestAniListMatch(from: candidates, tmdbShow: tvShowDetail)
 
         // If the best match looks suspicious (e.g. OVA with 2 eps when TMDB has 86),
-        // retry search using the matched anime's romaji title (stripped of OVA/Special suffixes).
-        // Handles cases where TMDB's English title doesn't match AniList's primary entry
-        // (e.g. "Food Wars! Shokugeki no Soma" → AniList OVA, but romaji "Shokugeki no Souma" → main TV series)
+        // check its relation edges for the parent/main TV series. OVAs/Specials always
+        // have a PARENT or SOURCE relation to the main show. This avoids an extra API call.
+        // (e.g. "Food Wars! Shokugeki no Soma" → AniList OVA → PARENT → main TV series)
         if let tmdbEps = tvShowDetail?.numberOfEpisodes, tmdbEps > 12,
-           let selectedEps = anime.episodes, selectedEps < tmdbEps / 4,
-           let romaji = anime.title.romaji {
-            let cleanedRomaji = romaji
-                .replacingOccurrences(of: " OVA", with: "")
-                .replacingOccurrences(of: " Special", with: "")
-                .replacingOccurrences(of: " Specials", with: "")
-            if cleanedRomaji != title {
-                Logger.shared.log("AniListService: Match looks suspicious (\(selectedEps) eps vs TMDB \(tmdbEps)) \u{2014} retrying with romaji '\(cleanedRomaji)'", type: "AniList")
-                let retryQuery = """
-                query {
-                    Page(perPage: 6) {
-                        media(search: "\(cleanedRomaji.replacingOccurrences(of: "\"", with: "\\\""))", type: ANIME, sort: POPULARITY_DESC) {
-                            id
-                            title { romaji english native }
-                            episodes status seasonYear season
-                            coverImage { large medium }
-                            format
-                            nextAiringEpisode { episode airingAt }
-                            relations { edges { relationType node {
-                                id
-                                title { romaji english native }
-                                episodes status seasonYear season format type
-                                coverImage { large medium }
-                                relations { edges { relationType node {
-                                    id
-                                    title { romaji english native }
-                                    episodes status seasonYear season format type
-                                    coverImage { large medium }
-                                } } }
-                            } } }
-                        }
+           let selectedEps = anime.episodes, selectedEps < tmdbEps / 4 {
+            Logger.shared.log("AniListService: Match looks suspicious (\(selectedEps) eps vs TMDB \(tmdbEps)) \u{2014} checking relation edges for main series", type: "AniList")
+            let parentRelTypes: Set<String> = ["PARENT", "SOURCE", "PREQUEL"]
+            let tvFormats: Set<String> = ["TV", "TV_SHORT", "ONA"]
+            if let edges = anime.relations?.edges {
+                let betterNode = edges
+                    .filter { parentRelTypes.contains($0.relationType) && $0.node.type == "ANIME" }
+                    .filter { node in
+                        guard let fmt = node.node.format else { return true }
+                        return tvFormats.contains(fmt)
                     }
-                }
-                """
+                    .max(by: { ($0.node.episodes ?? 0) < ($1.node.episodes ?? 0) })
 
-                struct RetryResponse: Codable {
-                    let data: DataWrapper
-                    struct DataWrapper: Codable {
-                        let Page: PageData
-                        struct PageData: Codable { let media: [AniListAnime] }
-                    }
-                }
-
-                if let retryData = try? await executeGraphQLQuery(retryQuery, token: token),
-                   let retryDecoded = try? JSONDecoder().decode(RetryResponse.self, from: retryData),
-                   !retryDecoded.data.Page.media.isEmpty {
-                    let retryMatch = pickBestAniListMatch(from: retryDecoded.data.Page.media, tmdbShow: tvShowDetail)
-                    let retryEps = retryMatch.episodes ?? 0
-                    if retryEps > selectedEps {
-                        Logger.shared.log("AniListService: Retry found better match '\(AniListTitlePicker.title(from: retryMatch.title, preferredLanguageCode: preferredLanguageCode))' with \(retryEps) eps", type: "AniList")
-                        anime = retryMatch
-                    }
+                if let better = betterNode, (better.node.episodes ?? 0) > selectedEps {
+                    let betterAnime = better.node.asAnime()
+                    Logger.shared.log("AniListService: Found better match via relations: '\(AniListTitlePicker.title(from: betterAnime.title, preferredLanguageCode: preferredLanguageCode))' with \(betterAnime.episodes ?? 0) eps", type: "AniList")
+                    anime = betterAnime
                 }
             }
         }
