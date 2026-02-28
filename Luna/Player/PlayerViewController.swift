@@ -421,8 +421,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var isSeeking = false
     private var cachedDuration: Double = 0
     private var cachedPosition: Double = 0
-    private var progressPipelineEventCount: Int = 0
-    private var lastProgressPipelineLogAt: CFTimeInterval = 0
+
     private var isRendererLoading: Bool = false
     private var isClosing = false
     private var isRunning = false  // Track if renderer has been started
@@ -520,40 +519,30 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func rendererPlay() {
-        Logger.shared.log("[PlayerViewController.rendererPlay] Play", type: "Stream")
         if let vlc = vlcRenderer {
-            Logger.shared.log("[PlayerViewController.rendererPlay] Using VLC renderer", type: "Stream")
             vlc.play()
         } else if let mpv = mpvRenderer {
-            Logger.shared.log("[PlayerViewController.rendererPlay] Using MPV renderer", type: "Stream")
             mpv.play()
         }
     }
     
     private func rendererPausePlayback() {
-        Logger.shared.log("[PlayerViewController.rendererPausePlayback] Pause", type: "Stream")
         if let vlc = vlcRenderer {
-            Logger.shared.log("[PlayerViewController.rendererPausePlayback] Using VLC renderer", type: "Stream")
             vlc.pausePlayback()
         } else if let mpv = mpvRenderer {
-            Logger.shared.log("[PlayerViewController.rendererPausePlayback] Using MPV renderer", type: "Stream")
             mpv.pausePlayback()
         }
     }
     
     private func rendererTogglePause() {
-        Logger.shared.log("[PlayerViewController.rendererTogglePause] Toggle pause", type: "Stream")
         if let vlc = vlcRenderer {
-            Logger.shared.log("[PlayerViewController.rendererTogglePause] Using VLC renderer", type: "Stream")
             vlc.togglePause()
         } else if let mpv = mpvRenderer {
-            Logger.shared.log("[PlayerViewController.rendererTogglePause] Using MPV renderer", type: "Stream")
             mpv.togglePause()
         }
     }
 
     private func rendererSeek(to seconds: Double) {
-        Logger.shared.log("[PlayerViewController.rendererSeek] Seek to \(seconds)s", type: "Stream")
         if let vlc = vlcRenderer {
             vlc.seek(to: seconds)
         } else if let mpv = mpvRenderer {
@@ -562,7 +551,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func rendererSeek(by seconds: Double) {
-        Logger.shared.log("[PlayerViewController.rendererSeek] Seek by \(seconds)s", type: "Stream")
         if let vlc = vlcRenderer {
             vlc.seek(by: seconds)
         } else if let mpv = mpvRenderer {
@@ -571,7 +559,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
     
     private func rendererSetSpeed(_ speed: Double) {
-        Logger.shared.log("[PlayerViewController.rendererSetSpeed] Speed=\(speed)", type: "Stream")
         if let vlc = vlcRenderer {
             vlc.setSpeed(speed)
         } else if let mpv = mpvRenderer {
@@ -1505,7 +1492,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     @objc private func pipTouchDown() {
-        Logger.shared.log("[PlayerVC.PiP] touchDown hidden=\(pipButton.isHidden) alpha=\(String(format: "%.2f", pipButton.alpha)) enabled=\(pipButton.isEnabled) controlsVisible=\(controlsVisible)", type: "Player")
+
     }
     
     private func setupHoldGesture() {
@@ -2048,8 +2035,25 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     // MARK: - AniSkip Integration
 
     private func fetchAniSkipData() {
-        guard !aniSkipFetched, isAnimeContent() else { return }
-        guard case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _, _) = mediaInfo else { return }
+        // Diagnostic logging for AniSkip entry conditions
+        let animeCheck = isAnimeContent()
+        let mediaInfoDesc: String = {
+            guard let info = mediaInfo else { return "nil" }
+            switch info {
+            case .movie(let id, _, _, let isAnime): return "movie(id=\(id), isAnime=\(isAnime))"
+            case .episode(let showId, let s, let e, let title, _, let isAnime): return "episode(showId=\(showId), s=\(s), e=\(e), title=\(title ?? "nil"), isAnime=\(isAnime))"
+            }
+        }()
+        Logger.shared.log("AniSkip: fetchAniSkipData called — fetched=\(aniSkipFetched) isAnime=\(animeCheck) isAnimeHint=\(isAnimeHint ?? false) isVLC=\(isVLCPlayer) mediaInfo=\(mediaInfoDesc)", type: "AniSkip")
+
+        guard !aniSkipFetched, animeCheck else {
+            Logger.shared.log("AniSkip: fetchAniSkipData skipped — fetched=\(aniSkipFetched) isAnime=\(animeCheck)", type: "AniSkip")
+            return
+        }
+        guard case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _, _) = mediaInfo else {
+            Logger.shared.log("AniSkip: fetchAniSkipData skipped — mediaInfo is not .episode", type: "AniSkip")
+            return
+        }
 
         aniSkipFetched = true
 
@@ -2957,16 +2961,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
         
         if progressHostingController != nil {
-            Logger.shared.log("[PlayerVC.progressHost] already initialized; skipping host creation", type: "Player")
             return
         }
         
         let host = UIHostingController(rootView: AnyView(ProgressHostView(model: progressModel, onEditingChanged: { [weak self] editing in
             guard let self = self else { return }
-            Logger.shared.log("[PlayerVC.progressHost] slider editing=\(editing) modelPos=\(String(format: "%.2f", self.progressModel.position)) modelDur=\(String(format: "%.2f", self.progressModel.duration))", type: "Player")
             self.isSeeking = editing
             if !editing {
-                Logger.shared.log("[PlayerVC.progressHost] editing ended, seeking renderer to \(String(format: "%.2f", max(0, self.progressModel.position)))", type: "Player")
                 self.rendererSeek(to: max(0, self.progressModel.position))
             }
         })))
@@ -2984,7 +2985,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         ])
         host.didMove(toParent: self)
         progressHostingController = host
-        Logger.shared.log("[PlayerVC.progressHost] host created and attached. containerFrame=\(progressContainer.frame)", type: "Player")
+
     }
     
     private func updatePlayPauseButton(isPaused: Bool, shouldShowControls: Bool = true) {
@@ -3331,7 +3332,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     private func updatePosition(_ position: Double, duration: Double) {
-        progressPipelineEventCount += 1
+
         // Some VLC/HLS sources report 0 duration for a while; keep the last good duration so progress persists.
         let effectiveDuration: Double
         if duration.isFinite, duration > 0 {
@@ -3358,11 +3359,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             Logger.shared.log("[PlayerVC.progress] non-finite input from renderer. rawPos=\(position) rawDur=\(duration) cachedPos=\(cachedPosition) cachedDur=\(cachedDuration)", type: "Error")
         }
 
-        let now = CACurrentMediaTime()
-        if now - lastProgressPipelineLogAt >= 0.5 {
-            lastProgressPipelineLogAt = now
-            Logger.shared.log("[PlayerVC.progress] events=\(progressPipelineEventCount) isSeeking=\(isSeeking) rawPos=\(String(format: "%.2f", position)) rawDur=\(String(format: "%.2f", duration)) effectiveDur=\(String(format: "%.2f", effectiveDuration)) safePos=\(String(format: "%.2f", safePosition)) safeDur=\(String(format: "%.2f", safeDuration)) modelPos=\(String(format: "%.2f", progressModel.position)) modelDur=\(String(format: "%.2f", progressModel.duration))", type: "Player")
-        }
+
 
         DispatchQueue.main.async {
             if duration.isFinite, duration > 0 {
@@ -3504,16 +3501,12 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
 extension PlayerViewController: VLCRendererDelegate {
     func renderer(_ renderer: VLCRenderer, didUpdatePosition position: Double, duration: Double) {
         if isClosing { return }
-        let now = CACurrentMediaTime()
-        if now - lastProgressPipelineLogAt >= 0.5 {
-            Logger.shared.log("[PlayerVC.VLCDelegate] didUpdatePosition pos=\(String(format: "%.2f", position)) dur=\(String(format: "%.2f", duration))", type: "Player")
-        }
         updatePosition(position, duration: duration)
     }
     
     func renderer(_ renderer: VLCRenderer, didChangePause isPaused: Bool) {
         if isClosing { return }
-        Logger.shared.log("[PlayerVC.VLCDelegate] didChangePause isPaused=\(isPaused)", type: "Player")
+
         if isRendererLoading {
             pipController?.updatePlaybackState()
             return
@@ -3524,7 +3517,7 @@ extension PlayerViewController: VLCRendererDelegate {
     
     func renderer(_ renderer: VLCRenderer, didChangeLoading isLoading: Bool) {
         if isClosing { return }
-        Logger.shared.log("[PlayerVC.VLCDelegate] didChangeLoading isLoading=\(isLoading)", type: "Player")
+
         isRendererLoading = isLoading
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -3543,7 +3536,7 @@ extension PlayerViewController: VLCRendererDelegate {
     
     func renderer(_ renderer: VLCRenderer, didBecomeReadyToSeek: Bool) {
         if isClosing { return }
-        Logger.shared.log("[PlayerVC.VLCDelegate] didBecomeReadyToSeek=\(didBecomeReadyToSeek) pendingSeek=\(pendingSeekTime != nil ? "yes" : "no")", type: "Player")
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             
