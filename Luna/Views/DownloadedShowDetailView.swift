@@ -46,7 +46,11 @@ struct DownloadedShowDetailView: View {
 #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
 #endif
+        #if os(iOS)
         .background(Color(.systemBackground))
+        #else
+        .background(Color.black)
+        #endif
         .confirmationDialog(
             "Delete Episode",
             isPresented: $showingDeleteConfirmation,
