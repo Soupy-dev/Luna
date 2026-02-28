@@ -468,7 +468,9 @@ final class AniListService {
                         seasonNumber: seasonIndex,    // AniList season for search
                         stillPath: tmdbEp.stillPath,  // TMDB metadata
                         airDate: tmdbEp.airDate,      // TMDB metadata
-                        runtime: tmdbEp.runtime       // TMDB metadata
+                        runtime: tmdbEp.runtime,      // TMDB metadata
+                        tmdbSeasonNumber: tmdbEp.seasonNumber,    // Original TMDB S
+                        tmdbEpisodeNumber: tmdbEp.episodeNumber   // Original TMDB E
                     )
                 } else {
                     return AniListEpisode(
@@ -478,7 +480,9 @@ final class AniListService {
                         seasonNumber: seasonIndex,
                         stillPath: nil,
                         airDate: nil,
-                        runtime: nil
+                        runtime: nil,
+                        tmdbSeasonNumber: nil,
+                        tmdbEpisodeNumber: nil
                     )
                 }
             }
@@ -862,6 +866,8 @@ struct AniListEpisode: AniListEpisodeProtocol {
     let stillPath: String?         // From TMDB for metadata
     let airDate: String?
     let runtime: Int?
+    let tmdbSeasonNumber: Int?     // Original TMDB season number (before AniList restructuring)
+    let tmdbEpisodeNumber: Int?    // Original TMDB episode number (before AniList restructuring)
 }
 
 struct AniListAiringScheduleEntry: Identifiable {

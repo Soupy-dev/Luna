@@ -366,19 +366,23 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     var mediaInfo: MediaInfo?
     // Optional override: when true, treat content as anime regardless of tracker mapping
     var isAnimeHint: Bool?
+    /// Original TMDB season/episode numbers for anime (before AniList restructuring).
+    /// Used by TheIntroDB which requires TMDB numbering, not AniList-restructured S/E.
+    var originalTMDBSeasonNumber: Int?
+    var originalTMDBEpisodeNumber: Int?
 
-    // MARK: - AniSkip & Next Episode
+    // MARK: - Skip Segments & Next Episode
     /// Called when the user taps "Next Episode" — passes (seasonNumber, nextEpisodeNumber).
     var onRequestNextEpisode: ((_ seasonNumber: Int, _ nextEpisodeNumber: Int) -> Void)?
 
-    private var aniSkipSegments: [SkipSegment] = []
-    private var aniSkipFetched = false
-    private var aniSkipAutoSkippedSegments: Set<String> = []
+    private var skipSegments: [SkipSegment] = []
+    private var skipDataFetched = false
+    private var autoSkippedSegments: Set<String> = []
     private var currentActiveSkipSegment: SkipSegment?
     private var nextEpisodeButtonShown = false
 
 #if !os(tvOS)
-    private lazy var aniSkipButton: UIButton = {
+    private lazy var skipButton: UIButton = {
         var config = UIButton.Configuration.filled()
         config.cornerStyle = .capsule
         config.baseBackgroundColor = UIColor.systemYellow
@@ -1315,7 +1319,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         brightnessContainer.contentView.addSubview(brightnessSlider)
         brightnessContainer.contentView.addSubview(brightnessIcon)
         if isVLCPlayer {
-            videoContainer.addSubview(aniSkipButton)
+            videoContainer.addSubview(skipButton)
             videoContainer.addSubview(nextEpisodeButton)
         }
     #endif
@@ -1424,11 +1428,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         ])
         if isVLCPlayer {
             NSLayoutConstraint.activate([
-                aniSkipButton.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor),
-                aniSkipButton.bottomAnchor.constraint(equalTo: subtitleButton.topAnchor, constant: -12),
+                skipButton.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor),
+                skipButton.bottomAnchor.constraint(equalTo: subtitleButton.topAnchor, constant: -12),
 
                 nextEpisodeButton.trailingAnchor.constraint(equalTo: progressContainer.trailingAnchor),
-                nextEpisodeButton.bottomAnchor.constraint(equalTo: aniSkipButton.topAnchor, constant: -10)
+                nextEpisodeButton.bottomAnchor.constraint(equalTo: skipButton.topAnchor, constant: -10)
             ])
         }
 #endif
@@ -1463,7 +1467,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         skipForwardButton.addTarget(self, action: #selector(skipForwardTapped), for: .touchUpInside)
 #if !os(tvOS)
         if isVLCPlayer {
-            aniSkipButton.addTarget(self, action: #selector(aniSkipButtonTapped), for: .touchUpInside)
+            skipButton.addTarget(self, action: #selector(skipButtonTapped), for: .touchUpInside)
             nextEpisodeButton.addTarget(self, action: #selector(nextEpisodeButtonTapped), for: .touchUpInside)
         }
 #endif
@@ -2032,161 +2036,203 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
     }
 
-    // MARK: - AniSkip Integration
+    // MARK: - Skip Data Integration (AniSkip + TheIntroDB)
 
-    private func fetchAniSkipData() {
-        // Diagnostic logging for AniSkip entry conditions
-        let animeCheck = isAnimeContent()
-        let mediaInfoDesc: String = {
-            guard let info = mediaInfo else { return "nil" }
-            switch info {
-            case .movie(let id, _, _, let isAnime): return "movie(id=\(id), isAnime=\(isAnime))"
-            case .episode(let showId, let s, let e, let title, _, let isAnime): return "episode(showId=\(showId), s=\(s), e=\(e), title=\(title ?? "nil"), isAnime=\(isAnime))"
-            }
-        }()
-        Logger.shared.log("AniSkip: fetchAniSkipData called — fetched=\(aniSkipFetched) isAnime=\(animeCheck) isAnimeHint=\(isAnimeHint ?? false) isVLC=\(isVLCPlayer) mediaInfo=\(mediaInfoDesc)", type: "AniSkip")
+    private func fetchSkipData() {
+        guard !skipDataFetched else { return }
+        guard let info = mediaInfo else { return }
 
-        guard !aniSkipFetched, animeCheck else {
-            Logger.shared.log("AniSkip: fetchAniSkipData skipped — fetched=\(aniSkipFetched) isAnime=\(animeCheck)", type: "AniSkip")
-            return
+        // Extract TMDB ID, season, episode from mediaInfo
+        let tmdbId: Int
+        let seasonNumber: Int?
+        let episodeNumber: Int?
+        let showTitle: String?
+        let isAnime: Bool
+
+        switch info {
+        case .movie(let id, _, _, let anime):
+            tmdbId = id
+            seasonNumber = nil
+            episodeNumber = nil
+            showTitle = nil
+            isAnime = anime || isAnimeContent()
+        case .episode(let showId, let s, let e, let title, _, let anime):
+            tmdbId = showId
+            seasonNumber = s
+            episodeNumber = e
+            showTitle = title
+            isAnime = anime || isAnimeContent()
         }
-        guard case .episode(let showId, let seasonNumber, let episodeNumber, let showTitle, _, _) = mediaInfo else {
-            Logger.shared.log("AniSkip: fetchAniSkipData skipped — mediaInfo is not .episode", type: "AniSkip")
-            return
-        }
 
-        aniSkipFetched = true
+        Logger.shared.log("SkipData: fetchSkipData called — tmdbId=\(tmdbId) s=\(seasonNumber ?? -1) ep=\(episodeNumber ?? -1) isAnime=\(isAnime)", type: "Skip")
+
+        skipDataFetched = true
 
         Task { [weak self] in
             guard let self else { return }
 
-            // Step 1: Check season-specific cache (populated when user visited the detail page)
-            var anilistId = self.trackerManager.cachedAniListSeasonId(tmdbId: showId, seasonNumber: seasonNumber)
-            if let id = anilistId {
-                Logger.shared.log("AniSkip: Step 1 hit – cached season ID \(id) for tmdbId=\(showId) s=\(seasonNumber)", type: "AniSkip")
+            // Wait for renderer to report a valid duration
+            var durationAtFetch: Double = 0
+            for attempt in 1...20 {
+                durationAtFetch = await MainActor.run { self.cachedDuration }
+                if durationAtFetch > 0 { break }
+                if attempt <= 2 {
+                    Logger.shared.log("SkipData: Waiting for duration (attempt \(attempt)/20)…", type: "Skip")
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000)
             }
 
-            // Step 2: Fall back to show-level cache
-            if anilistId == nil {
-                anilistId = self.trackerManager.cachedAniListId(for: showId)
-                if let id = anilistId {
-                    Logger.shared.log("AniSkip: Step 2 hit – cached show-level ID \(id) for tmdbId=\(showId)", type: "AniSkip")
+            var segments: [SkipSegment] = []
+
+            // ── Anime content: try AniSkip first (better anime coverage) ──
+            if isAnime, let ep = episodeNumber {
+                segments = await self.fetchAniSkipSegments(
+                    tmdbId: tmdbId,
+                    seasonNumber: seasonNumber ?? 1,
+                    episodeNumber: ep,
+                    showTitle: showTitle,
+                    duration: durationAtFetch
+                )
+
+                if !segments.isEmpty {
+                    Logger.shared.log("SkipData: AniSkip returned \(segments.count) segments", type: "Skip")
                 }
             }
 
-            // Step 3: Full AniList resolution (same path MediaDetailView uses)
-            // This resolves season-specific AniList IDs via sequel chain traversal
-            if anilistId == nil, let title = showTitle {
-                Logger.shared.log("AniSkip: Step 3 – resolving via AniListService for '\(title)' tmdbId=\(showId)", type: "AniSkip")
+            // ── Fallback to TheIntroDB (or primary for non-anime) ──
+            // For anime, use original TMDB S/E (pre-AniList restructuring) since TheIntroDB uses TMDB numbering
+            let introDBSeason = self.originalTMDBSeasonNumber ?? seasonNumber
+            let introDBEpisode = self.originalTMDBEpisodeNumber ?? episodeNumber
+            if segments.isEmpty {
                 do {
-                    let animeData = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
-                        title: title,
-                        tmdbShowId: showId,
-                        tmdbService: TMDBService.shared,
-                        tmdbShowPoster: nil,
-                        token: nil
+                    let introDBSegments = try await IntroDBService.shared.fetchSkipTimes(
+                        tmdbId: tmdbId,
+                        seasonNumber: introDBSeason,
+                        episodeNumber: introDBEpisode,
+                        episodeDuration: durationAtFetch
                     )
-                    // Cache all season mappings for future use
-                    let seasonMappings = animeData.seasons.map { (seasonNumber: $0.seasonNumber, anilistId: $0.anilistId) }
-                    self.trackerManager.registerAniListAnimeData(tmdbId: showId, seasons: seasonMappings)
-
-                    // Pick our season
-                    anilistId = animeData.seasons.first(where: { $0.seasonNumber == seasonNumber })?.anilistId
-                    if let id = anilistId {
-                        Logger.shared.log("AniSkip: Step 3 resolved season \(seasonNumber) → anilistId=\(id)", type: "AniSkip")
-                    } else {
-                        Logger.shared.log("AniSkip: Step 3 resolved \(animeData.seasons.count) seasons but none matched s=\(seasonNumber)", type: "AniSkip")
+                    if !introDBSegments.isEmpty {
+                        segments = introDBSegments
+                        Logger.shared.log("SkipData: TheIntroDB returned \(segments.count) segments", type: "Skip")
                     }
                 } catch {
-                    Logger.shared.log("AniSkip: Step 3 failed: \(error.localizedDescription)", type: "AniSkip")
+                    Logger.shared.log("SkipData: TheIntroDB fetch failed: \(error.localizedDescription)", type: "Error")
                 }
             }
 
-            // Step 4: Last resort – simple title search (show-level only)
-            if anilistId == nil {
-                Logger.shared.log("AniSkip: Step 4 – fallback getAniListMediaId for tmdbId=\(showId)", type: "AniSkip")
-                anilistId = await self.trackerManager.getAniListMediaId(tmdbId: showId)
-            }
-
-            guard let finalId = anilistId else {
-                Logger.shared.log("AniSkip: No AniList ID found after all steps for tmdbId=\(showId) season=\(seasonNumber)", type: "AniSkip")
+            if segments.isEmpty {
+                Logger.shared.log("SkipData: No skip data found from any source for tmdbId=\(tmdbId)", type: "Skip")
                 return
             }
 
-            Logger.shared.log("AniSkip: Using anilistId=\(finalId) for tmdbId=\(showId) s=\(seasonNumber) ep=\(episodeNumber)", type: "AniSkip")
-
-            // Wait for renderer to report a valid duration (VLC often hasn't parsed it yet at didBecomeReadyToSeek)
-            var durationAtFetch: Double = 0
-            for attempt in 1...20 { // up to ~10 seconds
-                durationAtFetch = await MainActor.run { self.cachedDuration }
-                if durationAtFetch > 0 { break }
-                Logger.shared.log("AniSkip: Waiting for duration (attempt \(attempt)/20)…", type: "AniSkip")
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-            }
-
-            if durationAtFetch <= 0 {
-                Logger.shared.log("AniSkip: Duration still 0 after waiting — calling API without episodeLength", type: "AniSkip")
-            }
-
-            do {
-                let segments = try await AniSkipService.shared.fetchSkipTimes(
-                    anilistId: finalId,
-                    episodeNumber: episodeNumber,
-                    episodeDuration: durationAtFetch
-                )
-                await MainActor.run {
-                    self.aniSkipSegments = segments
-                    Logger.shared.log("AniSkip: Fetched \(segments.count) segments for ep=\(episodeNumber), durationAtFetch=\(String(format: "%.1f", durationAtFetch))", type: "AniSkip")
-                    // Attempt normalization now; if duration is still 0 it will be retried in updateAniSkipState
-                    let liveDuration = self.cachedDuration
-                    guard liveDuration > 0 else { return }
-                    self.progressModel.skipSegments = segments.map { seg in
-                        (start: seg.startTime / liveDuration, end: seg.endTime / liveDuration)
-                    }
+            // Store segments and normalize for progress bar
+            await MainActor.run {
+                self.skipSegments = segments
+                let liveDuration = self.cachedDuration
+                guard liveDuration > 0 else { return }
+                self.progressModel.skipSegments = segments.map { seg in
+                    (start: seg.startTime / liveDuration, end: seg.endTime / liveDuration)
                 }
-            } catch {
-                Logger.shared.log("AniSkip: Fetch failed for anilistId=\(finalId) ep=\(episodeNumber): \(error.localizedDescription)", type: "Error")
             }
         }
     }
 
-#if !os(tvOS)
-    private func updateAniSkipState(position: Double, duration: Double) {
-        guard !aniSkipSegments.isEmpty, duration > 0 else { return }
-
-        // Deferred normalization: if fetchAniSkipData completed before duration was available,
-        // progressModel.skipSegments will still be empty. Populate it now.
-        if progressModel.skipSegments.isEmpty {
-            progressModel.skipSegments = aniSkipSegments.map { seg in
-                (start: seg.startTime / duration, end: seg.endTime / duration)
-            }
-            Logger.shared.log("AniSkip: Deferred normalization applied with duration=\(String(format: "%.1f", duration))", type: "AniSkip")
+    /// AniSkip fetch with 4-step AniList ID resolution (anime-only path).
+    private func fetchAniSkipSegments(tmdbId: Int, seasonNumber: Int, episodeNumber: Int, showTitle: String?, duration: Double) async -> [SkipSegment] {
+        // Step 1: Check season-specific cache
+        var anilistId = trackerManager.cachedAniListSeasonId(tmdbId: tmdbId, seasonNumber: seasonNumber)
+        if let id = anilistId {
+            Logger.shared.log("SkipData: AniSkip step 1 – cached season ID \(id)", type: "Skip")
         }
 
-        // Find if current position is inside any skip segment (with 1 s tolerance on entry)
-        let activeSegment = aniSkipSegments.first { seg in
+        // Step 2: Fall back to show-level cache
+        if anilistId == nil {
+            anilistId = trackerManager.cachedAniListId(for: tmdbId)
+            if let id = anilistId {
+                Logger.shared.log("SkipData: AniSkip step 2 – cached show ID \(id)", type: "Skip")
+            }
+        }
+
+        // Step 3: Full AniList resolution via sequel chain
+        if anilistId == nil, let title = showTitle {
+            Logger.shared.log("SkipData: AniSkip step 3 – resolving via AniListService for '\(title)'", type: "Skip")
+            do {
+                let animeData = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
+                    title: title,
+                    tmdbShowId: tmdbId,
+                    tmdbService: TMDBService.shared,
+                    tmdbShowPoster: nil,
+                    token: nil
+                )
+                let seasonMappings = animeData.seasons.map { (seasonNumber: $0.seasonNumber, anilistId: $0.anilistId) }
+                trackerManager.registerAniListAnimeData(tmdbId: tmdbId, seasons: seasonMappings)
+                anilistId = animeData.seasons.first(where: { $0.seasonNumber == seasonNumber })?.anilistId
+            } catch {
+                Logger.shared.log("SkipData: AniSkip step 3 failed: \(error.localizedDescription)", type: "Skip")
+            }
+        }
+
+        // Step 4: Last resort – simple title search
+        if anilistId == nil {
+            anilistId = await trackerManager.getAniListMediaId(tmdbId: tmdbId)
+        }
+
+        guard let finalId = anilistId else {
+            Logger.shared.log("SkipData: No AniList ID found for tmdbId=\(tmdbId) — skipping AniSkip", type: "Skip")
+            return []
+        }
+
+        Logger.shared.log("SkipData: AniSkip using anilistId=\(finalId) for ep=\(episodeNumber)", type: "Skip")
+
+        do {
+            return try await AniSkipService.shared.fetchSkipTimes(
+                anilistId: finalId,
+                episodeNumber: episodeNumber,
+                episodeDuration: duration
+            )
+        } catch {
+            Logger.shared.log("SkipData: AniSkip fetch failed: \(error.localizedDescription)", type: "Error")
+            return []
+        }
+    }
+
+#if !os(tvOS)
+    private func updateSkipState(position: Double, duration: Double) {
+        guard !skipSegments.isEmpty, duration > 0 else { return }
+
+        // Deferred normalization: if fetchSkipData completed before duration was available,
+        // progressModel.skipSegments will still be empty. Populate it now.
+        if progressModel.skipSegments.isEmpty {
+            progressModel.skipSegments = skipSegments.map { seg in
+                (start: seg.startTime / duration, end: seg.endTime / duration)
+            }
+            Logger.shared.log("SkipData: Deferred normalization applied with duration=\(String(format: "%.1f", duration))", type: "Skip")
+        }
+
+        // Find if current position is inside any skip segment
+        let activeSegment = skipSegments.first { seg in
             position >= seg.startTime && position <= seg.endTime
         }
 
         if let seg = activeSegment {
             // Auto-skip if enabled and not yet skipped for this segment
             let autoSkipEnabled = UserDefaults.standard.bool(forKey: "aniSkipAutoSkip")
-            if autoSkipEnabled, !aniSkipAutoSkippedSegments.contains(seg.uniqueKey) {
-                aniSkipAutoSkippedSegments.insert(seg.uniqueKey)
-                Logger.shared.log("AniSkip: Auto-skipping \(seg.type.rawValue) from \(Int(seg.startTime))s to \(Int(seg.endTime))s", type: "AniSkip")
+            if autoSkipEnabled, !autoSkippedSegments.contains(seg.uniqueKey) {
+                autoSkippedSegments.insert(seg.uniqueKey)
+                Logger.shared.log("SkipData: Auto-skipping \(seg.type.rawValue) from \(Int(seg.startTime))s to \(Int(seg.endTime))s", type: "Skip")
                 rendererSeek(to: seg.endTime + 1.0)
                 return
             }
 
             if currentActiveSkipSegment?.uniqueKey != seg.uniqueKey {
                 currentActiveSkipSegment = seg
-                aniSkipButton.configuration?.title = seg.type.displayLabel
-                showAniSkipButton()
+                skipButton.configuration?.title = seg.type.displayLabel
+                showSkipButton()
             }
         } else {
             if currentActiveSkipSegment != nil {
                 currentActiveSkipSegment = nil
-                hideAniSkipButton()
+                hideSkipButton()
             }
         }
     }
@@ -2218,13 +2264,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         }
     }
 
-    @objc private func aniSkipButtonTapped() {
+    @objc private func skipButtonTapped() {
         guard let seg = currentActiveSkipSegment else { return }
-        Logger.shared.log("AniSkip: User tapped skip for \(seg.type.rawValue) → seeking to \(Int(seg.endTime + 1))s", type: "AniSkip")
-        aniSkipAutoSkippedSegments.insert(seg.uniqueKey)
+        Logger.shared.log("SkipData: User tapped skip for \(seg.type.rawValue) → seeking to \(Int(seg.endTime + 1))s", type: "Skip")
+        autoSkippedSegments.insert(seg.uniqueKey)
         rendererSeek(to: seg.endTime + 1.0)
         currentActiveSkipSegment = nil
-        hideAniSkipButton()
+        hideSkipButton()
     }
 
     @objc private func nextEpisodeButtonTapped() {
@@ -2234,20 +2280,20 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         closeTapped()
     }
 
-    private func showAniSkipButton() {
-        guard aniSkipButton.isHidden || aniSkipButton.alpha < 1 else { return }
-        aniSkipButton.isHidden = false
-        videoContainer.bringSubviewToFront(aniSkipButton)
+    private func showSkipButton() {
+        guard skipButton.isHidden || skipButton.alpha < 1 else { return }
+        skipButton.isHidden = false
+        videoContainer.bringSubviewToFront(skipButton)
         UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseOut]) {
-            self.aniSkipButton.alpha = 1.0
+            self.skipButton.alpha = 1.0
         }
     }
 
-    private func hideAniSkipButton() {
+    private func hideSkipButton() {
         UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseIn]) {
-            self.aniSkipButton.alpha = 0
+            self.skipButton.alpha = 0
         } completion: { _ in
-            self.aniSkipButton.isHidden = true
+            self.skipButton.isHidden = true
         }
     }
 
@@ -3390,7 +3436,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
 #if !os(tvOS)
             if self.isVLCPlayer {
-                self.updateAniSkipState(position: safePosition, duration: safeDuration)
+                self.updateSkipState(position: safePosition, duration: safeDuration)
                 self.updateNextEpisodeState(position: safePosition, duration: safeDuration)
             }
 #endif
@@ -3460,8 +3506,8 @@ extension PlayerViewController: MPVSoftwareRendererDelegate {
                 self.pendingSeekTime = nil
             }
 
-            // Fetch AniSkip data once MPV is ready
-            self.fetchAniSkipData()
+            // Fetch skip data once MPV is ready
+            self.fetchSkipData()
         }
     }
 
@@ -3558,8 +3604,8 @@ extension PlayerViewController: VLCRendererDelegate {
                 self.pendingSeekTime = nil
             }
 
-            // Fetch AniSkip data once VLC is ready
-            self.fetchAniSkipData()
+            // Fetch skip data once VLC is ready
+            self.fetchSkipData()
         }
     }
 

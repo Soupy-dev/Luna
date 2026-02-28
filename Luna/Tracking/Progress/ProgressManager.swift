@@ -335,8 +335,6 @@ final class ProgressManager: ObservableObject {
             return
         }
 
-        Logger.shared.log("Storing progress for showId=\(showId) S\(seasonNumber)E\(episodeNumber) position=\(currentTime)/\(totalDuration)", type: "Progress")
-
         accessQueue.async(flags: .barrier) { [weak self] in
             guard let self = self else { return }
             var entry = self.progressData.findEpisode(showId: showId, season: seasonNumber, episode: episodeNumber)

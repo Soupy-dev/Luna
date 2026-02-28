@@ -712,13 +712,6 @@ struct ModulesSearchResultsSheet: View {
             searchQuery = effectiveTitle
         }
         
-        // Debug logging
-        Logger.shared.log("[ServicesResultsSheet] mediaTitle: '\(mediaTitle)'", type: "Debug")
-        Logger.shared.log("[ServicesResultsSheet] seasonTitleOverride: '\(seasonTitleOverride ?? "nil")'", type: "Debug")
-        Logger.shared.log("[ServicesResultsSheet] effectiveTitle: '\(effectiveTitle)'", type: "Debug")
-        Logger.shared.log("[ServicesResultsSheet] searchQuery: '\(searchQuery)'", type: "Debug")
-        Logger.shared.log("[ServicesResultsSheet] isAnime: \(isAnime)", type: "Debug")
-        
         let baseTitleQuery = searchQuery.caseInsensitiveCompare(effectiveTitle) == .orderedSame ? nil : effectiveTitle
         let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != effectiveTitle.lowercased() } ?? false
         
@@ -1320,6 +1313,8 @@ struct ModulesSearchResultsSheet: View {
                 )
                 let isAnimeHint = isAnimeContent || animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
                 pvc.isAnimeHint = isAnimeHint
+                pvc.originalTMDBSeasonNumber = selectedEpisode?.originalTMDBSeasonNumber
+                pvc.originalTMDBEpisodeNumber = selectedEpisode?.originalTMDBEpisodeNumber
                 pvc.onRequestNextEpisode = { seasonNumber, nextEpisodeNumber in
                     NotificationCenter.default.post(
                         name: .requestNextEpisode,
@@ -1374,6 +1369,8 @@ struct ModulesSearchResultsSheet: View {
                 )
                 let isAnimeHint = isAnimeContent || animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
                 pvc.isAnimeHint = isAnimeHint
+                pvc.originalTMDBSeasonNumber = selectedEpisode?.originalTMDBSeasonNumber
+                pvc.originalTMDBEpisodeNumber = selectedEpisode?.originalTMDBEpisodeNumber
                 pvc.onRequestNextEpisode = { seasonNumber, nextEpisodeNumber in
                     NotificationCenter.default.post(
                         name: .requestNextEpisode,

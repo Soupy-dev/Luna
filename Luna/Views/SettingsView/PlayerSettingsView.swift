@@ -486,14 +486,14 @@ struct PlayerSettingsView: View {
                     }
                 }
 
-                Section(header: Text("AniSkip")) {
+                Section(header: Text("Skip Segments")) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Auto Skip")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
 
-                            Text("Automatically skip intros, outros, and recaps when detected via AniSkip. A skip button is always shown regardless of this setting.")
+                            Text("Automatically skip intros, outros, recaps, and previews when detected via AniSkip or TheIntroDB. A skip button is always shown regardless of this setting.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.leading)

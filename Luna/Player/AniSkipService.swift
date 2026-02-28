@@ -13,12 +13,14 @@ enum SkipType: String, Codable {
     case intro
     case outro
     case recap
+    case preview
 
     var displayLabel: String {
         switch self {
         case .intro: return "Skip Intro"
         case .outro: return "Skip Outro"
         case .recap: return "Skip Recap"
+        case .preview: return "Skip Preview"
         }
     }
 }

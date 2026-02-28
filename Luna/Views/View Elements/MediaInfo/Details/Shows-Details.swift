@@ -436,7 +436,7 @@ struct TVShowSeasonsSection: View {
                     let seasonEpisodes = animeEpisodes.filter { $0.seasonNumber == season.seasonNumber }
                     
                     let tmdbEpisodes: [TMDBEpisode] = seasonEpisodes.map { aniEp in
-                        TMDBEpisode(
+                        var ep = TMDBEpisode(
                             id: tvShowId * 1000 + season.seasonNumber * 100 + aniEp.number,
                             name: aniEp.title,
                             overview: aniEp.description,
@@ -448,6 +448,10 @@ struct TVShowSeasonsSection: View {
                             voteAverage: 0,
                             voteCount: 0
                         )
+                        // Carry original TMDB numbers for TheIntroDB (before AniList restructuring)
+                        ep.originalTMDBSeasonNumber = aniEp.tmdbSeasonNumber
+                        ep.originalTMDBEpisodeNumber = aniEp.tmdbEpisodeNumber
+                        return ep
                     }
                     
                     let detail = TMDBSeasonDetail(

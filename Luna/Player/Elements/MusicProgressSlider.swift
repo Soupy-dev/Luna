@@ -25,8 +25,7 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
     @State private var localTempProgress: T = 0
     @GestureState private var isActive: Bool = false
     @State private var progressDuration: T = 0
-    @State private var sliderEventCount: Int = 0
-    @State private var lastSliderLogAt: TimeInterval = 0
+
     
     init(
         value: Binding<T>,
@@ -111,46 +110,29 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
                         state = true
                     }
                     .onChanged { gesture in
-                        sliderEventCount += 1
                         localTempProgress = T(gesture.translation.width / bounds.size.width)
                         let prg = max(min((localRealProgress + localTempProgress), 1), 0)
                         progressDuration = inRange.upperBound * prg
                         value = max(min(getPrgValue(), inRange.upperBound), inRange.lowerBound)
-
-                        let now = Date().timeIntervalSinceReferenceDate
-                        if now - lastSliderLogAt >= 0.2 {
-                            lastSliderLogAt = now
-                            Logger.shared.log("[MusicProgressSlider.drag] events=\(sliderEventCount) translation=\(String(format: "%.2f", gesture.translation.width)) width=\(String(format: "%.2f", bounds.size.width)) localReal=\(String(format: "%.4f", Double(localRealProgress))) localTemp=\(String(format: "%.4f", Double(localTempProgress))) value=\(String(format: "%.2f", Double(value))) rangeEnd=\(String(format: "%.2f", Double(inRange.upperBound)))", type: "Player")
-                        }
                     }
                     .onEnded { _ in
-                        Logger.shared.log("[MusicProgressSlider.drag] ended localReal(before)=\(String(format: "%.4f", Double(localRealProgress))) localTemp=\(String(format: "%.4f", Double(localTempProgress))) value=\(String(format: "%.2f", Double(value)))", type: "Player")
                         localRealProgress = max(min(localRealProgress + localTempProgress, 1), 0)
                         localTempProgress = 0
-                        Logger.shared.log("[MusicProgressSlider.drag] committed localReal(after)=\(String(format: "%.4f", Double(localRealProgress)))", type: "Player")
                     }
             )
             #endif
             .onChangeComp(of: isActive) { _, newValue in
                 value = max(min(getPrgValue(), inRange.upperBound), inRange.lowerBound)
-                Logger.shared.log("[MusicProgressSlider.active] isActive=\(newValue) value=\(String(format: "%.2f", Double(value))) localReal=\(String(format: "%.4f", Double(localRealProgress))) localTemp=\(String(format: "%.4f", Double(localTempProgress)))", type: "Player")
                 onEditingChanged(newValue)
             }
             .onAppear {
                 localRealProgress = getPrgPercentage(value)
                 progressDuration = inRange.upperBound * localRealProgress
-                Logger.shared.log("[MusicProgressSlider.appear] value=\(String(format: "%.2f", Double(value))) rangeStart=\(String(format: "%.2f", Double(inRange.lowerBound))) rangeEnd=\(String(format: "%.2f", Double(inRange.upperBound))) localReal=\(String(format: "%.4f", Double(localRealProgress)))", type: "Player")
             }
             .onChangeComp(of: value) { _, newValue in
                 if !isActive {
                     localRealProgress = getPrgPercentage(newValue)
                     progressDuration = inRange.upperBound * localRealProgress
-
-                    let now = Date().timeIntervalSinceReferenceDate
-                    if now - lastSliderLogAt >= 0.5 {
-                        lastSliderLogAt = now
-                        Logger.shared.log("[MusicProgressSlider.value] synced value=\(String(format: "%.2f", Double(newValue))) localReal=\(String(format: "%.4f", Double(localRealProgress))) progressDuration=\(String(format: "%.2f", Double(progressDuration))) rangeEnd=\(String(format: "%.2f", Double(inRange.upperBound)))", type: "Player")
-                    }
                 }
             }
         }
