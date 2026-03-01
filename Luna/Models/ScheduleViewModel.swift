@@ -156,6 +156,39 @@ final class ScheduleViewModel: ObservableObject {
             }
         }
         
+        // Relation fallback: walk up AniList parent/prequel chain and try TMDB on each ancestor
+        let parentCandidates = await AniListService.shared.fetchParentTitleCandidates(forMediaId: entry.mediaId)
+        for parent in parentCandidates {
+            var parentSeen = Set<String>()
+            let parentTitles = [parent.englishTitle, parent.romajiTitle, parent.nativeTitle]
+                .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty && parentSeen.insert($0).inserted }
+            
+            for candidate in parentTitles {
+                // Try TV show search (most common for parent series)
+                if let results = try? await tmdbService.searchTVShows(query: candidate),
+                   let best = bestTVMatch(results: results, candidateKey: normalized(candidate)) {
+                    return best.asSearchResult
+                }
+                // Try multi search as last resort
+                if let results = try? await tmdbService.searchMulti(query: candidate, maxPages: 1), !results.isEmpty {
+                    let candidateKey = normalized(candidate)
+                    let filtered = results.filter { r in
+                        let nameKey = normalized(r.displayTitle)
+                        return nameKey == candidateKey || nameKey.contains(candidateKey) || candidateKey.contains(nameKey)
+                    }
+                    let pool = filtered.isEmpty ? results : filtered
+                    let best = pool.min { a, b in
+                        let aAnim = a.genreIds?.contains(16) == true
+                        let bAnim = b.genreIds?.contains(16) == true
+                        if aAnim != bAnim { return aAnim }
+                        return a.popularity > b.popularity
+                    }
+                    if let best = best { return best }
+                }
+            }
+        }
+        
         return nil
     }
     
