@@ -277,9 +277,30 @@ final class VLCRenderer: NSObject {
 
         guard let player = mediaPlayer else { return }
         ensureAudioSessionActive()
+
+        // If VLC's media has stopped or ended (e.g. network timeout while backgrounded),
+        // calling play() alone won't work — reload the stream and seek back.
+        let state = player.state
+        if state == .stopped || state == .ended || state == .error {
+            Logger.shared.log("[VLCRenderer.play] Player in \(describeState(state)) state — reloading from position \(cachedPosition)s", type: "Stream")
+            reloadAndSeekToLastPosition()
+            return
+        }
+
         player.play()
         if currentPlaybackSpeed != 1.0 {
             player.rate = Float(currentPlaybackSpeed)
+        }
+    }
+
+    /// Reload the current media and seek back to the last known position.
+    /// Used to recover from stopped/ended state after background network drops.
+    private func reloadAndSeekToLastPosition() {
+        guard let url = currentURL, let preset = currentPreset else { return }
+        let savedPosition = cachedPosition
+        load(url: url, with: preset, headers: currentHeaders)
+        if savedPosition > 0 {
+            pendingAbsoluteSeek = savedPosition
         }
     }
     
@@ -634,6 +655,8 @@ final class VLCRenderer: NSObject {
     }
     
     @objc private func handleAppWillEnterForeground() {
+        // Re-activate the audio session that iOS may have deactivated during background.
+        ensureAudioSessionActive()
         // Do NOT auto-resume — stay paused until the user explicitly plays.
         // VLC PiP is disabled; will be revisited when VideoLAN adds native PiP.
     }
