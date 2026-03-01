@@ -71,10 +71,6 @@ final class PlayerSettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(vlcSubtitleEditMenuEnabled, forKey: "enableVLCSubtitleEditMenu") }
     }
 
-    @Published var vlcPictureInPictureEnabled: Bool {
-        didSet { UserDefaults.standard.set(vlcPictureInPictureEnabled, forKey: "enableVLCPictureInPicture") }
-    }
-
     @Published var aniSkipAutoSkip: Bool {
         didSet { UserDefaults.standard.set(aniSkipAutoSkip, forKey: "aniSkipAutoSkip") }
     }
@@ -100,7 +96,6 @@ final class PlayerSettingsStore: ObservableObject {
         self.inAppPlayer = InAppPlayer(rawValue: inAppRaw) ?? .normal
 
         self.vlcSubtitleEditMenuEnabled = UserDefaults.standard.bool(forKey: "enableVLCSubtitleEditMenu")
-        self.vlcPictureInPictureEnabled = UserDefaults.standard.bool(forKey: "enableVLCPictureInPicture")
 
         self.aniSkipAutoSkip = UserDefaults.standard.bool(forKey: "aniSkipAutoSkip")
 
@@ -465,24 +460,6 @@ struct PlayerSettingsView: View {
                                     .foregroundColor(accentColorManager.currentAccentColor)
                             }
                         }
-                    }
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Picture in Picture")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-
-                            Text("Show PiP button in VLC player. Hidden automatically for unsupported streams. PiP subtitles depend on AVPlayer-supported tracks. Unreliable until VLC adds official iOS PiP support with full subtitle compatibility.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.leading)
-                        }
-
-                        Spacer()
-
-                        Toggle("", isOn: $store.vlcPictureInPictureEnabled)
-                            .tint(accentColorManager.currentAccentColor)
                     }
                 }
 

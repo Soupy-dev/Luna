@@ -629,13 +629,13 @@ final class VLCRenderer: NSObject {
     }
     
     @objc private func handleAppDidEnterBackground() {
-        // Pause playback when app goes to background for thermal efficiency
+        // Pause playback when app goes to background
         pausePlayback()
     }
     
     @objc private func handleAppWillEnterForeground() {
-        // Resume playback when app returns to foreground
-        play()
+        // Do NOT auto-resume — stay paused until the user explicitly plays.
+        // VLC PiP is disabled; will be revisited when VideoLAN adds native PiP.
     }
     
     // MARK: - State Properties

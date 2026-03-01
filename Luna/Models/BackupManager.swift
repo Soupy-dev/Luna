@@ -21,7 +21,6 @@ struct BackupData: Codable {
     var enableSubtitlesByDefault: Bool
     var defaultSubtitleLanguage: String
     var enableVLCSubtitleEditMenu: Bool
-    var enableVLCPictureInPicture: Bool
 
     var preferredAnimeAudioLanguage: String
     var playerChoice: String
@@ -45,7 +44,7 @@ struct BackupData: Codable {
 
     enum CodingKeys: String, CodingKey {
         case version, createdDate
-        case accentColor, tmdbLanguage, selectedAppearance, enableSubtitlesByDefault, defaultSubtitleLanguage, enableVLCSubtitleEditMenu, enableVLCPictureInPicture, preferredAnimeAudioLanguage, playerChoice, showScheduleTab, showLocalScheduleTime
+        case accentColor, tmdbLanguage, selectedAppearance, enableSubtitlesByDefault, defaultSubtitleLanguage, enableVLCSubtitleEditMenu, preferredAnimeAudioLanguage, playerChoice, showScheduleTab, showLocalScheduleTime
         case collections, progressData, trackerState, catalogs, services
     }
 
@@ -60,7 +59,6 @@ struct BackupData: Codable {
         enableSubtitlesByDefault = try container.decodeIfPresent(Bool.self, forKey: .enableSubtitlesByDefault) ?? false
         defaultSubtitleLanguage = try container.decodeIfPresent(String.self, forKey: .defaultSubtitleLanguage) ?? "eng"
         enableVLCSubtitleEditMenu = try container.decodeIfPresent(Bool.self, forKey: .enableVLCSubtitleEditMenu) ?? false
-        enableVLCPictureInPicture = try container.decodeIfPresent(Bool.self, forKey: .enableVLCPictureInPicture) ?? false
 
         preferredAnimeAudioLanguage = try container.decodeIfPresent(String.self, forKey: .preferredAnimeAudioLanguage) ?? "jpn"
         playerChoice = try container.decodeIfPresent(String.self, forKey: .playerChoice) ?? "mpv"
@@ -83,7 +81,6 @@ struct BackupData: Codable {
         try container.encode(enableSubtitlesByDefault, forKey: .enableSubtitlesByDefault)
         try container.encode(defaultSubtitleLanguage, forKey: .defaultSubtitleLanguage)
         try container.encode(enableVLCSubtitleEditMenu, forKey: .enableVLCSubtitleEditMenu)
-        try container.encode(enableVLCPictureInPicture, forKey: .enableVLCPictureInPicture)
 
         try container.encode(preferredAnimeAudioLanguage, forKey: .preferredAnimeAudioLanguage)
         try container.encode(playerChoice, forKey: .playerChoice)
@@ -105,7 +102,6 @@ struct BackupData: Codable {
         enableSubtitlesByDefault: Bool,
         defaultSubtitleLanguage: String,
         enableVLCSubtitleEditMenu: Bool,
-        enableVLCPictureInPicture: Bool,
 
         preferredAnimeAudioLanguage: String,
         playerChoice: String,
@@ -125,7 +121,6 @@ struct BackupData: Codable {
         self.enableSubtitlesByDefault = enableSubtitlesByDefault
         self.defaultSubtitleLanguage = defaultSubtitleLanguage
         self.enableVLCSubtitleEditMenu = enableVLCSubtitleEditMenu
-        self.enableVLCPictureInPicture = enableVLCPictureInPicture
 
         self.preferredAnimeAudioLanguage = preferredAnimeAudioLanguage
         self.playerChoice = playerChoice
@@ -225,7 +220,6 @@ class BackupManager {
         let enableSubtitlesByDefault = userDefaults.bool(forKey: "enableSubtitlesByDefault")
         let defaultSubtitleLanguage = userDefaults.string(forKey: "defaultSubtitleLanguage") ?? "eng"
         let enableVLCSubtitleEditMenu = userDefaults.bool(forKey: "enableVLCSubtitleEditMenu")
-        let enableVLCPictureInPicture = userDefaults.bool(forKey: "enableVLCPictureInPicture")
 
         let preferredAnimeAudioLanguage = userDefaults.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn"
         let playerChoice = userDefaults.string(forKey: "playerChoice") ?? "mpv"
@@ -264,7 +258,6 @@ class BackupManager {
             enableSubtitlesByDefault: enableSubtitlesByDefault,
             defaultSubtitleLanguage: defaultSubtitleLanguage,
             enableVLCSubtitleEditMenu: enableVLCSubtitleEditMenu,
-            enableVLCPictureInPicture: enableVLCPictureInPicture,
 
             preferredAnimeAudioLanguage: preferredAnimeAudioLanguage,
             playerChoice: playerChoice,
@@ -339,7 +332,6 @@ class BackupManager {
         let enableSubtitlesByDefault = json["enableSubtitlesByDefault"] as? Bool ?? false
         let defaultSubtitleLanguage = json["defaultSubtitleLanguage"] as? String ?? "eng"
         let enableVLCSubtitleEditMenu = json["enableVLCSubtitleEditMenu"] as? Bool ?? false
-        let enableVLCPictureInPicture = json["enableVLCPictureInPicture"] as? Bool ?? false
         let preferredAnimeAudioLanguage = json["preferredAnimeAudioLanguage"] as? String ?? "jpn"
         let playerChoice = json["playerChoice"] as? String ?? "mpv"
         let showScheduleTab = json["showScheduleTab"] as? Bool ?? true
@@ -413,7 +405,6 @@ class BackupManager {
             enableSubtitlesByDefault: enableSubtitlesByDefault,
             defaultSubtitleLanguage: defaultSubtitleLanguage,
             enableVLCSubtitleEditMenu: enableVLCSubtitleEditMenu,
-            enableVLCPictureInPicture: enableVLCPictureInPicture,
             preferredAnimeAudioLanguage: preferredAnimeAudioLanguage,
             playerChoice: playerChoice,
             showScheduleTab: showScheduleTab,
@@ -445,7 +436,6 @@ class BackupManager {
         userDefaults.set(backup.enableSubtitlesByDefault, forKey: "enableSubtitlesByDefault")
         userDefaults.set(backup.defaultSubtitleLanguage, forKey: "defaultSubtitleLanguage")
         userDefaults.set(backup.enableVLCSubtitleEditMenu, forKey: "enableVLCSubtitleEditMenu")
-        userDefaults.set(backup.enableVLCPictureInPicture, forKey: "enableVLCPictureInPicture")
 
         userDefaults.set(backup.preferredAnimeAudioLanguage, forKey: "preferredAnimeAudioLanguage")
         userDefaults.set(backup.playerChoice, forKey: "playerChoice")
