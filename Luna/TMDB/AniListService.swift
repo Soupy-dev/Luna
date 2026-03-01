@@ -255,6 +255,7 @@ final class AniListService {
                             id
                             title { romaji english native }
                             coverImage { large medium }
+                            format
                         }
                     }
                 }
@@ -287,7 +288,11 @@ final class AniListService {
                     title: title,
                     airingAt: Date(timeIntervalSince1970: TimeInterval(schedule.airingAt)),
                     episode: schedule.episode,
-                    coverImage: cover
+                    coverImage: cover,
+                    englishTitle: schedule.media.title.english,
+                    romajiTitle: schedule.media.title.romaji,
+                    nativeTitle: schedule.media.title.native,
+                    format: schedule.media.format
                 )
             }
             .filter { entry in
@@ -1329,6 +1334,10 @@ struct AniListAiringScheduleEntry: Identifiable {
     let airingAt: Date
     let episode: Int
     let coverImage: String?
+    let englishTitle: String?
+    let romajiTitle: String?
+    let nativeTitle: String?
+    let format: String?
 }
 
 struct AniListSeasonWithPoster {
