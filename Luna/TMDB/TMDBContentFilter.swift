@@ -54,14 +54,6 @@ class TMDBContentFilter: ObservableObject {
         }
     }
     
-    func filterMovieDetail(_ movie: TMDBMovieDetail) -> Bool {
-        return shouldIncludeContent(genres: movie.genres)
-    }
-    
-    func filterTVShowDetail(_ tvShow: TMDBTVShowDetail) -> Bool {
-        return shouldIncludeContent(genres: tvShow.genres)
-    }
-    
     private func shouldIncludeContent(genreIds: [Int]?) -> Bool {
         if filterHorror {
             if let genreIds = genreIds {

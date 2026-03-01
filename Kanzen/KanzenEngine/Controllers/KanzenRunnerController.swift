@@ -9,10 +9,8 @@ import JavaScriptCore
 
 class KanzenRunnerController {
     private let moduleRunner: KanzenModuleRunner
-    private let outputFormatter: KanzenOutputFormatter
-    init(moduleRunner: KanzenModuleRunner, outputFormatter: KanzenOutputFormatter) {
+    init(moduleRunner: KanzenModuleRunner) {
         self.moduleRunner = moduleRunner
-        self.outputFormatter = outputFormatter
     }
     
     func loadScript(_script: String) throws

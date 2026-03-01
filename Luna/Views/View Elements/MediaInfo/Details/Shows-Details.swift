@@ -20,6 +20,12 @@ struct TVShowSeasonsSection: View {
     
     @State private var isLoadingSeason = false
     @State private var showingSearchResults = false
+    @State private var showingDownloadSheet = false
+    @State private var downloadEpisode: TMDBEpisode? = nil
+    @State private var downloadAllQueue: [TMDBEpisode] = []
+    @State private var isDownloadingAll = false
+    @State private var downloadWasEnqueued = false
+    @State private var downloadWasSkipped = false
     @State private var showingNoServicesAlert = false
     @State private var romajiTitle: String?
     @State private var currentSeasonTitle: String?
@@ -108,7 +114,17 @@ struct TVShowSeasonsSection: View {
                             Text("Episodes")
                                 .font(.title2)
                                 .fontWeight(.bold)
+                            
                             Spacer()
+                            
+                            if seasonDetail != nil && !serviceManager.activeServices.isEmpty {
+                                Button(action: startDownloadAllSeason) {
+                                    Image(systemName: "arrow.down.circle")
+                                        .font(.title3)
+                                        .foregroundColor(.white)
+                                }
+                                .disabled(isDownloadingAll)
+                            }
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal)
@@ -142,7 +158,50 @@ struct TVShowSeasonsSection: View {
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: tvShow?.id ?? 0,
                 animeSeasonTitle: isAnime ? currentSeasonTitle : nil,
-                posterPath: tvShow?.posterPath
+                posterPath: tvShow?.posterPath,
+                originalTMDBSeasonNumber: originalTMDBNumbers?.season,
+                originalTMDBEpisodeNumber: originalTMDBNumbers?.episode
+            )
+        }
+        .sheet(isPresented: $showingDownloadSheet, onDismiss: {
+            if isDownloadingAll {
+                if downloadWasEnqueued || downloadWasSkipped {
+                    // Download enqueued or skipped — advance to next episode
+                    downloadWasEnqueued = false
+                    downloadWasSkipped = false
+                    if !downloadAllQueue.isEmpty {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            showNextDownloadSheet()
+                        }
+                    } else {
+                        isDownloadingAll = false
+                    }
+                } else {
+                    // "Done" was tapped without download/skip — cancel entire queue
+                    downloadAllQueue.removeAll()
+                    isDownloadingAll = false
+                }
+            }
+        }) {
+            ModulesSearchResultsSheet(
+                mediaTitle: getSearchTitle(),
+                seasonTitleOverride: currentSeasonTitle,
+                originalTitle: romajiTitle,
+                isMovie: false,
+                isAnimeContent: isAnime,
+                selectedEpisode: downloadEpisode ?? selectedEpisodeForSearch,
+                tmdbId: tvShow?.id ?? 0,
+                animeSeasonTitle: isAnime ? currentSeasonTitle : nil,
+                posterPath: tvShow?.posterPath,
+                originalTMDBSeasonNumber: originalTMDBNumbers?.season,
+                originalTMDBEpisodeNumber: originalTMDBNumbers?.episode,
+                downloadMode: true,
+                onDownloadEnqueued: isDownloadingAll ? {
+                    downloadWasEnqueued = true
+                } : nil,
+                onSkipRequested: isDownloadingAll ? {
+                    downloadWasSkipped = true
+                } : nil
             )
         }
         .alert("No Active Services", isPresented: $showingNoServicesAlert) {
@@ -161,6 +220,15 @@ struct TVShowSeasonsSection: View {
                 .foregroundColor(.white)
             
             Spacer()
+            
+            if seasonDetail != nil && !serviceManager.activeServices.isEmpty {
+                Button(action: startDownloadAllSeason) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.title3)
+                        .foregroundColor(.white)
+                }
+                .disabled(isDownloadingAll)
+            }
             
             if let tvShow = tvShow, isGroupedBySeasons && useSeasonMenu {
                 seasonMenu(for: tvShow)
@@ -312,7 +380,14 @@ struct TVShowSeasonsSection: View {
                 isSelected: isSelected,
                 onTap: { episodeTapAction(episode: episode) },
                 onMarkWatched: { markAsWatched(episode: episode) },
-                onResetProgress: { resetProgress(episode: episode) }
+                onResetProgress: { resetProgress(episode: episode) },
+                onDownload: {
+                    if !serviceManager.activeServices.isEmpty {
+                        downloadEpisode = episode
+                        selectedEpisodeForSearch = episode
+                        showingDownloadSheet = true
+                    }
+                }
             )
         } else {
             EmptyView()
@@ -322,6 +397,19 @@ struct TVShowSeasonsSection: View {
     private func episodeTapAction(episode: TMDBEpisode) {
         selectedEpisodeForSearch = episode
         searchInServicesForEpisode(episode: episode)
+    }
+    
+    /// Look up the original TMDB season/episode numbers for the currently selected episode.
+    /// Returns nil for non-anime or when no AniList episode match is found.
+    private var originalTMDBNumbers: (season: Int, episode: Int)? {
+        guard isAnime,
+              let ep = selectedEpisodeForSearch,
+              let animeEps = animeEpisodes,
+              let match = animeEps.first(where: { $0.seasonNumber == ep.seasonNumber && $0.number == ep.episodeNumber }),
+              let s = match.tmdbSeasonNumber,
+              let e = match.tmdbEpisodeNumber
+        else { return nil }
+        return (s, e)
     }
     
     private func searchInServicesForEpisode(episode: TMDBEpisode) {
@@ -431,5 +519,27 @@ struct TVShowSeasonsSection: View {
         }
         
         return nil
+    }
+    
+    private func startDownloadAllSeason() {
+        guard let episodes = seasonDetail?.episodes, !episodes.isEmpty else { return }
+        isDownloadingAll = true
+        downloadAllQueue = Array(episodes.dropFirst())
+        if let first = episodes.first {
+            downloadEpisode = first
+            selectedEpisodeForSearch = first
+            showingDownloadSheet = true
+        }
+    }
+    
+    private func showNextDownloadSheet() {
+        guard !downloadAllQueue.isEmpty else {
+            isDownloadingAll = false
+            return
+        }
+        let next = downloadAllQueue.removeFirst()
+        downloadEpisode = next
+        selectedEpisodeForSearch = next
+        showingDownloadSheet = true
     }
 }

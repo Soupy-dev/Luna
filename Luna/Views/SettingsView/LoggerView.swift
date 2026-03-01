@@ -50,10 +50,7 @@ struct LogEntry: Identifiable {
 
 struct LoggerView: View {
     @StateObject private var loggerManager = LoggerManager.shared
-    @State private var selectedLogTypes: Set<String> = []
     @State private var searchText = ""
-    @State private var isAutoScrollEnabled = true
-    @State private var showingFilterSheet = false
     #if !os(tvOS)
     @State private var exportItem: ExportItem?
     #endif
@@ -61,10 +58,6 @@ struct LoggerView: View {
     
     private var filteredLogs: [LogEntry] {
         var logs = loggerManager.logs
-        
-        if !selectedLogTypes.isEmpty {
-            logs = logs.filter { selectedLogTypes.contains($0.type) }
-        }
         
         if !searchText.isEmpty {
             logs = logs.filter {
@@ -74,10 +67,6 @@ struct LoggerView: View {
         }
         
         return logs.sorted { $0.timestamp > $1.timestamp }
-    }
-    
-    private var availableLogTypes: [String] {
-        Array(Set(loggerManager.logs.map { $0.type })).sorted()
     }
     
     var body: some View {

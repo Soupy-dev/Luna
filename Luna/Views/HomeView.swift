@@ -9,6 +9,7 @@ struct HomeView: View {
     @State private var showingSettings = false
     @State private var isHoveringWatchNow = false
     @State private var isHoveringWatchlist = false
+    @State private var continueWatchingItems: [ContinueWatchingItem] = []
     
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
     
@@ -61,9 +62,13 @@ struct HomeView: View {
         }
         .navigationBarHidden(true)
         .onAppear {
+            refreshContinueWatchingItems()
             if !homeViewModel.hasLoadedContent {
                 homeViewModel.loadContent(tmdbService: tmdbService, catalogManager: catalogManager, contentFilter: contentFilter)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            refreshContinueWatchingItems()
         }
         .onChangeComp(of: contentFilter.filterHorror) { _, _ in
             if homeViewModel.hasLoadedContent {
@@ -120,10 +125,22 @@ struct HomeView: View {
         ScrollView(showsIndicators: false) {
             LazyVStack(spacing: 0) {
                 heroSection
+                continueWatchingSection
                 contentSections
             }
         }
         .ignoresSafeArea(edges: [.top, .leading, .trailing])
+    }
+
+    @ViewBuilder
+    private var continueWatchingSection: some View {
+        if !continueWatchingItems.isEmpty {
+            ContinueWatchingSection(
+                items: continueWatchingItems,
+                tmdbService: tmdbService,
+                onDataChanged: refreshContinueWatchingItems
+            )
+        }
     }
 
     
@@ -191,18 +208,7 @@ struct HomeView: View {
                     }
                 }
                 
-                if let heroLogoURL = homeViewModel.heroLogoURL {
-                    KFImage(URL(string: heroLogoURL))
-                        .placeholder {
-                            heroTitleText(hero)
-                        }
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: isTvOS ? 400 : 280, maxHeight: isTvOS ? 120 : 80)
-                        .shadow(color: .black.opacity(0.6), radius: 8, x: 0, y: 4)
-                } else {
-                    heroTitleText(hero)
-                }
+                heroTitleText(hero)
                 
                 if let overview = hero.overview, !overview.isEmpty {
                     Text(String(overview.prefix(100)) + (overview.count > 100 ? "..." : ""))
@@ -329,20 +335,17 @@ struct HomeView: View {
         )
     }
 
+    private func refreshContinueWatchingItems() {
+        continueWatchingItems = ProgressManager.shared.getContinueWatchingItems()
+    }
+
 }
 
 struct MediaSection: View {
     let title: String
     let items: [TMDBSearchResult]
-    let isLarge: Bool
     
     var gap: Double { isTvOS ? 50.0 : 20.0 }
-    
-    init(title: String, items: [TMDBSearchResult], isLarge: Bool = Bool.random()) {
-        self.title = title
-        self.items = items
-        self.isLarge = isLarge
-    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -463,6 +466,423 @@ struct MediaCard: View {
         }, else: { view in
             view.buttonStyle(PlainButtonStyle())
         })
+    }
+}
+
+struct ContinueWatchingSection: View {
+    let items: [ContinueWatchingItem]
+    let tmdbService: TMDBService
+    let onDataChanged: () -> Void
+
+    private var gap: Double { isTvOS ? 50.0 : 16.0 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Continue Watching")
+                    .font(isTvOS ? .headline : .title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+
+                Spacer()
+            }
+            .padding(.horizontal, isTvOS ? 40 : 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: gap) {
+                    ForEach(items) { item in
+                        ContinueWatchingCard(item: item, tmdbService: tmdbService, onDataChanged: onDataChanged)
+                    }
+                }
+                .padding(.horizontal, isTvOS ? 40 : 16)
+            }
+            .modifier(ScrollClipModifier())
+            .buttonStyle(.borderless)
+        }
+        .padding(.top, isTvOS ? 40 : 24)
+    }
+}
+
+struct ContinueWatchingCard: View {
+    let item: ContinueWatchingItem
+    let tmdbService: TMDBService
+    let onDataChanged: () -> Void
+
+    @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
+
+    @State private var backdropURL: String?
+    @State private var logoURL: String?
+    @State private var title: String = ""
+    @State private var isHovering = false
+    @State private var isLoaded = false
+    @State private var showingSearchResults = false
+    @State private var showingDetails = false
+
+    // Anime metadata resolved from TMDB + AniList (mirrors MediaDetailView logic)
+    @State private var isAnimeContent = false
+    @State private var animeSeasonTitle: String? = nil
+    @State private var originalTitle: String? = nil
+    @State private var isMetadataReady = false
+    @State private var pendingOpenSheet = false
+
+    private var cardWidth: CGFloat { isTvOS ? 380 : 260 }
+    private var cardHeight: CGFloat { isTvOS ? 220 : 146 }
+    private var logoMaxWidth: CGFloat { isTvOS ? 200 : 140 }
+    private var logoMaxHeight: CGFloat { isTvOS ? 60 : 40 }
+
+    private var displayTitle: String {
+        title.isEmpty ? item.title : title
+    }
+
+    /// Title to pass to the search sheet – uses the AniList season title for anime, matching MediaDetailView's logic
+    private var searchSheetTitle: String {
+        if isAnimeContent, !item.isMovie,
+           let seasonTitle = animeSeasonTitle {
+            return seasonTitle
+        }
+        return displayTitle
+    }
+
+    private var selectedEpisodeForSearch: TMDBEpisode? {
+        guard !item.isMovie,
+              let seasonNumber = item.seasonNumber,
+              let episodeNumber = item.episodeNumber else {
+            return nil
+        }
+
+        return TMDBEpisode(
+            id: Int("\(item.tmdbId)\(seasonNumber)\(episodeNumber)") ?? item.tmdbId,
+            name: "",
+            overview: nil,
+            stillPath: nil,
+            episodeNumber: episodeNumber,
+            seasonNumber: seasonNumber,
+            airDate: nil,
+            runtime: nil,
+            voteAverage: 0,
+            voteCount: 0
+        )
+    }
+
+    private var detailSearchResult: TMDBSearchResult {
+        TMDBSearchResult(
+            id: item.tmdbId,
+            mediaType: item.isMovie ? "movie" : "tv",
+            title: item.isMovie ? displayTitle : nil,
+            name: item.isMovie ? nil : displayTitle,
+            overview: nil,
+            posterPath: nil,
+            backdropPath: nil,
+            releaseDate: nil,
+            firstAirDate: nil,
+            voteAverage: nil,
+            popularity: 0,
+            adult: nil,
+            genreIds: nil
+        )
+    }
+
+    var body: some View {
+        Button {
+            if isMetadataReady {
+                showingSearchResults = true
+            } else {
+                pendingOpenSheet = true
+            }
+        } label: {
+            ZStack(alignment: .bottomLeading) {
+                ZStack {
+                    if let backdropURL {
+                        KFImage(URL(string: backdropURL))
+                            .placeholder { backdropPlaceholder }
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        backdropPlaceholder
+                    }
+                }
+                .frame(width: cardWidth, height: cardHeight)
+                .clipped()
+
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: .black.opacity(0.3), location: 0.4),
+                        .init(color: .black.opacity(0.85), location: 1.0)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                VStack(alignment: .leading, spacing: isTvOS ? 10 : 6) {
+                    Spacer()
+
+                    HStack(alignment: .bottom, spacing: isTvOS ? 12 : 8) {
+                        if let logoURL {
+                            KFImage(URL(string: logoURL))
+                                .placeholder { titleText }
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: logoMaxWidth, maxHeight: logoMaxHeight, alignment: .leading)
+                        } else {
+                            titleText
+                        }
+
+                        Spacer()
+
+                        if !item.isMovie, let season = item.seasonNumber, let episode = item.episodeNumber {
+                            Text("S\(season) E\(episode)")
+                                .font(isTvOS ? .subheadline : .caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    }
+
+                    HStack(spacing: isTvOS ? 12 : 8) {
+                        GeometryReader { geometry in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.white.opacity(0.3))
+                                    .frame(height: isTvOS ? 6 : 4)
+
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.white)
+                                    .frame(width: geometry.size.width * item.progress, height: isTvOS ? 6 : 4)
+                            }
+                        }
+                        .frame(height: isTvOS ? 6 : 4)
+
+                        Text(item.remainingTime)
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white.opacity(0.8))
+                            .fixedSize()
+                    }
+                }
+                .padding(isTvOS ? 16 : 12)
+            }
+            .frame(width: cardWidth, height: cardHeight)
+            .clipShape(RoundedRectangle(cornerRadius: isTvOS ? 16 : 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: isTvOS ? 16 : 12)
+                    .stroke(Color.white.opacity(isHovering ? 0.5 : 0.2), lineWidth: isHovering ? 2 : 1)
+            )
+            .shadow(color: .black.opacity(0.3), radius: isHovering ? 12 : 6, x: 0, y: isHovering ? 8 : 4)
+            .scaleEffect(isHovering ? 1.02 : 1.0)
+            .animation(.easeInOut(duration: 0.2), value: isHovering)
+            .modifier(ContinuousHoverModifier(isHovering: $isHovering))
+        }
+        .tvos({ view in
+            view.buttonStyle(BorderlessButtonStyle())
+        }, else: { view in
+            view.buttonStyle(PlainButtonStyle())
+        })
+        .task {
+            await loadMediaDetails()
+        }
+        .sheet(isPresented: $showingSearchResults) {
+            ModulesSearchResultsSheet(
+                mediaTitle: searchSheetTitle,
+                seasonTitleOverride: isAnimeContent ? animeSeasonTitle : nil,
+                originalTitle: originalTitle,
+                isMovie: item.isMovie,
+                isAnimeContent: isAnimeContent,
+                selectedEpisode: selectedEpisodeForSearch,
+                tmdbId: item.tmdbId,
+                animeSeasonTitle: isAnimeContent ? "anime" : nil,
+                posterPath: item.posterURL
+            )
+        }
+        .contextMenu {
+            Button {
+                showingDetails = true
+            } label: {
+                Label("Details", systemImage: "info.circle")
+            }
+
+            Button {
+                markAsWatched()
+            } label: {
+                Label("Mark as Watched", systemImage: "checkmark.circle")
+            }
+
+            Button(role: .destructive) {
+                removeFromContinueWatching()
+            } label: {
+                Label("Remove", systemImage: "trash")
+            }
+        }
+        .background(
+            NavigationLink(destination: MediaDetailView(searchResult: detailSearchResult), isActive: $showingDetails) {
+                EmptyView()
+            }
+            .hidden()
+        )
+    }
+
+    @ViewBuilder
+    private var titleText: some View {
+        Text(displayTitle)
+            .font(isTvOS ? .title3 : .subheadline)
+            .fontWeight(.bold)
+            .foregroundColor(.white)
+            .lineLimit(2)
+            .multilineTextAlignment(.leading)
+            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+    }
+
+    @ViewBuilder
+    private var backdropPlaceholder: some View {
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    colors: [Color.gray.opacity(0.4), Color.gray.opacity(0.2)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                Image(systemName: item.isMovie ? "film" : "tv")
+                    .font(isTvOS ? .largeTitle : .title)
+                    .foregroundColor(.gray.opacity(0.5))
+            )
+    }
+
+    private func loadMediaDetails() async {
+        guard !isLoaded else { return }
+
+        do {
+            if item.isMovie {
+                async let detailsTask = tmdbService.getMovieDetails(id: item.tmdbId)
+                async let imagesTask = tmdbService.getMovieImages(id: item.tmdbId, preferredLanguage: selectedLanguage)
+                async let romajiTask = tmdbService.getRomajiTitle(for: "movie", id: item.tmdbId)
+
+                let (details, images, romaji) = try await (detailsTask, imagesTask, romajiTask)
+
+                await MainActor.run {
+                    self.title = details.title
+                    self.backdropURL = details.fullBackdropURL ?? details.fullPosterURL ?? item.posterURL
+                    if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
+                        self.logoURL = logo.fullURL
+                    }
+                    self.originalTitle = romaji
+                    self.isAnimeContent = false
+                    self.isLoaded = true
+                    self.isMetadataReady = true
+                    if self.pendingOpenSheet {
+                        self.pendingOpenSheet = false
+                        self.showingSearchResults = true
+                    }
+                }
+            } else {
+                // Fetch TMDB details, images, and romaji title in parallel
+                async let detailsTask = tmdbService.getTVShowDetails(id: item.tmdbId)
+                async let imagesTask = tmdbService.getTVShowImages(id: item.tmdbId, preferredLanguage: selectedLanguage)
+                async let romajiTask = tmdbService.getRomajiTitle(for: "tv", id: item.tmdbId)
+
+                let (details, images, romaji) = try await (detailsTask, imagesTask, romajiTask)
+
+                // Anime detection: same logic as MediaDetailView
+                let isJapanese = details.originCountry?.contains("JP") ?? false
+                let isAnimation = details.genres.contains { $0.id == 16 }
+                let detectedAsAnime = isJapanese && isAnimation
+
+                // Set visual details immediately
+                await MainActor.run {
+                    self.title = details.name
+                    self.backdropURL = details.fullBackdropURL ?? details.fullPosterURL ?? item.posterURL
+                    if let logo = tmdbService.getBestLogo(from: images, preferredLanguage: selectedLanguage) {
+                        self.logoURL = logo.fullURL
+                    }
+                    self.originalTitle = romaji
+                    self.isLoaded = true
+                }
+
+                if detectedAsAnime {
+                    // Fetch AniList data for correct season title mapping
+                    do {
+                        let animeData = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
+                            title: details.name,
+                            tmdbShowId: details.id,
+                            tmdbService: tmdbService,
+                            tmdbShowPoster: details.fullPosterURL,
+                            token: nil
+                        )
+
+                        // Register AniList season IDs for tracker sync (same as MediaDetailView)
+                        let seasonMappings = animeData.seasons.map { (seasonNumber: $0.seasonNumber, anilistId: $0.anilistId) }
+                        TrackerManager.shared.registerAniListAnimeData(tmdbId: details.id, seasons: seasonMappings)
+
+                        // Find the season title for the episode the user was watching
+                        let matchedSeasonTitle: String? = {
+                            guard let sn = item.seasonNumber else { return animeData.seasons.first?.title }
+                            return animeData.seasons.first(where: { $0.seasonNumber == sn })?.title
+                                ?? animeData.seasons.first?.title
+                        }()
+
+                        await MainActor.run {
+                            self.isAnimeContent = true
+                            self.animeSeasonTitle = matchedSeasonTitle
+                            self.isMetadataReady = true
+                            if self.pendingOpenSheet {
+                                self.pendingOpenSheet = false
+                                self.showingSearchResults = true
+                            }
+                        }
+
+                        Logger.shared.log("ContinueWatchingCard: Resolved anime metadata for \(details.name), seasonTitle=\(matchedSeasonTitle ?? "nil")", type: "AniList")
+                    } catch {
+                        // AniList fetch failed – still mark as anime but without season title
+                        Logger.shared.log("ContinueWatchingCard: AniList fetch failed for \(details.name): \(error.localizedDescription)", type: "AniList")
+                        await MainActor.run {
+                            self.isAnimeContent = true
+                            self.isMetadataReady = true
+                            if self.pendingOpenSheet {
+                                self.pendingOpenSheet = false
+                                self.showingSearchResults = true
+                            }
+                        }
+                    }
+                } else {
+                    // Not anime – metadata is ready
+                    await MainActor.run {
+                        self.isAnimeContent = false
+                        self.isMetadataReady = true
+                        if self.pendingOpenSheet {
+                            self.pendingOpenSheet = false
+                            self.showingSearchResults = true
+                        }
+                    }
+                }
+            }
+        } catch {
+            await MainActor.run {
+                if self.title.isEmpty {
+                    self.title = item.title
+                }
+                self.backdropURL = item.posterURL
+                self.isLoaded = true
+                self.isMetadataReady = true
+                if self.pendingOpenSheet {
+                    self.pendingOpenSheet = false
+                    self.showingSearchResults = true
+                }
+            }
+        }
+    }
+
+    private func markAsWatched() {
+        ProgressManager.shared.markContinueWatchingItemAsWatched(item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            onDataChanged()
+        }
+    }
+
+    private func removeFromContinueWatching() {
+        ProgressManager.shared.removeContinueWatchingItem(item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            onDataChanged()
+        }
     }
 }
 

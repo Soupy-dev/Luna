@@ -36,8 +36,6 @@ extension JSController {
         }
         
         let thenBlock: @convention(block) (JSValue) -> Void = { result in
-            
-            Logger.shared.log(result.toString(), type: "HTMLStrings")
             if let jsonString = result.toString(),
                let data = jsonString.data(using: .utf8) {
                 do {

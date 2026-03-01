@@ -20,13 +20,11 @@ struct MediaDetailView: View {
     @State private var errorMessage: String?
     @State private var ambientColor: Color = Color.black
     @State private var showFullSynopsis: Bool = false
-    @State private var selectedEpisodeNumber: Int = 1
-    @State private var selectedSeasonIndex: Int = 0
     @State private var synopsis: String = ""
     @State private var isBookmarked: Bool = false
     @State private var showingSearchResults = false
+    @State private var showingDownloadSheet = false
     @State private var showingAddToCollection = false
-    @State private var showingNoServicesAlert = false
     @State private var selectedEpisodeForSearch: TMDBEpisode?
     @State private var romajiTitle: String?
     @State private var logoURL: String?
@@ -41,7 +39,6 @@ struct MediaDetailView: View {
     
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.verticalSizeClass) private var verticalSizeClass
-    @AppStorage("useSolidBackgroundBehindHero") private var useSolidBackgroundBehindHero = false
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
 
     private var headerHeight: CGFloat {
@@ -61,10 +58,6 @@ struct MediaDetailView: View {
 #endif
     }
 
-    private var isCompactLayout: Bool {
-        return verticalSizeClass == .compact
-    }
-    
     private var playButtonText: String {
         if searchResult.isMovie {
             return "Play"
@@ -114,6 +107,27 @@ struct MediaDetailView: View {
             }
             updateBookmarkStatus()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .requestNextEpisode)) { notification in
+            guard !showingSearchResults else { return }
+            guard let userInfo = notification.userInfo,
+                  let tmdbId = userInfo["tmdbId"] as? Int,
+                  tmdbId == searchResult.id,
+                  let seasonNumber = userInfo["seasonNumber"] as? Int,
+                  let episodeNumber = userInfo["episodeNumber"] as? Int else { return }
+
+            // Find the next episode in the current season detail
+            if let episodes = seasonDetail?.episodes,
+               let nextEp = episodes.first(where: { $0.seasonNumber == seasonNumber && $0.episodeNumber == episodeNumber }) {
+                selectedEpisodeForSearch = nextEp
+                // Delay to ensure the player is fully dismissed before presenting the sheet
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    guard !showingSearchResults else { return }
+                    showingSearchResults = true
+                }
+            } else {
+                Logger.shared.log("NextEpisode: Could not find S\(seasonNumber)E\(episodeNumber) in loaded season detail for tmdbId=\(tmdbId)", type: "Player")
+            }
+        }
         .onChangeComp(of: libraryManager.collections) { _, _ in
             updateBookmarkStatus()
         }
@@ -142,13 +156,34 @@ struct MediaDetailView: View {
                 posterPath: searchResult.isMovie ? movieDetail?.posterPath : tvShowDetail?.posterPath
             )
         }
+        .sheet(isPresented: $showingDownloadSheet) {
+            ModulesSearchResultsSheet(
+                mediaTitle: {
+                    if isAnimeShow, let episode = selectedEpisodeForSearch,
+                       let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                        return seasonTitle
+                    }
+                    return searchResult.displayTitle
+                }(),
+                seasonTitleOverride: {
+                    if isAnimeShow, let episode = selectedEpisodeForSearch,
+                       let seasonTitle = animeSeasonTitles?[episode.seasonNumber] {
+                        return seasonTitle
+                    }
+                    return nil
+                }(),
+                originalTitle: romajiTitle,
+                isMovie: searchResult.isMovie,
+                isAnimeContent: isAnimeShow,
+                selectedEpisode: selectedEpisodeForSearch,
+                tmdbId: searchResult.id,
+                animeSeasonTitle: isAnimeShow ? "anime" : nil,
+                posterPath: searchResult.isMovie ? movieDetail?.posterPath : tvShowDetail?.posterPath,
+                downloadMode: true
+            )
+        }
         .sheet(isPresented: $showingAddToCollection) {
             AddToCollectionView(searchResult: searchResult)
-        }
-        .alert("No Active Services", isPresented: $showingNoServicesAlert) {
-            Button("OK") { }
-        } message: {
-            Text("You don't have any active services. Please go to the Services tab to download and activate services.")
         }
     }
     
@@ -384,6 +419,23 @@ struct MediaDetailView: View {
                     .cornerRadius(8)
             }
             
+            if searchResult.isMovie {
+                Button(action: {
+                    downloadInServices()
+                }) {
+                    Image(systemName: downloadButtonIcon)
+                        .font(.title2)
+                        .frame(width: 42, height: 42)
+                        .applyLiquidGlassBackground(
+                            cornerRadius: 12,
+                            glassTint: downloadButtonTint
+                        )
+                        .foregroundColor(downloadButtonColor)
+                        .cornerRadius(8)
+                }
+                .disabled(serviceManager.activeServices.isEmpty || isCurrentlyDownloading)
+            }
+            
             Button(action: {
                 showingAddToCollection = true
             }) {
@@ -443,6 +495,66 @@ struct MediaDetailView: View {
         showingSearchResults = true
     }
     
+    private func downloadInServices() {
+        if !searchResult.isMovie {
+            if selectedEpisodeForSearch != nil {
+            } else if let seasonDetail = seasonDetail, !seasonDetail.episodes.isEmpty {
+                selectedEpisodeForSearch = seasonDetail.episodes.first
+            } else {
+                selectedEpisodeForSearch = nil
+            }
+        } else {
+            selectedEpisodeForSearch = nil
+        }
+        
+        showingDownloadSheet = true
+    }
+    
+    private var isCurrentlyDownloading: Bool {
+        if searchResult.isMovie {
+            return DownloadManager.shared.isDownloading(tmdbId: searchResult.id, isMovie: true)
+        } else if let ep = selectedEpisodeForSearch {
+            return DownloadManager.shared.isDownloading(tmdbId: searchResult.id, isMovie: false, seasonNumber: ep.seasonNumber, episodeNumber: ep.episodeNumber)
+        }
+        return false
+    }
+    
+    private var isAlreadyDownloaded: Bool {
+        if searchResult.isMovie {
+            return DownloadManager.shared.isDownloaded(tmdbId: searchResult.id, isMovie: true)
+        } else if let ep = selectedEpisodeForSearch {
+            return DownloadManager.shared.isDownloaded(tmdbId: searchResult.id, isMovie: false, seasonNumber: ep.seasonNumber, episodeNumber: ep.episodeNumber)
+        }
+        return false
+    }
+    
+    private var downloadButtonIcon: String {
+        if isAlreadyDownloaded {
+            return "checkmark.circle.fill"
+        } else if isCurrentlyDownloading {
+            return "arrow.down.circle"
+        }
+        return "arrow.down.circle"
+    }
+    
+    private var downloadButtonColor: Color {
+        if isAlreadyDownloaded {
+            return .green
+        } else if isCurrentlyDownloading {
+            return .blue
+        }
+        return .white
+    }
+    
+    private var downloadButtonTint: Color? {
+        if isAlreadyDownloaded {
+            return Color.green.opacity(0.2)
+        } else if isCurrentlyDownloading {
+            return Color.blue.opacity(0.2)
+        }
+        return nil
+    }
+    
     private func loadMediaDetails() {
         isLoading = true
         errorMessage = nil
@@ -476,11 +588,13 @@ struct MediaDetailView: View {
                     let isJapanese = detail.originCountry?.contains("JP") ?? false
                     let isAnimation = detail.genres.contains { $0.id == 16 }
                     let detectedAsAnime = isJapanese && isAnimation
+                    Logger.shared.log("MediaDetailView: \(detail.name) — isJapanese=\(isJapanese) isAnimation=\(isAnimation) detectedAsAnime=\(detectedAsAnime) originCountry=\(detail.originCountry ?? []) genres=\(detail.genres.map { $0.id })", type: "AniList")
                     
                     // Fetch AniList hybrid seasons/episodes if anime
                     var animeData: AniListAnimeWithSeasons? = nil
                     if detectedAsAnime {
                         do {
+                            Logger.shared.log("MediaDetailView: Starting AniList fetch for \(detail.name) (tmdbId=\(detail.id))", type: "AniList")
                             animeData = try await AniListService.shared.fetchAnimeDetailsWithEpisodes(
                                 title: detail.name,
                                 tmdbShowId: detail.id,
@@ -488,7 +602,7 @@ struct MediaDetailView: View {
                                 tmdbShowPoster: detail.fullPosterURL,
                                 token: nil
                             )
-                            Logger.shared.log("MediaDetailView: Fetched AniList hybrid data for \(detail.name) with \(animeData?.seasons.count ?? 0) seasons", type: "AniList")
+                            Logger.shared.log("MediaDetailView: Fetched AniList hybrid data for \(detail.name) with \(animeData?.seasons.count ?? 0) seasons, \(animeData?.totalEpisodes ?? 0) total episodes", type: "AniList")
                             
                             // Register AniList season IDs with tracker for accurate syncing
                             if let animeData = animeData {
@@ -496,8 +610,10 @@ struct MediaDetailView: View {
                                 TrackerManager.shared.registerAniListAnimeData(tmdbId: detail.id, seasons: seasonMappings)
                             }
                         } catch {
-                            Logger.shared.log("MediaDetailView: Failed to fetch AniList data: \(error.localizedDescription)", type: "AniList")
+                            Logger.shared.log("MediaDetailView: FAILED AniList fetch for \(detail.name): \(error.localizedDescription)", type: "Error")
                         }
+                    } else {
+                        Logger.shared.log("MediaDetailView: Skipping AniList fetch — not detected as anime", type: "AniList")
                     }
                     
                     await MainActor.run {
@@ -506,6 +622,7 @@ struct MediaDetailView: View {
                         self.isAnimeShow = detectedAsAnime
                         
                         if let animeData = animeData {
+                            Logger.shared.log("MediaDetailView: Using AniList structure — \(animeData.seasons.count) seasons", type: "AniList")
                             // Build AniList seasons list with TMDB-compatible fields
                             let aniSeasons: [TMDBSeason] = animeData.seasons.map { aniSeason in
                                 var posterPath: String?
@@ -576,6 +693,7 @@ struct MediaDetailView: View {
                             }
                         } else {
                             // Fallback to TMDB seasons
+                            Logger.shared.log("MediaDetailView: animeData is nil — falling back to pure TMDB seasons (\(detail.seasons.count) seasons)", type: "AniList")
                             self.tvShowDetail = detail
                             if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
                                 self.selectedSeason = firstSeason

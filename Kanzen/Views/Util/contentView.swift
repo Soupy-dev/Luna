@@ -224,13 +224,6 @@ struct contentView: View {
         }
     }
     @ViewBuilder
-    func chaptersMenu() -> some View {
-        if let contentChapters = self.contentChapters,  contentChapters.count > 0 {
-            
-        }
-    }
-    
-    @ViewBuilder
     func chaptersView() -> some View {
         if let chaptersData = self.contentChapters, chaptersData.count > 0 {
             let selectedLanguage = chaptersData[langaugeIdx]

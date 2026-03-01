@@ -484,7 +484,7 @@ class ChapterCollectionViewCell: UICollectionViewCell {
         ])
         
         // 2️⃣ Add hostingController inside container
-        hostingController = UIHostingController(rootView: CircularLoader(progress: 0))
+        hostingController = UIHostingController(rootView: CircularLoader())
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         hostingController.view.backgroundColor = .clear
         hostingController.view.clipsToBounds = false

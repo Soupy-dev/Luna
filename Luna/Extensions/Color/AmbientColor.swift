@@ -7,7 +7,6 @@
 
 import UIKit
 import SwiftUI
-import Accelerate
 
 // How does it work uh? On hopes and beliving on him? Why? Cuz i had to learn HSV, and how to work twith it yayy.
 extension Color {

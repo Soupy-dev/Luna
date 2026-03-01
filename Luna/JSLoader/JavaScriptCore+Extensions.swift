@@ -12,9 +12,7 @@ extension JSContext {
     func setupConsoleLogging() {
         let consoleObject = JSValue(newObjectIn: self)
         
-        let consoleLogFunction: @convention(block) (String) -> Void = { message in
-            Logger.shared.log(message, type: "Debug")
-        }
+        let consoleLogFunction: @convention(block) (String) -> Void = { _ in }
         consoleObject?.setObject(consoleLogFunction, forKeyedSubscript: "log" as NSString)
         
         let consoleErrorFunction: @convention(block) (String) -> Void = { message in
@@ -24,9 +22,7 @@ extension JSContext {
         
         self.setObject(consoleObject, forKeyedSubscript: "console" as NSString)
         
-        let logFunction: @convention(block) (String) -> Void = { message in
-            Logger.shared.log("JavaScript log: \(message)", type: "Debug")
-        }
+        let logFunction: @convention(block) (String) -> Void = { _ in }
         self.setObject(logFunction, forKeyedSubscript: "log" as NSString)
     }
     

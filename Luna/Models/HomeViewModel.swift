@@ -7,7 +7,6 @@
 
 import Foundation
 import SwiftUI
-import Combine
 
 final class HomeViewModel: ObservableObject {
     @Published var catalogResults: [String: [TMDBSearchResult]] = [:]
@@ -15,10 +14,7 @@ final class HomeViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var heroContent: TMDBSearchResult?
     @Published var ambientColor: Color = Color.black
-    @Published var heroLogoURL: String?
     @Published var hasLoadedContent = false
-    
-    private var cancellables = Set<AnyCancellable>()
     
     init() {
         // Init body can be simplified if needed
@@ -48,22 +44,23 @@ final class HomeViewModel: ObservableObject {
                 async let airingTodayTV = tmdbService.getAiringTodayTVShows()
                 async let topRatedTV = tmdbService.getTopRatedTVShows()
                 async let topRatedM = tmdbService.getTopRatedMovies()
-                async let trendingAnime = AniListService.shared.fetchAnimeCatalog(.trending, tmdbService: tmdbService)
-                async let popularAnime = AniListService.shared.fetchAnimeCatalog(.popular, tmdbService: tmdbService)
-                async let topRatedAnime = AniListService.shared.fetchAnimeCatalog(.topRated, tmdbService: tmdbService)
-                async let airingAnime = AniListService.shared.fetchAnimeCatalog(.airing, tmdbService: tmdbService)
-                async let upcomingAnime = AniListService.shared.fetchAnimeCatalog(.upcoming, tmdbService: tmdbService)
-                
-                let results = try await (
+                let tmdbResults = try await (
                     trending, popularM, nowPlayingM, upcomingM, popularTV, onTheAirTV,
-                    airingTodayTV, topRatedTV, topRatedM, trendingAnime, popularAnime,
-                    topRatedAnime, airingAnime, upcomingAnime
+                    airingTodayTV, topRatedTV, topRatedM
                 )
+                
+                // Fetch all anime catalogs in a single AniList query (1 API call instead of 5)
+                let animeCatalogs = (try? await AniListService.shared.fetchAllAnimeCatalogs(tmdbService: tmdbService)) ?? [:]
+                let trendingAnime = animeCatalogs[.trending] ?? []
+                let popularAnime = animeCatalogs[.popular] ?? []
+                let topRatedAnime = animeCatalogs[.topRated] ?? []
+                let airingAnime = animeCatalogs[.airing] ?? []
+                let upcomingAnime = animeCatalogs[.upcoming] ?? []
                 
                 await MainActor.run {
                     self.catalogResults = [
-                        "trending": results.0,
-                        "popularMovies": results.1.map { movie in
+                        "trending": tmdbResults.0,
+                        "popularMovies": tmdbResults.1.map { movie in
                             TMDBSearchResult(
                                 id: movie.id,
                                 mediaType: "movie",
@@ -80,7 +77,7 @@ final class HomeViewModel: ObservableObject {
                                 genreIds: movie.genreIds
                             )
                         },
-                        "nowPlayingMovies": results.2.map { movie in
+                        "nowPlayingMovies": tmdbResults.2.map { movie in
                             TMDBSearchResult(
                                 id: movie.id,
                                 mediaType: "movie",
@@ -97,7 +94,7 @@ final class HomeViewModel: ObservableObject {
                                 genreIds: movie.genreIds
                             )
                         },
-                        "upcomingMovies": results.3.map { movie in
+                        "upcomingMovies": tmdbResults.3.map { movie in
                             TMDBSearchResult(
                                 id: movie.id,
                                 mediaType: "movie",
@@ -114,7 +111,7 @@ final class HomeViewModel: ObservableObject {
                                 genreIds: movie.genreIds
                             )
                         },
-                        "popularTVShows": results.4.map { show in
+                        "popularTVShows": tmdbResults.4.map { show in
                             TMDBSearchResult(
                                 id: show.id,
                                 mediaType: "tv",
@@ -131,7 +128,7 @@ final class HomeViewModel: ObservableObject {
                                 genreIds: show.genreIds
                             )
                         },
-                        "onTheAirTV": results.5.map { show in
+                        "onTheAirTV": tmdbResults.5.map { show in
                             TMDBSearchResult(
                                 id: show.id,
                                 mediaType: "tv",
@@ -148,7 +145,7 @@ final class HomeViewModel: ObservableObject {
                                 genreIds: show.genreIds
                             )
                         },
-                        "airingTodayTV": results.6.map { show in
+                        "airingTodayTV": tmdbResults.6.map { show in
                             TMDBSearchResult(
                                 id: show.id,
                                 mediaType: "tv",
@@ -165,7 +162,7 @@ final class HomeViewModel: ObservableObject {
                                 genreIds: show.genreIds
                             )
                         },
-                        "topRatedTVShows": results.7.map { show in
+                        "topRatedTVShows": tmdbResults.7.map { show in
                             TMDBSearchResult(
                                 id: show.id,
                                 mediaType: "tv",
@@ -182,7 +179,7 @@ final class HomeViewModel: ObservableObject {
                                 genreIds: show.genreIds
                             )
                         },
-                        "topRatedMovies": results.8.map { movie in
+                        "topRatedMovies": tmdbResults.8.map { movie in
                             TMDBSearchResult(
                                 id: movie.id,
                                 mediaType: "movie",
@@ -199,15 +196,15 @@ final class HomeViewModel: ObservableObject {
                                 genreIds: movie.genreIds
                             )
                         },
-                        "trendingAnime": results.9,
-                        "popularAnime": results.10,
-                        "topRatedAnime": results.11,
-                        "airingAnime": results.12,
-                        "upcomingAnime": results.13
+                        "trendingAnime": trendingAnime,
+                        "popularAnime": popularAnime,
+                        "topRatedAnime": topRatedAnime,
+                        "airingAnime": airingAnime,
+                        "upcomingAnime": upcomingAnime
                     ]
                     
                     // Set hero content from trending
-                    if let hero = results.0.first {
+                    if let hero = tmdbResults.0.first {
                         self.heroContent = hero
                     }
                     
@@ -229,7 +226,6 @@ final class HomeViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         heroContent = nil
-        heroLogoURL = nil
         hasLoadedContent = false
     }
 }

@@ -61,15 +61,13 @@ class AlgorithmManager: ObservableObject {
             return cleanOriginal.isEmpty && cleanResult.isEmpty ? 1.0 : 0.0
         }
         
-        do {
-            switch selectedAlgorithm {
-            case .levenshtein:
-                return LevenshteinDistance.calculateSimilarity(original: cleanOriginal, result: cleanResult)
-            case .jaroWinkler:
-                return JaroWinklerSimilarity.calculateSimilarity(original: cleanOriginal, result: cleanResult)
-            case .hybrid:
-                return HybridSimilarity.calculateSimilarity(original: cleanOriginal, result: cleanResult)
-            }
+        switch selectedAlgorithm {
+        case .levenshtein:
+            return LevenshteinDistance.calculateSimilarity(original: cleanOriginal, result: cleanResult)
+        case .jaroWinkler:
+            return JaroWinklerSimilarity.calculateSimilarity(original: cleanOriginal, result: cleanResult)
+        case .hybrid:
+            return HybridSimilarity.calculateSimilarity(original: cleanOriginal, result: cleanResult)
         }
     }
 }

@@ -122,7 +122,6 @@ struct KanzenSearchView: View {
     }
 }
 struct SearchBar: View {
-    @State private var debounceTimer: Timer?
     @Binding var text: String
     var onSearchButtonClicked: () -> Void
     

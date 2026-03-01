@@ -17,14 +17,15 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
     let textColor: Color
     let emptyColor: Color
     let height: CGFloat
+    /// Normalized 0-1 skip segment ranges to render as yellow overlays.
+    let segments: [(start: Double, end: Double)]
     let onEditingChanged: (Bool) -> Void
     
     @State private var localRealProgress: T = 0
     @State private var localTempProgress: T = 0
     @GestureState private var isActive: Bool = false
     @State private var progressDuration: T = 0
-    @State private var sliderEventCount: Int = 0
-    @State private var lastSliderLogAt: TimeInterval = 0
+
     
     init(
         value: Binding<T>,
@@ -34,6 +35,7 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
         textColor: Color,
         emptyColor: Color,
         height: CGFloat,
+        segments: [(start: Double, end: Double)] = [],
         onEditingChanged: @escaping (Bool) -> Void
     ) {
         self._value = value
@@ -43,6 +45,7 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
         self.textColor = textColor
         self.emptyColor = emptyColor
         self.height = height
+        self.segments = segments
         self.onEditingChanged = onEditingChanged
     }
     
@@ -52,13 +55,23 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
                 Color.clear
                     .allowsHitTesting(false)
                 VStack(spacing: 8) {
-                    ZStack(alignment: .center) {
-                        ZStack(alignment: .center) {
-                            Capsule()
-                                .fill(.ultraThinMaterial)
-                        }
-                        .clipShape(Capsule())
+                    ZStack(alignment: .leading) {
+                        // Background capsule
+                        Capsule()
+                            .fill(.ultraThinMaterial)
 
+                        // Yellow skip-segment overlays
+                        ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
+                            let segStart = CGFloat(max(0, min(seg.start, 1)))
+                            let segEnd = CGFloat(max(0, min(seg.end, 1)))
+                            let segWidth = max((segEnd - segStart) * bounds.size.width, 2)
+                            Rectangle()
+                                .fill(Color.yellow.opacity(0.55))
+                                .frame(width: segWidth)
+                                .offset(x: segStart * bounds.size.width)
+                        }
+
+                        // Progress fill
                         Capsule()
                             .fill(isActive ? activeFillColor : fillColor)
                             .mask({
@@ -75,6 +88,7 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
                                 }
                             })
                     }
+                    .clipShape(Capsule())
                     
                     HStack {
                         Text(timeString(from: progressDuration))
@@ -96,46 +110,29 @@ struct MusicProgressSlider<T: BinaryFloatingPoint>: View {
                         state = true
                     }
                     .onChanged { gesture in
-                        sliderEventCount += 1
                         localTempProgress = T(gesture.translation.width / bounds.size.width)
                         let prg = max(min((localRealProgress + localTempProgress), 1), 0)
                         progressDuration = inRange.upperBound * prg
                         value = max(min(getPrgValue(), inRange.upperBound), inRange.lowerBound)
-
-                        let now = Date().timeIntervalSinceReferenceDate
-                        if now - lastSliderLogAt >= 0.2 {
-                            lastSliderLogAt = now
-                            Logger.shared.log("[MusicProgressSlider.drag] events=\(sliderEventCount) translation=\(String(format: "%.2f", gesture.translation.width)) width=\(String(format: "%.2f", bounds.size.width)) localReal=\(String(format: "%.4f", Double(localRealProgress))) localTemp=\(String(format: "%.4f", Double(localTempProgress))) value=\(String(format: "%.2f", Double(value))) rangeEnd=\(String(format: "%.2f", Double(inRange.upperBound)))", type: "Player")
-                        }
                     }
                     .onEnded { _ in
-                        Logger.shared.log("[MusicProgressSlider.drag] ended localReal(before)=\(String(format: "%.4f", Double(localRealProgress))) localTemp=\(String(format: "%.4f", Double(localTempProgress))) value=\(String(format: "%.2f", Double(value)))", type: "Player")
                         localRealProgress = max(min(localRealProgress + localTempProgress, 1), 0)
                         localTempProgress = 0
-                        Logger.shared.log("[MusicProgressSlider.drag] committed localReal(after)=\(String(format: "%.4f", Double(localRealProgress)))", type: "Player")
                     }
             )
             #endif
             .onChangeComp(of: isActive) { _, newValue in
                 value = max(min(getPrgValue(), inRange.upperBound), inRange.lowerBound)
-                Logger.shared.log("[MusicProgressSlider.active] isActive=\(newValue) value=\(String(format: "%.2f", Double(value))) localReal=\(String(format: "%.4f", Double(localRealProgress))) localTemp=\(String(format: "%.4f", Double(localTempProgress)))", type: "Player")
                 onEditingChanged(newValue)
             }
             .onAppear {
                 localRealProgress = getPrgPercentage(value)
                 progressDuration = inRange.upperBound * localRealProgress
-                Logger.shared.log("[MusicProgressSlider.appear] value=\(String(format: "%.2f", Double(value))) rangeStart=\(String(format: "%.2f", Double(inRange.lowerBound))) rangeEnd=\(String(format: "%.2f", Double(inRange.upperBound))) localReal=\(String(format: "%.4f", Double(localRealProgress)))", type: "Player")
             }
             .onChangeComp(of: value) { _, newValue in
                 if !isActive {
                     localRealProgress = getPrgPercentage(newValue)
                     progressDuration = inRange.upperBound * localRealProgress
-
-                    let now = Date().timeIntervalSinceReferenceDate
-                    if now - lastSliderLogAt >= 0.5 {
-                        lastSliderLogAt = now
-                        Logger.shared.log("[MusicProgressSlider.value] synced value=\(String(format: "%.2f", Double(newValue))) localReal=\(String(format: "%.4f", Double(localRealProgress))) progressDuration=\(String(format: "%.2f", Double(progressDuration))) rangeEnd=\(String(format: "%.2f", Double(inRange.upperBound)))", type: "Player")
-                    }
                 }
             }
         }

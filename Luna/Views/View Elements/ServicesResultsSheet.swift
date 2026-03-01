@@ -9,6 +9,10 @@ import AVKit
 import SwiftUI
 import Kingfisher
 
+extension Notification.Name {
+    static let requestNextEpisode = Notification.Name("requestNextEpisode")
+}
+
 struct StreamOption: Identifiable {
     let id = UUID()
     let name: String
@@ -53,7 +57,6 @@ final class ModulesSearchResultsViewModel: ObservableObject {
     var pendingJSController: JSController?
     var pendingStreamURL: String?
     var pendingHeaders: [String: String]?
-    var pendingDefaultSubtitle: String?
     var pendingServiceHref: String?
     
     init() {
@@ -92,6 +95,15 @@ struct ModulesSearchResultsSheet: View {
     /// Non-nil for anime to force E## format
     let animeSeasonTitle: String?
     let posterPath: String?
+    /// Original TMDB season/episode numbers for anime (before AniList restructuring), used by TheIntroDB.
+    var originalTMDBSeasonNumber: Int? = nil
+    var originalTMDBEpisodeNumber: Int? = nil
+    /// When true, selecting a stream downloads instead of playing
+    var downloadMode: Bool = false
+    /// Called when a download has been enqueued (for Download All flow)
+    var onDownloadEnqueued: (() -> Void)? = nil
+    /// Called when user taps "Skip" (for Download All flow)
+    var onSkipRequested: (() -> Void)? = nil
     
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var viewModel = ModulesSearchResultsViewModel()
@@ -109,7 +121,7 @@ struct ModulesSearchResultsSheet: View {
 
     private var displayTitle: String {
         if let episode = selectedEpisode {
-            if animeSeasonTitle != nil {
+            if isAnimeContent || animeSeasonTitle != nil {
                 return "\(animeEffectiveTitle) E\(episode.episodeNumber)"
             }
             return "\(effectiveTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
@@ -119,6 +131,9 @@ struct ModulesSearchResultsSheet: View {
     
     private var episodeSeasonInfo: String {
         guard let episode = selectedEpisode else { return "" }
+        if isAnimeContent || animeSeasonTitle != nil {
+            return "E\(episode.episodeNumber)"
+        }
         return "S\(episode.seasonNumber)E\(episode.episodeNumber)"
     }
     
@@ -367,9 +382,11 @@ struct ModulesSearchResultsSheet: View {
         }
     }
     
+    private var actionVerb: String { downloadMode ? "Download" : "Play" }
+    
     @ViewBuilder
     private var playAlertButtons: some View {
-        Button("Play") {
+        Button(actionVerb) {
             viewModel.showingPlayAlert = false
             if let result = viewModel.selectedResult {
                 Task {
@@ -386,9 +403,9 @@ struct ModulesSearchResultsSheet: View {
     @ViewBuilder
     private var playAlertMessage: some View {
         if let result = viewModel.selectedResult, let episode = selectedEpisode {
-            Text("Play Episode \(episode.episodeNumber) of '\(result.title)'?")
+            Text("\(actionVerb) Episode \(episode.episodeNumber) of '\(result.title)'?")
         } else if let result = viewModel.selectedResult {
-            Text("Play '\(result.title)'?")
+            Text("\(actionVerb) '\(result.title)'?")
         }
     }
     
@@ -523,7 +540,7 @@ struct ModulesSearchResultsSheet: View {
                 viewModel.showingSubtitlePicker = false
                 if let service = viewModel.pendingService,
                    let streamURL = viewModel.pendingStreamURL {
-                    playStreamURL(streamURL, service: service, subtitle: option.url, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
+                    dispatchStreamAction(streamURL, service: service, subtitle: option.url, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
                 }
             }
         }
@@ -531,7 +548,7 @@ struct ModulesSearchResultsSheet: View {
             viewModel.showingSubtitlePicker = false
             if let service = viewModel.pendingService,
                let streamURL = viewModel.pendingStreamURL {
-                playStreamURL(streamURL, service: service, subtitle: nil, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
+                dispatchStreamAction(streamURL, service: service, subtitle: nil, headers: viewModel.pendingHeaders, serviceHref: viewModel.pendingServiceHref)
             }
         }
         Button("Cancel", role: .cancel) {
@@ -572,7 +589,7 @@ struct ModulesSearchResultsSheet: View {
                     servicesResultsSection
                 }
             }
-            .navigationTitle("Services Result")
+            .navigationTitle(downloadMode ? "Download Source" : "Services Result")
 #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif
@@ -614,13 +631,22 @@ struct ModulesSearchResultsSheet: View {
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
+                    HStack(spacing: 12) {
+                        if downloadMode && onSkipRequested != nil {
+                            Button("Skip") {
+                                onSkipRequested?()
+                                presentationMode.wrappedValue.dismiss()
+                            }
+                        }
+                        
+                        Button("Done") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
                     }
                 }
             }
         }
-        .alert("Play Content", isPresented: $viewModel.showingPlayAlert) {
+        .alert(downloadMode ? "Download Content" : "Play Content", isPresented: $viewModel.showingPlayAlert) {
             playAlertButtons
         } message: {
             playAlertMessage
@@ -688,13 +714,6 @@ struct ModulesSearchResultsSheet: View {
         } else {
             searchQuery = effectiveTitle
         }
-        
-        // Debug logging
-        Logger.shared.log("[ServicesResultsSheet] mediaTitle: '\(mediaTitle)'", type: "Debug")
-        Logger.shared.log("[ServicesResultsSheet] seasonTitleOverride: '\(seasonTitleOverride ?? "nil")'", type: "Debug")
-        Logger.shared.log("[ServicesResultsSheet] effectiveTitle: '\(effectiveTitle)'", type: "Debug")
-        Logger.shared.log("[ServicesResultsSheet] searchQuery: '\(searchQuery)'", type: "Debug")
-        Logger.shared.log("[ServicesResultsSheet] isAnime: \(isAnime)", type: "Debug")
         
         let baseTitleQuery = searchQuery.caseInsensitiveCompare(effectiveTitle) == .orderedSame ? nil : effectiveTitle
         let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != effectiveTitle.lowercased() } ?? false
@@ -857,10 +876,6 @@ struct ModulesSearchResultsSheet: View {
                 }
             }
         }
-    }
-    
-    private func getResultCount(for service: Service) -> Int {
-        return viewModel.moduleResults[service.id]?.count ?? 0
     }
     
     private func proceedWithSelectedEpisode(_ episode: EpisodeLink) {
@@ -1160,18 +1175,18 @@ struct ModulesSearchResultsSheet: View {
     @MainActor
     private func resolveSubtitleSelection(subtitles: [String]?, defaultSubtitle: String?, service: Service, streamURL: String, headers: [String: String]?, serviceHref: String? = nil) {
         guard let subtitles = subtitles, !subtitles.isEmpty else {
-            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
+            dispatchStreamAction(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
             return
         }
         
         let options = parseSubtitleOptions(from: subtitles)
         guard !options.isEmpty else {
-            playStreamURL(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
+            dispatchStreamAction(streamURL, service: service, subtitle: defaultSubtitle, headers: headers, serviceHref: serviceHref)
             return
         }
         
         if options.count == 1 {
-            playStreamURL(streamURL, service: service, subtitle: options[0].url, headers: headers, serviceHref: serviceHref)
+            dispatchStreamAction(streamURL, service: service, subtitle: options[0].url, headers: headers, serviceHref: serviceHref)
             return
         }
         
@@ -1180,9 +1195,17 @@ struct ModulesSearchResultsSheet: View {
         viewModel.pendingHeaders = headers
         viewModel.pendingService = service
         viewModel.pendingServiceHref = serviceHref
-        viewModel.pendingDefaultSubtitle = defaultSubtitle
         viewModel.isFetchingStreams = false
         viewModel.showingSubtitlePicker = true
+    }
+    
+    /// Routes to either play or download based on downloadMode
+    private func dispatchStreamAction(_ url: String, service: Service, subtitle: String?, headers: [String: String]?, serviceHref: String? = nil) {
+        if downloadMode {
+            downloadStreamURL(url, service: service, subtitle: subtitle, headers: headers)
+        } else {
+            playStreamURL(url, service: service, subtitle: subtitle, headers: headers, serviceHref: serviceHref)
+        }
     }
     
     private func parseSubtitleOptions(from subtitles: [String]) -> [(title: String, url: String)] {
@@ -1273,8 +1296,7 @@ struct ModulesSearchResultsSheet: View {
             
             if inAppPlayer == "mpv" {
                 let preset = PlayerPreset.presets.first
-                let rawSubtitles: [String]? = subtitle.map { [$0] }
-                var subtitleArray = rawSubtitles
+                let subtitleArray: [String]? = subtitle.map { [$0] }
                 
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil
@@ -1294,6 +1316,19 @@ struct ModulesSearchResultsSheet: View {
                 )
                 let isAnimeHint = isAnimeContent || animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
                 pvc.isAnimeHint = isAnimeHint
+                pvc.originalTMDBSeasonNumber = originalTMDBSeasonNumber
+                pvc.originalTMDBEpisodeNumber = originalTMDBEpisodeNumber
+                pvc.onRequestNextEpisode = { seasonNumber, nextEpisodeNumber in
+                    NotificationCenter.default.post(
+                        name: .requestNextEpisode,
+                        object: nil,
+                        userInfo: [
+                            "tmdbId": tmdbId,
+                            "seasonNumber": seasonNumber,
+                            "episodeNumber": nextEpisodeNumber
+                        ]
+                    )
+                }
                 let mediaInfoLabel: String = {
                     guard let info = playerMediaInfo else { return "nil" }
                     switch info {
@@ -1318,9 +1353,6 @@ struct ModulesSearchResultsSheet: View {
                 // VLC uses same PlayerViewController as MPV
                 let preset = PlayerPreset.presets.first
                 let subtitleArray: [String]? = subtitle.map { [$0] }
-
-                let vlcURL = streamURL
-                let vlcHeaders: [String: String]? = finalHeaders
                 
                 // Prepare mediaInfo before creating player
                 var playerMediaInfo: MediaInfo? = nil
@@ -1332,14 +1364,27 @@ struct ModulesSearchResultsSheet: View {
                 }
                 
                 let pvc = PlayerViewController(
-                    url: vlcURL,
+                    url: streamURL,
                     preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
-                    headers: vlcHeaders,
+                    headers: finalHeaders,
                     subtitles: subtitleArray,
                     mediaInfo: playerMediaInfo
                 )
                 let isAnimeHint = isAnimeContent || animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
                 pvc.isAnimeHint = isAnimeHint
+                pvc.originalTMDBSeasonNumber = originalTMDBSeasonNumber
+                pvc.originalTMDBEpisodeNumber = originalTMDBEpisodeNumber
+                pvc.onRequestNextEpisode = { seasonNumber, nextEpisodeNumber in
+                    NotificationCenter.default.post(
+                        name: .requestNextEpisode,
+                        object: nil,
+                        userInfo: [
+                            "tmdbId": tmdbId,
+                            "seasonNumber": seasonNumber,
+                            "episodeNumber": nextEpisodeNumber
+                        ]
+                    )
+                }
                 let mediaInfoLabel: String = {
                     guard let info = playerMediaInfo else { return "nil" }
                     switch info {
@@ -1387,6 +1432,65 @@ struct ModulesSearchResultsSheet: View {
                 }
             }
         }
+    }
+    
+    private func downloadStreamURL(_ url: String, service: Service, subtitle: String?, headers: [String: String]?) {
+        viewModel.resetStreamState()
+        
+        let serviceURL = service.metadata.baseUrl
+        var finalHeaders: [String: String] = [
+            "Origin": serviceURL,
+            "Referer": serviceURL,
+            "User-Agent": URLSession.randomUserAgent
+        ]
+        
+        if let custom = headers {
+            for (k, v) in custom {
+                finalHeaders[k] = v
+            }
+            if finalHeaders["User-Agent"] == nil {
+                finalHeaders["User-Agent"] = URLSession.randomUserAgent
+            }
+        }
+        
+        let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+        
+        let displayTitle: String
+        if isMovie {
+            displayTitle = mediaTitle
+        } else if let ep = selectedEpisode {
+            if isAnimeContent || animeSeasonTitle != nil {
+                displayTitle = "\(animeEffectiveTitle) E\(ep.episodeNumber)"
+            } else {
+                displayTitle = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
+            }
+        } else {
+            displayTitle = mediaTitle
+        }
+        
+        DownloadManager.shared.enqueueDownload(
+            tmdbId: tmdbId,
+            isMovie: isMovie,
+            title: mediaTitle,
+            displayTitle: displayTitle,
+            posterURL: posterURL,
+            seasonNumber: selectedEpisode?.seasonNumber,
+            episodeNumber: selectedEpisode?.episodeNumber,
+            episodeName: selectedEpisode?.name,
+            streamURL: url,
+            headers: finalHeaders,
+            subtitleURL: subtitle,
+            serviceBaseURL: serviceURL,
+            isAnime: isAnimeContent
+        )
+        
+        Logger.shared.log("Download enqueued: \(displayTitle)", type: "Download")
+        
+        // Notify parent that download was enqueued (for Download All flow)
+        onDownloadEnqueued?()
+        
+        // Dismiss the sheet after enqueuing
+        presentationMode.wrappedValue.dismiss()
     }
     
     private func safeConvertToHeaders(_ value: Any?) -> [String: String]? {

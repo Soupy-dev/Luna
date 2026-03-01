@@ -228,11 +228,6 @@ var nextControllers: [UIViewController]?
         return index
     }
     
-    // Optional: Force refresh all controllers (useful for debugging)
-    func refreshAllControllers() {
-        print("Force refreshing all controllers")
-
-    }
     func findControllers(currView: UIViewController) -> Bool {
         if let currControllers = currControllers, currControllers.contains(currView) {
             return true

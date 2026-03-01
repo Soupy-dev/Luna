@@ -58,8 +58,8 @@ final class VLCRenderer: NSObject {
     private var isRunning = false
     private var isStopping = false
     private var currentPlaybackSpeed: Double = 1.0
-    private var progressEventCount: Int = 0
-    private var lastProgressDiagnosticLogAt: CFTimeInterval = 0
+
+    private var currentSubtitleStyle: SubtitleStyle = .default
     
     weak var delegate: VLCRendererDelegate?
     
@@ -148,7 +148,7 @@ final class VLCRenderer: NSObject {
             )
             
             isRunning = true
-            Logger.shared.log("[VLCRenderer.start] isRunning=true", type: "Stream")
+
         } catch {
             throw RendererError.vlcInitializationFailed
         }
@@ -158,7 +158,7 @@ final class VLCRenderer: NSObject {
         if isStopping { return }
         if !isRunning { return }
 
-        Logger.shared.log("[VLCRenderer.stop] stop requested. paused=\(isPaused) loading=\(isLoading) ready=\(isReadyToSeek)", type: "Player")
+
         
         isRunning = false
         isStopping = true
@@ -179,20 +179,14 @@ final class VLCRenderer: NSObject {
 
             // Mark stop completion only after cleanup finishes to prevent reentrancy races
             self.isStopping = false
-            Logger.shared.log("[VLCRenderer.stop] cleanup complete", type: "Player")
+
         }
     }
     
     // MARK: - Playback Control
     
     func load(url: URL, with preset: PlayerPreset, headers: [String: String]? = nil) {
-        Logger.shared.log("[VLCRenderer.load] Starting load with URL: \(url.absoluteString)", type: "Stream")
-        Logger.shared.log("[VLCRenderer.load] Headers count: \(headers?.count ?? 0)", type: "Stream")
-        if let headers = headers {
-            for (k, v) in headers {
-                Logger.shared.log("[VLCRenderer.load] Header - \(k): \(v.prefix(50))...", type: "Stream")
-            }
-        }
+        Logger.shared.log("[VLCRenderer.load] URL=\(url.absoluteString) headers=\(headers?.count ?? 0) isLocal=\(url.isFileURL)", type: "Stream")
         
         currentURL = url
         currentPreset = preset
@@ -200,8 +194,6 @@ final class VLCRenderer: NSObject {
         // Use provided headers as-is; they're already built correctly by the caller
         // (StreamURL domain should NOT be used for headers—service baseUrl should be)
         currentHeaders = headers ?? [:]
-        
-        Logger.shared.log("[VLCRenderer.load] VLCRenderer: Loading \(url.absoluteString)", type: "Info")
         
         isLoading = true
         isReadyToSeek = false
@@ -216,57 +208,52 @@ final class VLCRenderer: NSObject {
                 return 
             }
             
-            Logger.shared.log("[VLCRenderer.load] Creating VLCMedia with URL", type: "Stream")
-            // Keep the URL untouched; apply headers via VLC media options
             let media = VLCMedia(url: url)
             if let headers = self.currentHeaders, !headers.isEmpty {
-                Logger.shared.log("[VLCRenderer.load] Applying \(headers.count) headers to VLCMedia", type: "Stream")
-                // Prefer dedicated options when available (unquoted to match server expectations)
                 if let ua = headers["User-Agent"], !ua.isEmpty {
-                    Logger.shared.log("[VLCRenderer.load] Setting User-Agent", type: "Stream")
                     media.addOption(":http-user-agent=\(ua)")
                 }
                 if let referer = headers["Referer"], !referer.isEmpty {
-                    Logger.shared.log("[VLCRenderer.load] Setting Referer", type: "Stream")
                     media.addOption(":http-referrer=\(referer)")
-                    // Some HLS mirrors expect the header form as well; set both to be safe.
                     media.addOption(":http-header=Referer: \(referer)")
                 }
                 if let cookie = headers["Cookie"], !cookie.isEmpty {
-                    Logger.shared.log("[VLCRenderer.load] Setting Cookie", type: "Stream")
                     media.addOption(":http-cookie=\(cookie)")
                 }
 
-                // Let VLC reconnect on transient failures (common on these CDNs)
-                Logger.shared.log("[VLCRenderer.load] Setting http-reconnect=true", type: "Stream")
                 media.addOption(":http-reconnect=true")
 
-                // Add remaining headers individually, skipping ones already set via dedicated options
                 let skippedKeys: Set<String> = ["User-Agent", "Referer", "Cookie"]
-                var headerCount = 0
                 for (key, value) in headers where !skippedKeys.contains(key) {
                     guard !value.isEmpty else { continue }
-                    let headerLine = "\(key): \(value)"
-                    Logger.shared.log("[VLCRenderer.load] Adding header: \(key)", type: "Stream")
-                    media.addOption(":http-header=\(headerLine)")
-                    headerCount += 1
+                    media.addOption(":http-header=\(key): \(value)")
                 }
-                Logger.shared.log("[VLCRenderer.load] Applied \(headerCount) additional headers plus User-Agent/Referer/Cookie", type: "Info")
             }
 
             // Keep reconnect enabled for flaky hosts
             media.addOption(":http-reconnect=true")
 
-            // Reduce buffering while keeping resume/start reasonably responsive
-            media.addOption(":network-caching=12000")  // ~12s
+            // Apply subtitle styling options (best effort; depends on libvlc text renderer support)
+            self.applySubtitleStyleOptions(to: media)
+
+            // Tune caching and demuxer for local vs. remote playback
+            if url.isFileURL {
+                media.addOption(":file-caching=300")
+                // Force MPEG-TS demuxer for .ts files (concatenated HLS segments)
+                let ext = url.pathExtension.lowercased()
+                if ext == "ts" || ext == "mts" || ext == "m2ts" {
+                    media.addOption(":demux=ts")
+                }
+            } else {
+                // Reduce buffering while keeping resume/start reasonably responsive
+                media.addOption(":network-caching=12000")  // ~12s
+            }
 
             self.currentMedia = media
             
-            Logger.shared.log("[VLCRenderer.load] Setting media on player and calling play()", type: "Stream")
             player.media = media
             self.ensureAudioSessionActive()
             player.play()
-            Logger.shared.log("[VLCRenderer.load] play() called", type: "Stream")
         }
     }
     
@@ -282,7 +269,6 @@ final class VLCRenderer: NSObject {
     }
     
     func play() {
-        Logger.shared.log("[VLCRenderer.play] requested. isPaused=\(isPaused) targetRate=\(String(format: "%.2f", currentPlaybackSpeed))", type: "Player")
         isPaused = false
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -291,15 +277,34 @@ final class VLCRenderer: NSObject {
 
         guard let player = mediaPlayer else { return }
         ensureAudioSessionActive()
+
+        // If VLC's media has stopped or ended (e.g. network timeout while backgrounded),
+        // calling play() alone won't work — reload the stream and seek back.
+        let state = player.state
+        if state == .stopped || state == .ended || state == .error {
+            Logger.shared.log("[VLCRenderer.play] Player in \(describeState(state)) state — reloading from position \(cachedPosition)s", type: "Stream")
+            reloadAndSeekToLastPosition()
+            return
+        }
+
         player.play()
         if currentPlaybackSpeed != 1.0 {
             player.rate = Float(currentPlaybackSpeed)
         }
-        Logger.shared.log("[VLCRenderer.play] play() called. actualRate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state))", type: "Player")
+    }
+
+    /// Reload the current media and seek back to the last known position.
+    /// Used to recover from stopped/ended state after background network drops.
+    private func reloadAndSeekToLastPosition() {
+        guard let url = currentURL, let preset = currentPreset else { return }
+        let savedPosition = cachedPosition
+        load(url: url, with: preset, headers: currentHeaders)
+        if savedPosition > 0 {
+            pendingAbsoluteSeek = savedPosition
+        }
     }
     
     func pausePlayback() {
-        Logger.shared.log("[VLCRenderer.pause] requested. isPaused=\(isPaused)", type: "Player")
         isPaused = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -307,9 +312,6 @@ final class VLCRenderer: NSObject {
         }
 
         mediaPlayer?.pause()
-        if let player = mediaPlayer {
-            Logger.shared.log("[VLCRenderer.pause] pause() called. rate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state))", type: "Player")
-        }
     }
     
     func togglePause() {
@@ -320,7 +322,6 @@ final class VLCRenderer: NSObject {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             let clamped = max(0, seconds)
-            Logger.shared.log("[VLCRenderer.seek] absolute seek requested=\(String(format: "%.2f", seconds)) clamped=\(String(format: "%.2f", clamped))", type: "Player")
 
             // If VLC already knows the duration, seek accurately using normalized position.
             let durationMs = player.media?.length.value?.doubleValue ?? 0
@@ -330,7 +331,6 @@ final class VLCRenderer: NSObject {
                 player.position = Float(normalized)
                 self.cachedDuration = durationSec
                 self.pendingAbsoluteSeek = nil
-                Logger.shared.log("[VLCRenderer.seek] applied with media duration=\(String(format: "%.2f", durationSec)) normalized=\(String(format: "%.4f", normalized))", type: "Player")
                 return
             }
 
@@ -339,13 +339,11 @@ final class VLCRenderer: NSObject {
                 let normalized = min(max(clamped / self.cachedDuration, 0), 1)
                 player.position = Float(normalized)
                 self.pendingAbsoluteSeek = clamped
-                Logger.shared.log("[VLCRenderer.seek] applied via cached duration=\(String(format: "%.2f", self.cachedDuration)) normalized=\(String(format: "%.4f", normalized)) pending=\(String(format: "%.2f", clamped))", type: "Player")
                 return
             }
 
             // Duration unknown: stash the seek request to apply once duration arrives.
             self.pendingAbsoluteSeek = clamped
-            Logger.shared.log("[VLCRenderer.seek] duration unknown, pending seek stored=\(String(format: "%.2f", clamped))", type: "Player")
         }
     }
     
@@ -353,7 +351,6 @@ final class VLCRenderer: NSObject {
         eventQueue.async { [weak self] in
             guard let self, let player = self.mediaPlayer else { return }
             let newTime = self.cachedPosition + seconds
-            Logger.shared.log("[VLCRenderer.seekBy] delta=\(String(format: "%.2f", seconds)) cachedPos=\(String(format: "%.2f", self.cachedPosition)) target=\(String(format: "%.2f", newTime)) state=\(self.describeState(player.state))", type: "Player")
             self.seek(to: newTime)
         }
     }
@@ -365,7 +362,6 @@ final class VLCRenderer: NSObject {
             self.currentPlaybackSpeed = max(0.1, speed)
             
             player.rate = Float(self.currentPlaybackSpeed)
-            Logger.shared.log("[VLCRenderer.setSpeed] requested=\(String(format: "%.2f", speed)) applied=\(String(format: "%.2f", self.currentPlaybackSpeed)) actualRate=\(String(format: "%.2f", Double(player.rate))) state=\(self.describeState(player.state))", type: "Player")
         }
     }
     
@@ -494,8 +490,10 @@ final class VLCRenderer: NSObject {
             Logger.shared.log("VLCRenderer: Adding external subtitles count=\(urls.count)", type: "Info")
             for urlString in urls {
                 if let url = URL(string: urlString) {
-                    player.addPlaybackSlave(url, type: VLCMediaPlaybackSlaveType.subtitle, enforce: false)
-                    Logger.shared.log("VLCRenderer: added playback slave subtitle=\(url.absoluteString)", type: "Info")
+                    // enforce: true for local files so VLC auto-selects the subtitle track
+                    let shouldEnforce = url.isFileURL
+                    player.addPlaybackSlave(url, type: VLCMediaPlaybackSlaveType.subtitle, enforce: shouldEnforce)
+                    Logger.shared.log("VLCRenderer: added playback slave subtitle=\(url.absoluteString) enforce=\(shouldEnforce)", type: "Info")
                 }
             }
             DispatchQueue.main.async { [weak self] in
@@ -504,47 +502,54 @@ final class VLCRenderer: NSObject {
             }
         }
     }
-    
-    func clearSubtitleCache() {
-        // VLC handles subtitle caching internally
+
+    func applySubtitleStyle(_ style: SubtitleStyle) {
+        currentSubtitleStyle = style
+        eventQueue.async { [weak self] in
+            guard let self else { return }
+
+            if let media = self.currentMedia {
+                self.applySubtitleStyleOptions(to: media)
+            }
+
+            // Best-effort live re-apply: toggle current subtitle track to force renderer refresh.
+            if let player = self.mediaPlayer {
+                let currentTrack = player.currentVideoSubTitleIndex
+                if currentTrack >= 0 {
+                    player.currentVideoSubTitleIndex = -1
+                    player.currentVideoSubTitleIndex = currentTrack
+                }
+            }
+        }
     }
-    
-    func getSubtitleTracksDetailed() -> [(Int, String)] {
-        return getSubtitleTracks()
+
+    private func applySubtitleStyleOptions(to media: VLCMedia) {
+        let foregroundHex = vlcHexRGB(currentSubtitleStyle.foregroundColor)
+        let strokeHex = vlcHexRGB(currentSubtitleStyle.strokeColor)
+        let fontSize = max(12, Int(round(currentSubtitleStyle.fontSize)))
+        let outline = max(0, Int(round(currentSubtitleStyle.strokeWidth * 2.0)))
+
+        media.addOption(":freetype-color=0x\(foregroundHex)")
+        media.addOption(":freetype-outline-color=0x\(strokeHex)")
+        media.addOption(":freetype-outline-thickness=\(outline)")
+        media.addOption(":freetype-fontsize=\(fontSize)")
+    }
+
+    private func vlcHexRGB(_ color: UIColor) -> String {
+        var r: CGFloat = 1
+        var g: CGFloat = 1
+        var b: CGFloat = 1
+        var a: CGFloat = 1
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let ri = max(0, min(255, Int(round(r * 255))))
+        let gi = max(0, min(255, Int(round(g * 255))))
+        let bi = max(0, min(255, Int(round(b * 255))))
+        return String(format: "%02X%02X%02X", ri, gi, bi)
     }
     
     func getCurrentSubtitleTrackId() -> Int {
         guard let player = mediaPlayer else { return -1 }
         return Int(player.currentVideoSubTitleIndex)
-    }
-    
-    func getAvailableSubtitles() -> [String] {
-        return getSubtitleTracks().map { $0.1 }
-    }
-    
-    // MARK: - Anime Audio & Auto Subtitle Features
-    
-    // These methods are called by VLCPlayer but VLC handles track selection
-    // through the standard track APIs. We keep these for compatibility.
-    
-    func enableAutoSubtitles(_ enable: Bool) {
-        // Auto-subtitle selection is handled through track selection UI
-        // VLC automatically detects and lists all subtitle tracks
-        Logger.shared.log("[VLCRenderer] Auto subtitles \(enable ? "enabled" : "disabled")", type: "Info")
-    }
-    
-    func setPreferredAudioLanguage(_ language: String) {
-        // Store preference for future use, but VLC doesn't auto-select by language
-        Logger.shared.log("[VLCRenderer] Preferred audio language set to: \(language)", type: "Info")
-    }
-    
-    func setAnimeAudioLanguage(_ language: String) {
-        // Store anime audio preference
-        Logger.shared.log("[VLCRenderer] Anime audio language set to: \(language)", type: "Info")
-    }
-    
-    func togglePlayPause() {
-        togglePause()
     }
 
     // MARK: - Event Handlers
@@ -556,12 +561,8 @@ final class VLCRenderer: NSObject {
         let position = positionMs / 1000.0
         let duration = durationMs / 1000.0
         let normalizedPosition = Double(player.position)
-        progressEventCount += 1
-        let now = CACurrentMediaTime()
 
-        if !position.isFinite || !duration.isFinite || !normalizedPosition.isFinite {
-            Logger.shared.log("[VLCRenderer.time] non-finite values: pos=\(position) dur=\(duration) norm=\(normalizedPosition) state=\(describeState(player.state)) rate=\(String(format: "%.2f", Double(player.rate)))", type: "Error")
-        }
+        let now = CACurrentMediaTime()
 
         cachedPosition = position
         cachedDuration = duration
@@ -571,7 +572,6 @@ final class VLCRenderer: NSObject {
             let normalized = min(max(pending / duration, 0), 1)
             player.position = Float(normalized)
             pendingAbsoluteSeek = nil
-            Logger.shared.log("[VLCRenderer.time] applied pending seek pending=\(String(format: "%.2f", pending)) duration=\(String(format: "%.2f", duration)) normalized=\(String(format: "%.4f", normalized))", type: "Player")
         }
 
         // If we were marked loading but playback is progressing, clear loading state
@@ -588,24 +588,18 @@ final class VLCRenderer: NSObject {
             self.delegate?.renderer(self, didUpdatePosition: position, duration: duration)
         }
 
-        if now - lastProgressDiagnosticLogAt >= 0.5 {
-            lastProgressDiagnosticLogAt = now
-            Logger.shared.log("[VLCRenderer.time] events=\(progressEventCount) pos=\(String(format: "%.2f", position)) dur=\(String(format: "%.2f", duration)) norm=\(String(format: "%.4f", normalizedPosition)) cachedPos=\(String(format: "%.2f", cachedPosition)) cachedDur=\(String(format: "%.2f", cachedDuration)) pending=\(pendingAbsoluteSeek != nil ? "yes" : "no") loading=\(isLoading) paused=\(isPaused) rate=\(String(format: "%.2f", Double(player.rate))) state=\(describeState(player.state))", type: "Player")
-        }
+
     }
     
     @objc private func mediaPlayerStateChanged() {
         guard let player = mediaPlayer else { return }
         
         let state = player.state
-        let urlString = currentURL?.absoluteString ?? "nil"
-        let stateLabel = describeState(state)
-        let logType = (state == .error) ? "Error" : "Info"
+        
         if state == .error {
+            let urlString = currentURL?.absoluteString ?? "nil"
             let headerCount = currentHeaders?.count ?? 0
-            Logger.shared.log("VLCRenderer: state=\(stateLabel) url=\(urlString) headers=\(headerCount) preset=\(currentPreset?.id.rawValue ?? "nil")", type: logType)
-        } else {
-            Logger.shared.log("VLCRenderer: state=\(stateLabel) url=\(urlString)", type: logType)
+            Logger.shared.log("VLCRenderer: ERROR url=\(urlString) headers=\(headerCount) preset=\(currentPreset?.id.rawValue ?? "nil")", type: "Error")
         }
         
         switch state {
@@ -613,7 +607,6 @@ final class VLCRenderer: NSObject {
             isPaused = false
             isLoading = false
             isReadyToSeek = true
-            Logger.shared.log("[VLCRenderer.state] playing -> paused=false loading=false ready=true rate=\(String(format: "%.2f", Double(player.rate)))", type: "Player")
             
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -624,7 +617,6 @@ final class VLCRenderer: NSObject {
             
         case .paused:
             isPaused = true
-            Logger.shared.log("[VLCRenderer.state] paused", type: "Player")
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangePause: true)
@@ -632,7 +624,6 @@ final class VLCRenderer: NSObject {
             
         case .opening, .buffering:
             isLoading = true
-            Logger.shared.log("[VLCRenderer.state] \(stateLabel) loading=true", type: "Player")
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangeLoading: true)
@@ -641,7 +632,6 @@ final class VLCRenderer: NSObject {
         case .stopped, .ended, .error:
             isPaused = true
             isLoading = false
-            Logger.shared.log("[VLCRenderer.state] \(stateLabel) paused=true loading=false", type: "Player")
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.delegate?.renderer(self, didChangePause: true)
@@ -660,13 +650,15 @@ final class VLCRenderer: NSObject {
     }
     
     @objc private func handleAppDidEnterBackground() {
-        // Pause playback when app goes to background for thermal efficiency
+        // Pause playback when app goes to background
         pausePlayback()
     }
     
     @objc private func handleAppWillEnterForeground() {
-        // Resume playback when app returns to foreground
-        play()
+        // Re-activate the audio session that iOS may have deactivated during background.
+        ensureAudioSessionActive()
+        // Do NOT auto-resume — stay paused until the user explicitly plays.
+        // VLC PiP is disabled; will be revisited when VideoLAN adds native PiP.
     }
     
     // MARK: - State Properties
@@ -731,18 +723,12 @@ final class VLCRenderer {
     func getCurrentAudioTrackId() -> Int { -1 }
     func setAudioTrack(id: Int) { }
     func getSubtitleTracks() -> [(Int, String)] { [] }
-    func getSubtitleTracksDetailed() -> [(Int, String)] { [] }
     func getCurrentSubtitleTrackId() -> Int { -1 }
     func setSubtitleTrack(id: Int) { }
     func disableSubtitles() { }
     func refreshSubtitleOverlay() { }
     func loadExternalSubtitles(urls: [String]) { }
-    func clearSubtitleCache() { }
-    func getAvailableSubtitles() -> [String] { [] }
-    func enableAutoSubtitles(_ enable: Bool) { }
-    func setPreferredAudioLanguage(_ language: String) { }
-    func setAnimeAudioLanguage(_ language: String) { }
-    func togglePlayPause() { }
+    func applySubtitleStyle(_ style: SubtitleStyle) { }
     var isPausedState: Bool { true }
     weak var delegate: VLCRendererDelegate?
 }

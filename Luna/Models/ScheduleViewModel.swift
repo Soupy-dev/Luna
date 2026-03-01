@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import Combine
 
 final class ScheduleViewModel: ObservableObject {
     @Published var isLoading = true
@@ -15,7 +14,6 @@ final class ScheduleViewModel: ObservableObject {
     @Published var dayBuckets: [DayBucket] = []
     @Published var currentDayAnchor = Date()
     
-    private var cancellables = Set<AnyCancellable>()
     private let scheduleDaysAhead = 7
     
     init() {}

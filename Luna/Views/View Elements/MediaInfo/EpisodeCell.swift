@@ -18,6 +18,7 @@ struct EpisodeCell: View {
     let onTap: () -> Void
     let onMarkWatched: () -> Void
     let onResetProgress: () -> Void
+    var onDownload: (() -> Void)? = nil
     
     @State private var isWatched: Bool = false
     @State private var progressValue: Double = 0
@@ -292,6 +293,32 @@ struct EpisodeCell: View {
         Group {
             Button(action: onTap) {
                 Label("Play", systemImage: "play.fill")
+            }
+            
+            if let onDownload = onDownload {
+                let isDownloaded = DownloadManager.shared.isDownloaded(
+                    tmdbId: showId, isMovie: false,
+                    seasonNumber: episode.seasonNumber,
+                    episodeNumber: episode.episodeNumber
+                )
+                let isDownloading = DownloadManager.shared.isDownloading(
+                    tmdbId: showId, isMovie: false,
+                    seasonNumber: episode.seasonNumber,
+                    episodeNumber: episode.episodeNumber
+                )
+                
+                if isDownloaded {
+                    Button(role: .destructive, action: {
+                        let id = "dl_ep_\(showId)_s\(episode.seasonNumber)_e\(episode.episodeNumber)"
+                        DownloadManager.shared.removeDownload(id: id, deleteFile: true)
+                    }) {
+                        Label("Remove Download", systemImage: "trash")
+                    }
+                } else if !isDownloading {
+                    Button(action: onDownload) {
+                        Label("Download", systemImage: "arrow.down.circle")
+                    }
+                }
             }
             
             if episode.episodeNumber > 1 {

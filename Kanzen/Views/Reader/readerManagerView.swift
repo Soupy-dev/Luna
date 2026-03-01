@@ -47,7 +47,7 @@ struct readerManagerView:View {
                 readerContent()
             }
             else{
-                CircularLoader(progress: 0)
+                CircularLoader()
             }
             readerOverlay()
         }

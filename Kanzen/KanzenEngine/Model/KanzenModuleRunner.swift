@@ -10,7 +10,6 @@ import JavaScriptCore
 
 class KanzenModuleRunner
 {
-    private let contextQueue: DispatchQueue = DispatchQueue(label: "com.Kanzen.Module.Runner.Context")
     private var jsContext: JSContext?
     private var lastJSException: String?
     

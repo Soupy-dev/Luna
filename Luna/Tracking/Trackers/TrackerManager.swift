@@ -20,7 +20,6 @@ final class TrackerManager: NSObject, ObservableObject {
     @Published var authError: String?
 
     private let trackerStateURL: URL
-    private var cancellables = Set<AnyCancellable>()
     #if !os(tvOS)
     private var webAuthSession: ASWebAuthenticationSession?
     #endif
@@ -32,6 +31,10 @@ final class TrackerManager: NSObject, ObservableObject {
     // Cache for (TMDB ID, season number) -> AniList ID for anime with multiple AniList entries per season
     private var anilistSeasonIdCache: [String: Int] = [:] // key format: "tmdbId_seasonNumber"
     private let anilistSeasonIdCacheQueue = DispatchQueue(label: "com.luna.anilistSeasonIdCache")
+
+    // Prevent tracker sync bursts during local backup restore.
+    private var syncSuppressedDuringBackupRestore = false
+    private let backupRestoreSyncQueue = DispatchQueue(label: "com.luna.backupRestoreSync")
 
     // OAuth config (redirects can be overridden via Info.plist keys AniListRedirectUri / TraktRedirectUri)
     private let anilistClientId = "33908"
@@ -67,6 +70,19 @@ final class TrackerManager: NSObject, ObservableObject {
             if let encoded = try? JSONEncoder().encode(self.trackerState) {
                 try? encoded.write(to: self.trackerStateURL)
             }
+        }
+    }
+
+    func setBackupRestoreSyncSuppressed(_ suppressed: Bool) {
+        backupRestoreSyncQueue.sync {
+            syncSuppressedDuringBackupRestore = suppressed
+        }
+        Logger.shared.log("Tracker sync suppression during backup restore: \(suppressed ? "enabled" : "disabled")", type: "Tracker")
+    }
+
+    private func isBackupRestoreSyncSuppressed() -> Bool {
+        backupRestoreSyncQueue.sync {
+            syncSuppressedDuringBackupRestore
         }
     }
 
@@ -597,6 +613,11 @@ final class TrackerManager: NSObject, ObservableObject {
     }
 
     func syncWatchProgress(showId: Int, seasonNumber: Int, episodeNumber: Int, progress: Double, isMovie: Bool = false) {
+        guard !isBackupRestoreSyncSuppressed() else {
+            Logger.shared.log("Skipping watch sync (backup restore in progress) for TMDB \(showId) S\(seasonNumber)E\(episodeNumber) \(Int(progress))%", type: "Tracker")
+            return
+        }
+
         guard trackerState.syncEnabled else {
             Logger.shared.log("Skipping watch sync (sync disabled) for TMDB \(showId) S\(seasonNumber)E\(episodeNumber) \(Int(progress))%", type: "Tracker")
             return
@@ -641,7 +662,6 @@ final class TrackerManager: NSObject, ObservableObject {
 
         // Determine status: COMPLETED if >= 85%, otherwise CURRENT for in-progress
         let status = progress >= 85 ? "COMPLETED" : "CURRENT"
-        _ = ISO8601DateFormatter().string(from: Date())  // Unused in AniList mutation
 
         let mutation = """
         mutation {
@@ -827,7 +847,7 @@ final class TrackerManager: NSObject, ObservableObject {
 
     // MARK: - Helper Methods
 
-    private func getAniListMediaId(tmdbId: Int) async -> Int? {
+    func getAniListMediaId(tmdbId: Int) async -> Int? {
         // Return cached mapping when available
         if let cachedId = cachedAniListId(for: tmdbId) {
             return cachedId
