@@ -584,11 +584,12 @@ struct MediaDetailView: View {
                     
                     let (detail, images, romaji) = try await (detailTask, imagesTask, romajiTask)
                     
-                    // Detect anime for tracking/catalog, but structure remains TMDB-only
-                    let isJapanese = detail.originCountry?.contains("JP") ?? false
+                    // Detect anime/donghua for tracking/catalog — includes JP, CN, KR, TW animation
+                    let asianAnimationCountries: Set<String> = ["JP", "CN", "KR", "TW"]
+                    let isAsianAnimation = detail.originCountry?.contains(where: { asianAnimationCountries.contains($0) }) ?? false
                     let isAnimation = detail.genres.contains { $0.id == 16 }
-                    let detectedAsAnime = isJapanese && isAnimation
-                    Logger.shared.log("MediaDetailView: \(detail.name) — isJapanese=\(isJapanese) isAnimation=\(isAnimation) detectedAsAnime=\(detectedAsAnime) originCountry=\(detail.originCountry ?? []) genres=\(detail.genres.map { $0.id })", type: "AniList")
+                    let detectedAsAnime = isAsianAnimation && isAnimation
+                    Logger.shared.log("MediaDetailView: \(detail.name) — isAsianAnimation=\(isAsianAnimation) isAnimation=\(isAnimation) detectedAsAnime=\(detectedAsAnime) originCountry=\(detail.originCountry ?? []) genres=\(detail.genres.map { $0.id })", type: "AniList")
                     
                     // Fetch AniList hybrid seasons/episodes if anime
                     var animeData: AniListAnimeWithSeasons? = nil
