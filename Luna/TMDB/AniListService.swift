@@ -1134,6 +1134,99 @@ final class AniListService {
         }
     }
     
+    // MARK: - Parent Relation Lookup
+    
+    /// Walk up the AniList relation chain (PREQUEL, PARENT, SOURCE) to find ancestor anime.
+    /// Returns title candidates for each ancestor, ordered from closest to furthest parent.
+    /// Used as a fallback when a sequel/season doesn't have its own TMDB entry.
+    func fetchParentTitleCandidates(forMediaId mediaId: Int, maxDepth: Int = 3) async -> [(englishTitle: String?, romajiTitle: String?, nativeTitle: String?)] {
+        var visited = Set<Int>([mediaId])
+        var currentId = mediaId
+        var results: [(englishTitle: String?, romajiTitle: String?, nativeTitle: String?)] = []
+        
+        for _ in 0..<maxDepth {
+            let query = """
+            query {
+                Media(id: \(currentId), type: ANIME) {
+                    relations {
+                        edges {
+                            relationType
+                            node {
+                                id
+                                title { romaji english native }
+                                format
+                                type
+                            }
+                        }
+                    }
+                }
+            }
+            """
+            
+            struct Response: Codable {
+                let data: DataWrapper?
+                struct DataWrapper: Codable {
+                    let Media: MediaData?
+                }
+                struct MediaData: Codable {
+                    let relations: Relations?
+                }
+                struct Relations: Codable {
+                    let edges: [Edge]
+                }
+                struct Edge: Codable {
+                    let relationType: String
+                    let node: Node
+                }
+                struct Node: Codable {
+                    let id: Int
+                    let title: TitleData
+                    let format: String?
+                    let type: String?
+                }
+                struct TitleData: Codable {
+                    let romaji: String?
+                    let english: String?
+                    let native: String?
+                }
+            }
+            
+            guard let data = try? await executeGraphQLQuery(query, token: nil),
+                  let decoded = try? JSONDecoder().decode(Response.self, from: data),
+                  let edges = decoded.data?.Media?.relations?.edges else {
+                break
+            }
+            
+            let parentRelTypes: Set<String> = ["PREQUEL", "PARENT", "SOURCE"]
+            let tvFormats: Set<String> = ["TV", "TV_SHORT", "ONA"]
+            
+            // Find the best parent: prefer TV formats, then any anime relation
+            let parentEdge = edges
+                .filter { parentRelTypes.contains($0.relationType) && $0.node.type == "ANIME" && !visited.contains($0.node.id) }
+                .sorted { a, b in
+                    let aIsTV = tvFormats.contains(a.node.format ?? "")
+                    let bIsTV = tvFormats.contains(b.node.format ?? "")
+                    if aIsTV != bIsTV { return aIsTV }
+                    // Prefer PREQUEL over PARENT over SOURCE
+                    let order = ["PREQUEL": 0, "PARENT": 1, "SOURCE": 2]
+                    return (order[a.relationType] ?? 3) < (order[b.relationType] ?? 3)
+                }
+                .first
+            
+            guard let parent = parentEdge else { break }
+            
+            visited.insert(parent.node.id)
+            results.append((
+                englishTitle: parent.node.title.english,
+                romajiTitle: parent.node.title.romaji,
+                nativeTitle: parent.node.title.native
+            ))
+            currentId = parent.node.id
+        }
+        
+        return results
+    }
+    
     // MARK: - Private Helpers
     
     private func executeGraphQLQuery(_ query: String, token: String?, maxRetries: Int = 3) async throws -> Data {
