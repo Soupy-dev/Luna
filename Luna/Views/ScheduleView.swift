@@ -14,6 +14,12 @@ struct ScheduleView: View {
     @StateObject private var viewModel = ScheduleViewModel()
     @StateObject private var accentColorManager = AccentColorManager.shared
     
+    @State private var selectedTMDBResult: TMDBSearchResult?
+    @State private var showingMediaDetail = false
+    @State private var showNoTMDBAlert = false
+    @State private var noTMDBAlertTitle = ""
+    @State private var loadingItemId: Int?
+    
     private let dayChangeTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
     
     var body: some View {
@@ -57,6 +63,26 @@ struct ScheduleView: View {
         }
         .onReceive(dayChangeTimer) { _ in
             Task { await viewModel.handleDayChangeIfNeeded(localTimeZone: showLocalScheduleTime) }
+        }
+        .background(
+            NavigationLink(
+                destination: Group {
+                    if let result = selectedTMDBResult {
+                        MediaDetailView(searchResult: result)
+                    }
+                },
+                isActive: $showingMediaDetail
+            ) {
+                EmptyView()
+            }
+            .hidden()
+        )
+        .alert(isPresented: $showNoTMDBAlert) {
+            Alert(
+                title: Text("No TMDB Entry"),
+                message: Text("\"\(noTMDBAlertTitle)\" does not have a TMDB entry and cannot be opened."),
+                dismissButton: .default(Text("OK"))
+            )
         }
     }
     
@@ -169,6 +195,38 @@ struct ScheduleView: View {
     }
     
     private func scheduleItemCard(item: AniListAiringScheduleEntry) -> some View {
+        Button {
+            guard loadingItemId == nil else { return }
+            loadingItemId = item.id
+            Task {
+                let result = await viewModel.lookupTMDBResult(for: item)
+                await MainActor.run {
+                    loadingItemId = nil
+                    if let result = result {
+                        selectedTMDBResult = result
+                        showingMediaDetail = true
+                    } else {
+                        noTMDBAlertTitle = item.title
+                        showNoTMDBAlert = true
+                    }
+                }
+            }
+        } label: {
+            scheduleItemContent(item: item)
+        }
+        .buttonStyle(.plain)
+        .opacity(loadingItemId == item.id ? 0.6 : 1.0)
+        .overlay {
+            if loadingItemId == item.id {
+                ProgressView()
+                    .tint(.white)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: loadingItemId)
+        .disabled(loadingItemId != nil)
+    }
+    
+    private func scheduleItemContent(item: AniListAiringScheduleEntry) -> some View {
         HStack(spacing: 12) {
             // Cover image
             if let coverURL = item.coverImage, let url = URL(string: coverURL) {
@@ -195,7 +253,7 @@ struct ScheduleView: View {
                     .lineLimit(2)
                 
                 HStack(spacing: 8) {
-                    Label("Ep. \(item.episode)", systemImage: "film")
+                    Text(formatLabel(for: item))
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     
@@ -215,7 +273,24 @@ struct ScheduleView: View {
         .cornerRadius(12)
     }
     
-    // MARK: - Data Loading
+    // MARK: - Helpers
+    
+    private func formatLabel(for item: AniListAiringScheduleEntry) -> String {
+        switch item.format?.uppercased() {
+        case "MOVIE":
+            return "Movie"
+        case "OVA":
+            return "OVA"
+        case "ONA":
+            return "ONA Ep. \(item.episode)"
+        case "SPECIAL":
+            return "Special"
+        case "MUSIC":
+            return "Music"
+        default:
+            return "Ep. \(item.episode)"
+        }
+    }
     
     private func formattedDay(_ date: Date) -> String {
         let calendar = Calendar.current
