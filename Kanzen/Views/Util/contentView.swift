@@ -183,13 +183,13 @@ struct contentView: View {
     
     func getContentData() {
         DispatchQueue.main.async{
-            kanzen.getContentData(params: self.params)
+            kanzen.extractDetails(params: self.params)
             {
                 result in
                 
                 self.contentData = result
             }
-            kanzen.getChapters(params: self.params){
+            kanzen.extractChapters(params: self.params){
                 result in
                 if let result = result{
                     var temp: [Chapters] = []

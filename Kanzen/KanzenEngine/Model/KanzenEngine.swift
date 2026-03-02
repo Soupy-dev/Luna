@@ -19,26 +19,26 @@ class KanzenEngine: ObservableObject
         try self.controller.loadScript(_script: script)
     }
     
-    func getContentData(params:Any, completion: @escaping ([String:Any]?) -> Void)
+    func extractDetails(params:Any, completion: @escaping ([String:Any]?) -> Void)
     {
-        controller.getContentData(params: params)
+        controller.extractDetails(params: params)
         {
             result in
             completion(result)
         }
     }
     
-    func getChapterImages(params:Any, completion: @escaping ([String]?)-> Void)
+    func extractImages(params:Any, completion: @escaping ([String]?)-> Void)
     {
-        controller.getChapterImages(params: params){
+        controller.extractImages(params: params){
             result in
             completion(result)
         }
     }
     
-    func getChapters(params: Any, completion: @escaping ([String:Any]?)-> Void)
+    func extractChapters(params: Any, completion: @escaping ([String:Any]?)-> Void)
     {
-        controller.getChapters(params: params){
+        controller.extractChapters(params: params){
             result in
             completion(result)
         }

@@ -10,12 +10,32 @@ class ModuleManager: ObservableObject {
     @Published var modules: [ModuleDataContainer] = []
     private let fileManager = FileManager.default
     private let modulesFileName: String = "modules.json"
+
+    // MARK: - Auto-Update
+
+    private static let autoUpdateKey = "kanzenAutoUpdateModules"
+    private static let lastAutoUpdateKey = "kanzenLastModuleAutoUpdate"
+    private let autoUpdateInterval: TimeInterval = 3600 // 1 hour
+
+    static var isAutoUpdateEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: autoUpdateKey) }
+        set { UserDefaults.standard.set(newValue, forKey: autoUpdateKey) }
+    }
+
+    private var lastAutoUpdateDate: Date {
+        get { UserDefaults.standard.object(forKey: ModuleManager.lastAutoUpdateKey) as? Date ?? .distantPast }
+        set { UserDefaults.standard.set(newValue, forKey: ModuleManager.lastAutoUpdateKey) }
+    }
+
     private init()
     {
+        // Register defaults so auto-update is on by default
+        UserDefaults.standard.register(defaults: [
+            ModuleManager.autoUpdateKey: true
+        ])
+
         createModuleFile()
-        // loadModules
         loadModules()
-        // validate Modules
         for module in modules {
             validateModule(module){isValid in
                 if !isValid {
@@ -173,7 +193,47 @@ class ModuleManager: ObservableObject {
     {
         return ModuleManager.shared.modules.first { $0.id == moduleId }
     }
-    
 
+    // MARK: - Auto-Update
+
+    /// Re-downloads the JS scripts for all installed modules from their original URLs.
+    func updateModules() async {
+        Logger.shared.log("ModuleManager: Starting module auto-update for \(modules.count) modules", type: "Info")
+        for module in modules {
+            do {
+                let metaData = try await validateModuleUrl(module.moduleurl)
+                let jsContent = try await validateJSfile(metaData.scriptURL)
+                let localUrl = getDocumentsDirectory().appendingPathComponent(module.localPath)
+                try jsContent.write(to: localUrl, atomically: true, encoding: .utf8)
+
+                // Update metadata if it changed
+                if let index = modules.firstIndex(where: { $0.id == module.id }) {
+                    let updated = ModuleDataContainer(
+                        id: module.id,
+                        moduleData: metaData,
+                        localPath: module.localPath,
+                        moduleurl: module.moduleurl,
+                        isActive: module.isActive
+                    )
+                    await MainActor.run {
+                        self.modules[index] = updated
+                    }
+                }
+                Logger.shared.log("ModuleManager: Updated \(module.moduleData.sourceName)", type: "Info")
+            } catch {
+                Logger.shared.log("ModuleManager: Failed to update \(module.moduleData.sourceName): \(error.localizedDescription)", type: "Error")
+            }
+        }
+        saveModules()
+        lastAutoUpdateDate = Date()
+        Logger.shared.log("ModuleManager: Auto-update complete", type: "Info")
+    }
+
+    /// Auto-update modules if enabled and enough time has passed since the last update.
+    func autoUpdateModulesIfNeeded() async {
+        guard ModuleManager.isAutoUpdateEnabled else { return }
+        guard Date().timeIntervalSince(lastAutoUpdateDate) >= autoUpdateInterval else { return }
+        await updateModules()
+    }
     
 }

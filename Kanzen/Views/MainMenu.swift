@@ -9,17 +9,45 @@ import SwiftUI
 
 #if !os(tvOS)
 struct KanzenMenu: View {
-    let kanzen = KanzenEngine();
+    let kanzen = KanzenEngine()
+    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject var moduleManager: ModuleManager
+
     var body: some View {
         TabView {
-            KanzenLibraryView().tabItem {
-                Label("Library", systemImage: "books.vertical")
-            }
-            BrowseView().tabItem {
-                Label("Browse",systemImage: "list.bullet")
-            }
-            KanzenSettingsView().tabItem{
-                Label("Settings", systemImage: "gear")
+            KanzenHomeView()
+                .tabItem {
+                    Label("Home", systemImage: "house")
+                }
+
+            KanzenLibraryView()
+                .tabItem {
+                    Label("Library", systemImage: "books.vertical")
+                }
+
+            KanzenGlobalSearchView()
+                .tabItem {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
+
+            BrowseView()
+                .tabItem {
+                    Label("Browse", systemImage: "list.bullet")
+                }
+
+            KanzenSettingsView()
+                .tabItem {
+                    Label("Settings", systemImage: "gear")
+                }
+        }
+        .task {
+            await moduleManager.autoUpdateModulesIfNeeded()
+        }
+        .onChange(of: scenePhase) { newPhase in
+            if newPhase == .active {
+                Task {
+                    await moduleManager.autoUpdateModulesIfNeeded()
+                }
             }
         }
     }

@@ -13,14 +13,14 @@ class KanzenModuleRunner
     private var jsContext: JSContext?
     private var lastJSException: String?
     
-    func getChapterImages(params:Any, completion: @escaping (JSValue?,Error?) -> Void)
+    func extractImages(params:Any, completion: @escaping (JSValue?,Error?) -> Void)
     {
         guard let context = jsContext else {
             completion(nil, NSError(domain: "JSContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "JS function not found"]))
             return
         
         }
-        guard let chaptersFunc = context.objectForKeyedSubscript("getChapterImages") else {
+        guard let chaptersFunc = context.objectForKeyedSubscript("extractImages") else {
             completion(nil, NSError(domain: "JSContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "JS function not found"]))
             return
         }
@@ -46,14 +46,14 @@ class KanzenModuleRunner
         promise.invokeMethod("catch", withArguments: [rejectCallback as Any])
     }
     
-    func getChapters(params:Any, completion: @escaping (JSValue?,Error?) -> Void)
+    func extractChapters(params:Any, completion: @escaping (JSValue?,Error?) -> Void)
     {
         guard let context = jsContext else {
             completion(nil, NSError(domain: "JSContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "JS function not found"]))
             return
         
         }
-        guard let chaptersFunc = context.objectForKeyedSubscript("getChapters") else {
+        guard let chaptersFunc = context.objectForKeyedSubscript("extractChapters") else {
             completion(nil, NSError(domain: "JSContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "JS function not found"]))
             return
         }
@@ -79,7 +79,7 @@ class KanzenModuleRunner
         promise.invokeMethod("catch", withArguments: [rejectCallback as Any])
     }
 
-    func getContentData(params:Any, completion: @escaping (JSValue?,Error?) -> Void)
+    func extractDetails(params:Any, completion: @escaping (JSValue?,Error?) -> Void)
     {
 
         guard let context = jsContext else {
@@ -87,7 +87,7 @@ class KanzenModuleRunner
             return
         }
         
-        guard let contentDataFunc = context.objectForKeyedSubscript("getContentData") else {
+        guard let contentDataFunc = context.objectForKeyedSubscript("extractDetails") else {
             completion(nil, NSError(domain: "JSContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "JS function not found"]))
             return
         }
@@ -113,7 +113,7 @@ class KanzenModuleRunner
         promise.invokeMethod("catch", withArguments: [rejectCallback as Any])
     }
     
-    func searchContent(input:String, page:Int = 0,completion: @escaping(JSValue?,Error?) -> Void)
+    func searchResults(input:String, page:Int = 0,completion: @escaping(JSValue?,Error?) -> Void)
     {
 
         guard let context = jsContext else {
@@ -122,7 +122,7 @@ class KanzenModuleRunner
         }
      
 
-        guard let searchFunc = context.objectForKeyedSubscript("searchContent") else {
+        guard let searchFunc = context.objectForKeyedSubscript("searchResults") else {
             completion(nil, NSError(domain: "JSContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "JS function not found"]))
             return
         }

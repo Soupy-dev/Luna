@@ -16,14 +16,22 @@ import SwiftUI
 struct KanzenSettingsView : View
 {
     @AppStorage("showKanzen") private var showKanzen: Bool = false
+    @State private var autoUpdateModules = ModuleManager.isAutoUpdateEnabled
     var body: some View
     {
         NavigationView {
             Form {
                 Section(header: Text("General")) {
                     NavigationLink(destination: KanzenGeneralSettingsView()){Text("Preferences")}
-                   
-                    
+                    NavigationLink(destination: MangaCatalogSettingsView()) {
+                        Text("Home Catalogs")
+                    }
+                }
+                Section(header: Text("Modules")) {
+                    Toggle("Auto-Update Modules", isOn: $autoUpdateModules)
+                        .onChange(of: autoUpdateModules) { newValue in
+                            ModuleManager.isAutoUpdateEnabled = newValue
+                        }
                 }
                 Section(header: Text("Activity")) {
                     NavigationLink(destination: LoggerView()) {

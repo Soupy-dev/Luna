@@ -282,7 +282,7 @@ var nextControllers: [UIViewController]?
                 
                 // Convert callback to async/await
                 let result = await withCheckedContinuation { continuation in
-                    self.kanzen.getChapterImages(params: params) { result in
+                    self.kanzen.extractImages(params: params) { result in
                         continuation.resume(returning: result)
                     }
                 }

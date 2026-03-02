@@ -18,9 +18,9 @@ class KanzenRunnerController {
         try moduleRunner.loadScript(_script)
     }
     
-    func getChapterImages(params:Any,completion: @escaping ([String]?) -> Void)
+    func extractImages(params:Any,completion: @escaping ([String]?) -> Void)
     {
-        moduleRunner.getChapterImages(params: params)
+        moduleRunner.extractImages(params: params)
         {
             jsResult, error in
             guard let result = jsResult?.toArray() as? [String] else {
@@ -31,9 +31,9 @@ class KanzenRunnerController {
         }
     }
     
-    func getChapters(params:Any, completion: @escaping ([String:Any]?) -> Void )
+    func extractChapters(params:Any, completion: @escaping ([String:Any]?) -> Void )
     {
-        moduleRunner.getChapters(params: params){
+        moduleRunner.extractChapters(params: params){
             jsResult, error in
             guard let result = jsResult?.toDictionary() as? [String:Any] else
             {
@@ -44,10 +44,10 @@ class KanzenRunnerController {
         }
     }
     
-    func getContentData(params:Any, completion: @escaping ([String:Any]?)-> Void)
+    func extractDetails(params:Any, completion: @escaping ([String:Any]?)-> Void)
     {
        
-        moduleRunner.getContentData(params: params)
+        moduleRunner.extractDetails(params: params)
         {
             jsResult, error in
             guard let result = jsResult?.toDictionary() as? [String:Any] else
@@ -61,7 +61,7 @@ class KanzenRunnerController {
     
     func searchInput(_input: String,page:Int = 0, completion: @escaping ([[String:Any]]?) -> Void)
     {
-        moduleRunner.searchContent(input: _input,page: page)
+        moduleRunner.searchResults(input: _input,page: page)
         {
             jsResult,error in
             guard let result = jsResult?.toArray() as? [[String:Any]] else {

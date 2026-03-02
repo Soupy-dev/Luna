@@ -114,6 +114,12 @@ struct KanzenSearchView: View {
                         let content = try moduleManager.getModuleScript(module: module)
                         try kanzen.loadScript(content)
                     }
+                    // Auto-search if searchText is pre-filled
+                    if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && searchArray.isEmpty {
+                        searchPage = 0
+                        endOfPage = false
+                        performSearch()
+                    }
                     }
                 catch{
                     Logger.shared.log(error.localizedDescription,type: "Error")
