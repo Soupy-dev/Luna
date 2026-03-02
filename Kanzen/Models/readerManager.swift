@@ -17,7 +17,7 @@ class readerManager: ObservableObject {
     @Published var currChapter: [PageData]
     @Published var prevChapter: [PageData]
     @Published var nextChapter: [PageData]
-    @AppStorage("readingMode") var readingModeRaw: Int = 0
+    @AppStorage("readingMode") var readingModeRaw: Int = ReadingMode.WEBTOON.rawValue
     var pagePrefetcher: ImagePrefetcher?
     var readingMode: ReadingMode {
         ReadingMode(rawValue: readingModeRaw) ?? .LTR
@@ -25,6 +25,8 @@ class readerManager: ObservableObject {
     var changeIndex: Bool = false
 
      var kanzen : KanzenEngine
+    var mangaId: Int = 0
+    var mangaTitle: String = ""
     // Cached controllers - only recreated when data changes
  var currControllers: [UIViewController]?
   var prevControllers: [UIViewController]?
@@ -46,7 +48,7 @@ var nextControllers: [UIViewController]?
         }
     }
     
-    init(index: Int = 0, currChapter: [PageData] = [], prevChapter: [PageData] = [], nextChapter: [PageData] = [], shiftChapterLeft: @escaping () -> Void = {}, shiftChapterRight: @escaping () -> Void = {}, fetchPrev: @escaping () -> Void = {}, fetchNext: @escaping () -> Void = {}, kanzen: KanzenEngine,chapters: [Chapter]?, selectedChapter: Chapter?) {
+    init(index: Int = 0, currChapter: [PageData] = [], prevChapter: [PageData] = [], nextChapter: [PageData] = [], shiftChapterLeft: @escaping () -> Void = {}, shiftChapterRight: @escaping () -> Void = {}, fetchPrev: @escaping () -> Void = {}, fetchNext: @escaping () -> Void = {}, kanzen: KanzenEngine,chapters: [Chapter]?, selectedChapter: Chapter?, mangaId: Int = 0, mangaTitle: String = "") {
         self.index = index
         self.currChapter = currChapter
         self.prevChapter = prevChapter
@@ -54,6 +56,8 @@ var nextControllers: [UIViewController]?
         self.kanzen = kanzen
         self.chapters = chapters
         self.selectedChapter = selectedChapter
+        self.mangaId = mangaId
+        self.mangaTitle = mangaTitle
     }
     func initChapters(){
         // resetState
@@ -140,29 +144,43 @@ var nextControllers: [UIViewController]?
     }
     func generateCurrControllers()
     {
-        currControllers = currChapter.map { UIHostingController(rootView: $0.body) }
+        currControllers = currChapter.map { page in
+            if page.content != "CHAPTER_END", let url = URL(string: page.content) {
+                return UIHostingController(rootView: AnyView(ZoomablePageView(url: url)))
+            }
+            return UIHostingController(rootView: AnyView(page.body))
+        }
         if let selectedChapter = selectedChapter{
             let transistionView: any View = chapterView(page: PageData(content: "CHAPTER_END"), index: selectedChapter.chapterNumber)
-            currControllers = currChapter.map { UIHostingController(rootView: $0.body) } + [UIHostingController(rootView: AnyView( transistionView))]
+            currControllers = currControllers! + [UIHostingController(rootView: AnyView( transistionView))]
         }
        
     }
     func generatePrevControllers()
     {
-
-        prevControllers = prevChapter.map { UIHostingController(rootView: $0.body) }
+        prevControllers = prevChapter.map { page in
+            if page.content != "CHAPTER_END", let url = URL(string: page.content) {
+                return UIHostingController(rootView: AnyView(ZoomablePageView(url: url)))
+            }
+            return UIHostingController(rootView: AnyView(page.body))
+        }
         if let selectedChapter = selectedChapter, let chapters = chapters, selectedChapter.idx > 0 {
             let transistionView: any View = chapterView(page: PageData(content: "CHAPTER_END"), index: chapters[selectedChapter.idx-1].chapterNumber)
-            prevControllers = prevChapter.map { UIHostingController(rootView: $0.body) } + [UIHostingController(rootView: AnyView( transistionView))]
+            prevControllers = prevControllers! + [UIHostingController(rootView: AnyView( transistionView))]
             
         }
     }
     func generateNextControllers()
     {
-        nextControllers = nextChapter.map { UIHostingController(rootView: $0.body) }
+        nextControllers = nextChapter.map { page in
+            if page.content != "CHAPTER_END", let url = URL(string: page.content) {
+                return UIHostingController(rootView: AnyView(ZoomablePageView(url: url)))
+            }
+            return UIHostingController(rootView: AnyView(page.body))
+        }
         if let selectedChapter = selectedChapter, let chapters = chapters, selectedChapter.idx < chapters.count - 1 {
             let transistionView: any View = chapterView(page: PageData(content: "CHAPTER_END"), index: chapters[selectedChapter.idx + 1].chapterNumber)
-            nextControllers =  nextChapter.map { UIHostingController(rootView: $0.body) } + [UIHostingController(rootView: AnyView( transistionView))]
+            nextControllers = nextControllers! + [UIHostingController(rootView: AnyView( transistionView))]
             
         }
     }
@@ -173,6 +191,15 @@ var nextControllers: [UIViewController]?
         {
             print("End of chapters reached - no more chapters to load")
             return
+        }
+        
+        // Mark the chapter we're leaving as read
+        if let chapter = selectedChapter, mangaId != 0 {
+            MangaReadingProgressManager.shared.markChapterRead(
+                mangaId: mangaId,
+                chapterNumber: chapter.chapterNumber,
+                mangaTitle: mangaTitle
+            )
         }
         
         //shift Controllers
@@ -203,6 +230,15 @@ var nextControllers: [UIViewController]?
         {
             print("End of chapters reached - no more chapters to load")
             return
+        }
+        
+        // Mark the chapter we're leaving as read
+        if let chapter = selectedChapter, mangaId != 0 {
+            MangaReadingProgressManager.shared.markChapterRead(
+                mangaId: mangaId,
+                chapterNumber: chapter.chapterNumber,
+                mangaTitle: mangaTitle
+            )
         }
         
         prevControllers = currControllers

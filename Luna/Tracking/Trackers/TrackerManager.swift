@@ -568,47 +568,68 @@ final class TrackerManager: NSObject, ObservableObject {
                 Logger.shared.log("Could not find AniList manga ID for title \(title)", type: "Tracker")
                 return
             }
+            await sendMangaProgressToAniList(mediaId: mediaId, chapterNumber: chapterNumber, account: account)
+        }
+    }
 
-            let mutation = """
-            mutation {
-                SaveMediaListEntry(
-                    mediaId: \(mediaId),
-                    progress: \(chapterNumber),
-                    status: CURRENT
-                ) {
-                    id
-                    progress
-                    status
-                }
+    /// Sync manga reading progress using a known AniList media ID (skips title lookup).
+    func syncMangaProgress(aniListId: Int, chapterNumber: Int) {
+        guard trackerState.syncEnabled else {
+            Logger.shared.log("Skipping manga sync (sync disabled) for aniListId \(aniListId) ch \(chapterNumber)", type: "Tracker")
+            return
+        }
+
+        guard let account = trackerState.getAccount(for: .anilist), account.isConnected else {
+            Logger.shared.log("Skipping manga sync (no connected AniList account) for aniListId \(aniListId) ch \(chapterNumber)", type: "Tracker")
+            return
+        }
+
+        Logger.shared.log("Starting manga sync to AniList for aniListId \(aniListId) ch \(chapterNumber)", type: "Tracker")
+
+        Task {
+            await sendMangaProgressToAniList(mediaId: aniListId, chapterNumber: chapterNumber, account: account)
+        }
+    }
+
+    private func sendMangaProgressToAniList(mediaId: Int, chapterNumber: Int, account: TrackerAccount) async {
+        let mutation = """
+        mutation {
+            SaveMediaListEntry(
+                mediaId: \(mediaId),
+                progress: \(chapterNumber),
+                status: CURRENT
+            ) {
+                id
+                progress
+                status
             }
-            """
+        }
+        """
 
-            do {
-                let url = URL(string: "https://graphql.anilist.co")!
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
+        do {
+            let url = URL(string: "https://graphql.anilist.co")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
 
-                let body: [String: Any] = ["query": mutation]
-                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let body: [String: Any] = ["query": mutation]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-                let (data, response) = try await URLSession.shared.data(for: request)
-                if (response as? HTTPURLResponse)?.statusCode == 200 {
-                    // Check for GraphQL errors
-                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let errors = json["errors"] as? [[String: Any]], !errors.isEmpty {
-                        let errorMsg = (errors.first?["message"] as? String) ?? "Unknown error"
-                        Logger.shared.log("AniList manga sync error: \(errorMsg)", type: "Tracker")
-                    } else {
-                        Logger.shared.log("Synced manga to AniList: chapter \(chapterNumber) for \(title)", type: "Tracker")
-                    }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if (response as? HTTPURLResponse)?.statusCode == 200 {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let errors = json["errors"] as? [[String: Any]], !errors.isEmpty {
+                    let errorMsg = (errors.first?["message"] as? String) ?? "Unknown error"
+                    Logger.shared.log("AniList manga sync error: \(errorMsg)", type: "Tracker")
                 } else {
-                    Logger.shared.log("AniList manga sync returned status \((response as? HTTPURLResponse)?.statusCode ?? -1)", type: "Tracker")
+                    Logger.shared.log("Synced manga to AniList: chapter \(chapterNumber) for mediaId \(mediaId)", type: "Tracker")
                 }
-            } catch {
-                Logger.shared.log("Failed to sync manga to AniList: \(error.localizedDescription)", type: "Error")
+            } else {
+                Logger.shared.log("AniList manga sync returned status \((response as? HTTPURLResponse)?.statusCode ?? -1)", type: "Tracker")
             }
+        } catch {
+            Logger.shared.log("Failed to sync manga to AniList: \(error.localizedDescription)", type: "Error")
         }
     }
 

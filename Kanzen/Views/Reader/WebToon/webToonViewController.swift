@@ -27,6 +27,17 @@ struct WebtoonView: UIViewRepresentable {
         collectionView.delegate = context.coordinator
         collectionView.register(ChapterCollectionViewCell.self, forCellWithReuseIdentifier: ChapterCollectionViewCell.reuseIdentifier)
         
+        // Pinch-to-zoom gesture
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+        collectionView.addGestureRecognizer(pinch)
+        
+        // Double-tap to toggle zoom
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        collectionView.addGestureRecognizer(doubleTap)
+        
+        context.coordinator.collectionView = collectionView
+        
         return collectionView
     }
     
@@ -76,6 +87,12 @@ struct WebtoonView: UIViewRepresentable {
         var chapters: [[PageData]] = []
         var currChapter: [PageData]
         var transitionPages: [String] = []
+        weak var collectionView: UICollectionView?
+        
+        // Zoom state
+        private var currentZoomScale: CGFloat = 1.0
+        private let minZoomScale: CGFloat = 1.0
+        private let maxZoomScale: CGFloat = 3.0
         
         init(reader_manager: readerManager) {
             self.reader_manager = reader_manager
@@ -83,6 +100,48 @@ struct WebtoonView: UIViewRepresentable {
             self.currChapter = reader_manager.currChapter
             self.transitionPages.append(reader_manager.selectedChapter?.chapterNumber ?? "0")
             imageSizes.append([:])
+        }
+        
+        // MARK: - Zoom Gestures
+        
+        @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            guard let view = gesture.view else { return }
+            
+            switch gesture.state {
+            case .changed:
+                let newScale = (currentZoomScale * gesture.scale).clamped(to: minZoomScale...maxZoomScale)
+                let relativeScale = newScale / currentZoomScale
+                view.transform = view.transform.scaledBy(x: relativeScale, y: relativeScale)
+                currentZoomScale = newScale
+                gesture.scale = 1.0
+            case .ended, .cancelled:
+                if currentZoomScale < minZoomScale + 0.1 {
+                    UIView.animate(withDuration: 0.25) {
+                        view.transform = .identity
+                    }
+                    currentZoomScale = 1.0
+                }
+            default:
+                break
+            }
+        }
+        
+        @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard let view = gesture.view else { return }
+            if currentZoomScale > 1.0 {
+                UIView.animate(withDuration: 0.25) {
+                    view.transform = .identity
+                }
+                currentZoomScale = 1.0
+            } else {
+                let center = gesture.location(in: view)
+                let targetScale: CGFloat = 2.0
+                UIView.animate(withDuration: 0.25) {
+                    view.transform = CGAffineTransform(translationX: center.x - view.bounds.midX, y: center.y - view.bounds.midY)
+                        .scaledBy(x: targetScale, y: targetScale)
+                }
+                currentZoomScale = targetScale
+            }
         }
         
         func getCurrentpagePath(collectionView: UICollectionView, position: ScreenPosition = .mid) -> IndexPath? {
@@ -644,4 +703,10 @@ enum ScreenPosition {
     case mid
     case top
     case bottom
+}
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
 }

@@ -27,10 +27,10 @@ struct readerManagerView:View {
     // new Implementation
     
     @StateObject   var reader_manager: readerManager
-    init (chapters: [Chapter]?,selectedChapter: Chapter?,kanzen: KanzenEngine)
+    init (chapters: [Chapter]?,selectedChapter: Chapter?,kanzen: KanzenEngine, mangaId: Int = 0, mangaTitle: String = "")
     {
         self.kanzen = kanzen
-        _reader_manager =  StateObject(wrappedValue: readerManager(kanzen:kanzen,chapters: chapters,selectedChapter: selectedChapter))
+        _reader_manager =  StateObject(wrappedValue: readerManager(kanzen:kanzen,chapters: chapters,selectedChapter: selectedChapter, mangaId: mangaId, mangaTitle: mangaTitle))
         _chapters = State(initialValue: chapters)
         _selectedChapter = State(initialValue: selectedChapter)
     }

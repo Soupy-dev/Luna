@@ -14,6 +14,7 @@ struct MangaDetailView: View {
     @EnvironmentObject var moduleManager: ModuleManager
     @StateObject private var sourceFinder = MangaSourceFinder()
     @ObservedObject private var libraryManager = MangaLibraryManager.shared
+    @ObservedObject private var progressManager = MangaReadingProgressManager.shared
     @AppStorage("kanzenAutoMode") private var autoModeEnabled: Bool = false
 
     // UI state
@@ -85,17 +86,30 @@ struct MangaDetailView: View {
             MangaAddToCollectionView(item: libraryItem)
                 .environmentObject(libraryManager)
         }
-        .fullScreenCover(item: $selectedChapterData) { chapter in
+        .fullScreenCover(item: $selectedChapterData, onDismiss: {
+            // Mark the chapter that was just read
+            if let chapter = selectedChapterData {
+                progressManager.markChapterRead(
+                    mangaId: manga.id,
+                    chapterNumber: chapter.chapterNumber,
+                    mangaTitle: manga.displayTitle
+                )
+            }
+        }) { chapter in
             if let chapters = loadedChapters, chapterLanguageIdx < chapters.count {
                 readerManagerView(
                     chapters: chapters[chapterLanguageIdx].chapters,
                     selectedChapter: chapter,
-                    kanzen: chapterEngine
+                    kanzen: chapterEngine,
+                    mangaId: manga.id,
+                    mangaTitle: manga.displayTitle
                 )
             }
         }
         .task {
             guard !moduleManager.modules.isEmpty else { return }
+            // Don't re-search if we already have results or are searching
+            guard sourceFinder.matches.isEmpty, !sourceFinder.isSearching, !sourceFinder.hasFinished else { return }
             sourceFinder.searchAllModules(for: manga)
         }
         .onChange(of: sourceFinder.hasFinished) { finished in
@@ -472,23 +486,33 @@ struct MangaDetailView: View {
             Divider().padding(.vertical, 4)
 
             ForEach(displayed) { chapter in
+                let isRead = progressManager.isChapterRead(mangaId: manga.id, chapterNumber: chapter.chapterNumber)
                 Button {
                     selectedChapterData = chapter
                 } label: {
-                    HStack {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(chapter.chapterNumber)
                             .font(.subheadline)
-                            .foregroundColor(.accentColor)
+                            .fontWeight(.semibold)
+                            .foregroundColor(isRead ? .secondary : .primary)
+                            .lineLimit(1)
 
-                        if let data = chapter.chapterData, let first = data.first, !first.scanlationGroup.isEmpty {
-                            Text("· \(first.scanlationGroup)")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
+                        HStack {
+                            if let data = chapter.chapterData, let first = data.first, !first.scanlationGroup.isEmpty {
+                                Text(first.scanlationGroup)
+                                    .font(.caption)
+                                    .foregroundColor(.accentColor)
+                            }
+                            Spacer()
+                            if isRead {
+                                Text("Read")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
-
-                        Spacer()
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 8)
+                    .opacity(isRead ? 0.6 : 1.0)
                 }
                 .buttonStyle(.plain)
                 Divider()

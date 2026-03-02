@@ -44,6 +44,10 @@ struct ChapterList: View {
                     Divider()
                     ForEach(displayedChapters, id:\.offset) { index, item in
                         if let chapterData = item.chapterData {
+                            let isRead = readerManager.mangaId != 0 && MangaReadingProgressManager.shared.isChapterRead(
+                                mangaId: readerManager.mangaId,
+                                chapterNumber: item.chapterNumber
+                            )
                             Button
                             {
                                 DispatchQueue.main.async {
@@ -51,19 +55,29 @@ struct ChapterList: View {
                                     readerManager.resetState()
                                 }
                             }label: {
-                                HStack{
-                                    if chapterData.count > 0 {
-                                        Text("\(item.chapterNumber )").font(.subheadline)
-                                            .foregroundColor(settings.accentColor) + Text(" \u{00B7} \(chapterData[0].scanlationGroup)")
-                                            .foregroundColor(settings.accentColor)
-                                            .font(.footnote)
-                                        //.foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.chapterNumber)
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(isRead ? .secondary : settings.accentColor)
+                                        .lineLimit(1)
+
+                                    HStack {
+                                        if chapterData.count > 0, !chapterData[0].scanlationGroup.isEmpty {
+                                            Text(chapterData[0].scanlationGroup)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                        if isRead {
+                                            Text("Read")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
                                     }
-                                    else{
-                                        Text("\(item.chapterNumber)").font(.subheadline)
-                                            .foregroundColor(settings.accentColor)
-                                    }
-                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .opacity(isRead ? 0.6 : 1.0)
                             }
                         }
                         Divider()
