@@ -1,100 +1,24 @@
-# Luna
-<div align="center"> 
+My fork of Luna. As of 3/1/26 this was the pr msg:
+"I switched to this vlc https://github.com/tylerjonesio/vlckit-spm it should mean that vlc can go into the regular build thanks to undead.
 
-**A modular media player for iOS, tvOS and macOS, under the GPLv3.0 License.**
+Features added:
 
-[![Build and Release IPA](https://github.com/cranci1/Luna/actions/workflows/build.yml/badge.svg)](https://github.com/cranci1/Luna/actions/workflows/build.yml) [![Discord](https://img.shields.io/discord/1293430817841741899.svg?logo=discord&color=blue)](https://discord.gg/XR3SrmUbpd) [![Platform](https://img.shields.io/badge/Platform-iOS%20%7C%20iPadOS%2015.0%2B%20%26%20macOS%2012.0%2B-red?logo=apple&logoColor=white)](https://img.shields.io/badge/Platform-iOS%20%7C%20iPadOS%2015.0%2B%20%26%20macOS%2012.0%2B-red?logo=apple&logoColor=white)
+1: "Mark as watched" and related buttons now work
+2: Anilist and trakt sync (Anilist should work for manga too but I didnt test it)
+3: TMDB and Anilist hybrid system for anime only. Fixes issue of improper anime handling by pure tmdb. Update, fixed known edge cases, its now even more robust and accurate than before.
+4: Catalogs provided by tmdb and anilist with control over them
+5: Anime schedule provided by anilist
+6: Auto clear cache
+7: Backup and restore
+8: Auto subtitles, auto anime language, Next episode button, AniSkip, and TheIntroDB for VLC only
+9: Minor but episodes now have their full descriptions in the services result sheet
+10: VLC player (Requires proxy setting enabled to work with every service, otherwise only works with some)
+11: Made Crancis Continue Watching respect the tmdb+AniList system
+12: Downloads support, ui needed minor revision to add this tab. Settings is now in the top right. HLS downloads are slower due to needing proper playback from mpv and VLC
+13: VLC does have subtitle editing. But I just removed pip. I went through many implementations and spent a bunch of time. But VLC just isn't ready for pip, waiting for VLC v4 for better stability and native pip is the best call. I've pretty much pushed VLC as far as it can go.
 
-</div>
+Notes:
 
-## Table of Contents
+I have 650+ workflows it took a long time. Paul helped test. VLC and this Luna in general has come a long way. There are likely minor issues with VLC that can't be fixed/smoothed without v4."
 
-- [Why Luna?](#why-luna)
-- [Features](#features)
-- [Installation](#installation)
-- [Frequently Asked Questions](#frequently-asked-questions)
-- [Acknowledgements](#acknowledgements)
-- [License](#license)
-- [Legal](#legal)
-
-## Why Luna?
-Luna has been made to improve speed and stability over the old version, [Sora 1](https://github.com/cranci1/Sora) and have a better experience overall. 
-
-## Features
-
-- [x] TMDB integration
-- [x] tvOS 17+ support
-- [ ] macOS 13+ support
-- [x] iOS & iPadOS 15+ support
-- [x] Customizable Home Sections
-- [x] Custom mpv based video player
-- [ ] Chromecast and AirPlay support
-- [x] Bookmarks & Collections for Media Items
-- [x] Support for personal media servers (Jellyfin, Emby)
-- [x] Background playback and Picture-in-Picture (PiP) support
-- [x] External media player support (VLC, Infuse, Outplayer, nPlayer, SenPlayer, VidHub, TracyPlayer)
-
-## Installation
-
-You can download Luna using Xcode or using the .ipa file, which you can find in the [Nightly](https://nightly.link/cranci1/Luna/workflows/build/main/Luna%20IPA.zip) build page.
-
-## Frequently Asked Questions
-
-1. **What is Luna?**  
-   Luna is a modular media player for iOS and macOS, enabling custom Services to play media from user-provided sources.
-
-2. **Is Luna safe?**  
-   Yes, Luna is open-source and prioritizes user privacy. It does not store user data on external servers and does not collect crash logs.
-
-3. **Will Luna ever be paid?**  
-   No, Luna will always remain free without subscriptions, paid content, or any type of login.
-
-4. **How can I get Services?**  
-   Luna does not include any Services by default. You will need to find and add the necessary Services yourself, or create your own.
-
-## Acknowledgements
-
-Frameworks:
-- [MPVKit](https://github.com/mpvkit/MPVKit) - GPLv3.0 License
-- [SoraCore](https://github.com/cranci1/SoraCore) – Custom License
-- [KingFisher](https://github.com/onevcat/Kingfisher) - MIT License
-- [FakeWebkit](https://github.com/undeaDD/FakeWebKit) - GPLv3.0 License
-
-Misc:
-- [50/50](https://github.com/50n50) for the app icon  
-
-## License
-
-This project is licensed under the [GNU General Public License v3.0](LICENSE) (GPLv3.0).
-
-```
-Copyright © 2024-2025 cranci. All rights reserved.
-
-Luna is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Luna is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Luna. If not, see <https://www.gnu.org/licenses/>.
-```
-
-## Legal
-
-**Luna is a media player that does not host or provide any content. Users are responsible for providing their own content.**
-
-### User Responsibility
-- Users must ensure they have legal rights to any content they use
-- Users are responsible for complying with all applicable laws
-- Users must respect copyright and intellectual property rights
-
-### No Liability
-The developers assume no responsibility for user actions or content. This software is provided "as-is" without warranties. Users bear full responsibility for their use of the software and any Services.
-
-### Services
-Luna does not include any Services. Third-party Services are the responsibility of their creators, not the Luna developers.
+Why did I close the PR? Wouldn't this be great for users? I agree. But to not stoop low, I'll just say that the code wasn't the only thing that was conflicting with the main repo.
