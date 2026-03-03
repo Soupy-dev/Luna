@@ -991,6 +991,87 @@ final class TrackerManager: NSObject, ObservableObject {
         trackerState.disconnectAccount(for: service)
         saveTrackerState()
     }
+
+    // MARK: - AniList Library Import
+
+    /// Import the user's AniList anime lists (Watching, Planning, Completed) into local library collections.
+    /// Uses the standard AniList→TMDB matching pipeline so items are consistent with the rest of the app.
+    @Published var isImportingAniList = false
+    @Published var aniListImportError: String?
+    @Published var aniListImportProgress: String?
+
+    func importAniListToLibrary() {
+        guard let account = trackerState.getAccount(for: .anilist), account.isConnected else {
+            aniListImportError = "No connected AniList account"
+            return
+        }
+
+        guard !isImportingAniList else { return }
+
+        Task { @MainActor in
+            isImportingAniList = true
+            aniListImportError = nil
+            aniListImportProgress = "Fetching your AniList library…"
+        }
+
+        Task {
+            do {
+                let userId = Int(account.userId) ?? 0
+                let lists = try await AniListService.shared.fetchUserAnimeListsForImport(
+                    token: account.accessToken,
+                    userId: userId,
+                    tmdbService: TMDBService.shared
+                )
+
+                await MainActor.run {
+                    aniListImportProgress = "Adding items to library…"
+                }
+
+                let library = LibraryManager.shared
+                let mapping: [(name: String, items: [TMDBSearchResult])] = [
+                    ("Watching",  lists.watching),
+                    ("Planning",  lists.planning),
+                    ("Completed", lists.completed),
+                ]
+
+                await MainActor.run {
+                    for (collectionName, tmdbItems) in mapping where !tmdbItems.isEmpty {
+                        // Find or create the collection
+                        let collection: LibraryCollection
+                        if let existing = library.collections.first(where: { $0.name == collectionName }) {
+                            collection = existing
+                        } else {
+                            library.createCollection(name: collectionName, description: "Imported from AniList")
+                            collection = library.collections.first(where: { $0.name == collectionName })!
+                        }
+
+                        var added = 0
+                        for result in tmdbItems {
+                            let item = LibraryItem(searchResult: result)
+                            if !library.isItemInCollection(collection.id, item: item) {
+                                library.addItem(to: collection.id, item: item)
+                                added += 1
+                            }
+                        }
+                        Logger.shared.log("AniList import: Added \(added) new items to '\(collectionName)' (\(tmdbItems.count) total matched)", type: "Tracker")
+                    }
+
+                    let totalImported = mapping.reduce(0) { $0 + $1.items.count }
+                    isImportingAniList = false
+                    aniListImportProgress = nil
+                    aniListImportError = nil
+                    Logger.shared.log("AniList import completed: \(totalImported) total items across \(mapping.filter { !$0.items.isEmpty }.count) collections", type: "Tracker")
+                }
+            } catch {
+                await MainActor.run {
+                    isImportingAniList = false
+                    aniListImportProgress = nil
+                    aniListImportError = "Import failed: \(error.localizedDescription)"
+                    Logger.shared.log("AniList import failed: \(error.localizedDescription)", type: "Error")
+                }
+            }
+        }
+    }
 }
 
 #if !os(tvOS)

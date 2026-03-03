@@ -1226,7 +1226,107 @@ final class AniListService {
         
         return results
     }
-    
+
+    // MARK: - User List Import
+
+    /// Represents a categorized set of AniList user anime lists mapped to TMDB results.
+    struct AniListUserListImport {
+        var watching: [TMDBSearchResult] = []
+        var planning: [TMDBSearchResult] = []
+        var completed: [TMDBSearchResult] = []
+    }
+
+    /// Fetch the authenticated user's anime lists (CURRENT/watching, PLANNING, COMPLETED)
+    /// and map each entry to a TMDBSearchResult using the standard matching system.
+    func fetchUserAnimeListsForImport(
+        token: String,
+        userId: Int,
+        tmdbService: TMDBService
+    ) async throws -> AniListUserListImport {
+        // Fetch all three status lists in a single paginated query using aliases
+        // AniList caps perPage at 50 so we paginate per status
+        func fetchList(status: String, token: String) async throws -> [AniListAnime] {
+            var allAnime: [AniListAnime] = []
+            var page = 1
+            var hasNext = true
+
+            while hasNext {
+                let query = """
+                query {
+                    Page(page: \(page), perPage: 50) {
+                        pageInfo { hasNextPage }
+                        mediaList(userId: \(userId), type: ANIME, status: \(status)) {
+                            media {
+                                id
+                                title { romaji english native }
+                                episodes
+                                status
+                                seasonYear
+                                season
+                                coverImage { large medium }
+                                format
+                            }
+                        }
+                    }
+                }
+                """
+
+                struct Response: Codable {
+                    let data: DataWrapper
+                    struct DataWrapper: Codable { let Page: PageData }
+                    struct PageData: Codable {
+                        let pageInfo: PageInfo
+                        let mediaList: [MediaListEntry]
+                    }
+                    struct PageInfo: Codable { let hasNextPage: Bool }
+                    struct MediaListEntry: Codable { let media: AniListAnime }
+                }
+
+                let data = try await executeGraphQLQuery(query, token: token)
+                let decoded = try JSONDecoder().decode(Response.self, from: data)
+                allAnime.append(contentsOf: decoded.data.Page.mediaList.map(\.media))
+                hasNext = decoded.data.Page.pageInfo.hasNextPage
+                page += 1
+            }
+
+            return allAnime
+        }
+
+        Logger.shared.log("AniListService: Fetching user anime lists for import (userId: \(userId))", type: "AniList")
+
+        // Fetch all three lists concurrently
+        async let watchingAnime = fetchList(status: "CURRENT", token: token)
+        async let planningAnime = fetchList(status: "PLANNING", token: token)
+        async let completedAnime = fetchList(status: "COMPLETED", token: token)
+
+        let watching = try await watchingAnime
+        let planning = try await planningAnime
+        let completed = try await completedAnime
+
+        Logger.shared.log("AniListService: User lists - Watching: \(watching.count), Planning: \(planning.count), Completed: \(completed.count)", type: "AniList")
+
+        // Dedupe all anime across all lists and batch-map to TMDB
+        var allAnime: [AniListAnime] = []
+        var seenIds = Set<Int>()
+        for anime in watching + planning + completed {
+            if seenIds.insert(anime.id).inserted {
+                allAnime.append(anime)
+            }
+        }
+
+        let tmdbMap = await batchMapAniListToTMDB(allAnime, tmdbService: tmdbService)
+
+        // Re-assemble per-list results
+        var result = AniListUserListImport()
+        result.watching = watching.compactMap { tmdbMap[$0.id] }
+        result.planning = planning.compactMap { tmdbMap[$0.id] }
+        result.completed = completed.compactMap { tmdbMap[$0.id] }
+
+        Logger.shared.log("AniListService: Mapped to TMDB - Watching: \(result.watching.count), Planning: \(result.planning.count), Completed: \(result.completed.count)", type: "AniList")
+
+        return result
+    }
+
     // MARK: - Private Helpers
     
     private func executeGraphQLQuery(_ query: String, token: String?, maxRetries: Int = 3) async throws -> Data {

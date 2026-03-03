@@ -10,6 +10,7 @@ import SwiftUI
 struct TrackersSettingsView: View {
     @StateObject private var trackerManager = TrackerManager.shared
     @State private var selectedTracker: TrackerService?
+    @State private var showImportConfirmation = false
 
     var body: some View {
         ZStack {
@@ -39,6 +40,11 @@ struct TrackersSettingsView: View {
                             onConnect: { trackerManager.startAniListAuth() },
                             onDisconnect: { trackerManager.disconnectTracker(.anilist) }
                         )
+
+                        // AniList Import Section
+                        if trackerManager.trackerState.getAccount(for: .anilist) != nil {
+                            aniListImportSection
+                        }
 
                         // Trakt Section
                         trackerRow(
@@ -78,6 +84,66 @@ struct TrackersSettingsView: View {
         #if !os(tvOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .alert("Import AniList Library", isPresented: $showImportConfirmation) {
+            Button("Import", role: .none) {
+                trackerManager.importAniListToLibrary()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will import your AniList Watching, Planning, and Completed lists as collections in your library. Existing items won't be duplicated.")
+        }
+    }
+
+    // MARK: - AniList Import Section
+
+    @ViewBuilder
+    private var aniListImportSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Import AniList Library")
+                        .font(.headline)
+                        .foregroundColor(.white)
+
+                    Text("Import your Watching, Planning, and Completed lists as collections")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                if trackerManager.isImportingAniList {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                } else {
+                    Button(action: { showImportConfirmation = true }) {
+                        Text("Import")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.blue)
+                            .cornerRadius(6)
+                    }
+                }
+            }
+
+            if let progress = trackerManager.aniListImportProgress {
+                Text(progress)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            if let error = trackerManager.aniListImportError {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+            }
+        }
+        .padding()
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(12)
     }
 
     @ViewBuilder
