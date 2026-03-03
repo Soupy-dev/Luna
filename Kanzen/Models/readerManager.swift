@@ -397,6 +397,33 @@ var nextControllers: [UIViewController]?
             }
         }
     }
+
+    func goToPreviousChapter() {
+        guard let chapter = selectedChapter, chapter.idx > 0 else { return }
+        if mangaId != 0 {
+            MangaReadingProgressManager.shared.markChapterRead(
+                mangaId: mangaId,
+                chapterNumber: chapter.chapterNumber,
+                mangaTitle: mangaTitle
+            )
+        }
+        selectedChapter = chapters?[chapter.idx - 1]
+        resetState()
+    }
+
+    func goToNextChapter() {
+        guard let chapter = selectedChapter, let chapters = chapters, chapter.idx < chapters.count - 1 else { return }
+        if mangaId != 0 {
+            MangaReadingProgressManager.shared.markChapterRead(
+                mangaId: mangaId,
+                chapterNumber: chapter.chapterNumber,
+                mangaTitle: mangaTitle
+            )
+        }
+        selectedChapter = chapters[chapter.idx + 1]
+        resetState()
+    }
+
     func fetchPrev(completion: @escaping () -> Void = {})
     {
         print("fetchPrev called")

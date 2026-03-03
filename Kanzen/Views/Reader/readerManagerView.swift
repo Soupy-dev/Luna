@@ -18,12 +18,7 @@ struct readerManagerView:View {
     @State private var showFullScreen = true
     @State private var showChapterlist: Bool = false
     @State private var showReadingModePicker = false
-    @Environment(\.colorScheme) var colorScheme
-    @State var someValue: CGFloat = 0
-    @State var RTL: Bool = true
-    
-    @State private var sliderRange: ClosedRange<CGFloat> = 0...0
-    @State private var debounceWorkItem: DispatchWorkItem?
+    @State private var orientationLocked = false
     // new Implementation
     
     @StateObject   var reader_manager: readerManager
@@ -63,25 +58,9 @@ struct readerManagerView:View {
             //.presentationBackground(.regularMaterial) // 👈 blurred material background
             
         }
-        .onChange(of: reader_manager.index) { newIndex in
-            let clamped = min(CGFloat(newIndex), reader_manager.currRange.upperBound)
-            if someValue != clamped { // avoid redundant triggers
-                someValue = clamped
-            }
+        .onDisappear {
+            AppDelegate.orientationLock = .all
         }
-        .onChange(of: someValue) { newValue in
-            print("someValue changed")
-            guard Int(newValue) != reader_manager.index else { return }
-            debounceWorkItem?.cancel()
-            let workItem = DispatchWorkItem {
-                reader_manager.setIndex(Int(newValue))
-                reader_manager.changeIndex.toggle()
-                
-            }
-            debounceWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
-        }
-        
         .navigationBarBackButtonHidden(true)
         .task {
             reader_manager.initChapters()
@@ -110,61 +89,147 @@ struct readerManagerView:View {
     
     @ViewBuilder
     func readerOverlay() -> some View {
-        if showFullScreen
-        {
-            VStack{
-                HStack{
-                    HStack{
-                        Image(systemName: "multiply.circle.fill").onTapGesture {
-                            dismiss()
+        if showFullScreen {
+            VStack(spacing: 0) {
+                // MARK: - Top Bar
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !reader_manager.mangaTitle.isEmpty {
+                            Text(reader_manager.mangaTitle)
+                                .font(.headline)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                                .lineLimit(1)
                         }
-                        .font(.title)
-                        .foregroundColor(settings.accentColor )
-                        
+                        Text(reader_manager.selectedChapter?.chapterNumber ?? "")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.7))
+                            .lineLimit(1)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading,10)
                     Spacer()
-                    VStack{
-                        Text("Chapter")
-                        Text("\(reader_manager.selectedChapter?.chapterNumber ?? "No Title")")
-                        
+                    Button {
+                        AppDelegate.orientationLock = .all
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.body)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .frame(width: 30, height: 30)
+                            .background(Color.white.opacity(0.2))
+                            .clipShape(Circle())
                     }
-                    .frame(maxWidth: .infinity)
-                    Spacer()
-                    HStack{
-                        Image(systemName: "line.3.horizontal.decrease.circle.fill")
-                            .font(.title)
-                            .foregroundColor(settings.accentColor )
-                            .onTapGesture {
-                                showReadingModePicker = true
-                                
-                            }
-                        Image(systemName: "list.bullet.circle.fill")
-                            .font(.title)
-                            .foregroundColor(settings.accentColor )
-                            .onTapGesture {
-                                showChapterlist = true
-                            }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing,10)
                 }
-                .frame(height: 50)
-                .frame(maxWidth: .infinity)
-                .background(  colorScheme == .dark ?  Color.black.opacity(0.5) : Color.black.opacity(0.1))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .padding(.top, 4)
+                .background(
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.7), Color.black.opacity(0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .ignoresSafeArea(.all, edges: .top)
+                )
+
                 Spacer()
-                VStack
-                {
-                    HStack{
-                        customSlider(value: $someValue,RTL: $RTL,range: reader_manager.currRange)
-                            .padding(.leading, 10)
-                            .padding(.trailing,10)
+
+                // MARK: - Bottom Bar
+                HStack(spacing: 20) {
+                    // Orientation lock
+                    Button {
+                        toggleOrientationLock()
+                    } label: {
+                        Image(systemName: orientationLocked ? "lock.fill" : "lock.open")
+                            .font(.title2)
+                            .foregroundColor(orientationLocked ? settings.accentColor : .white)
                     }
-                    .frame(height: 50)
-                    Text("\(min(Int(someValue),Int(reader_manager.currRange.upperBound)))/\(Int(reader_manager.currRange.upperBound))")
+
+                    // Settings
+                    Button {
+                        showReadingModePicker = true
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                    }
+
+                    // Chapter list
+                    Button {
+                        showChapterlist = true
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                    }
+
+                    Spacer()
+
+                    // Page counter with chapter arrows
+                    HStack(spacing: 10) {
+                        Button {
+                            reader_manager.goToPreviousChapter()
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.callout)
+                                .fontWeight(.semibold)
+                                .foregroundColor(reader_manager.selectedChapter?.idx ?? 0 > 0 ? .white : .white.opacity(0.3))
+                        }
+                        .disabled(reader_manager.selectedChapter?.idx == 0)
+
+                        Text("\(min(reader_manager.index + 1, max(reader_manager.currChapter.count, 1))) of \(max(reader_manager.currChapter.count, 1))")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                            .monospacedDigit()
+
+                        Button {
+                            reader_manager.goToNextChapter()
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.callout)
+                                .fontWeight(.semibold)
+                                .foregroundColor((reader_manager.selectedChapter?.idx ?? 0) < (reader_manager.chapters?.count ?? 1) - 1 ? .white : .white.opacity(0.3))
+                        }
+                        .disabled(reader_manager.selectedChapter?.idx == (reader_manager.chapters?.count ?? 1) - 1)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.15))
+                    .cornerRadius(20)
                 }
-                .background(  colorScheme == .dark ?  Color.black.opacity(0.5) : Color.black.opacity(0.1))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .padding(.bottom, 4)
+                .background(
+                    LinearGradient(
+                        colors: [Color.black.opacity(0), Color.black.opacity(0.7)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .ignoresSafeArea(.all, edges: .bottom)
+                )
+            }
+        }
+    }
+
+    private func toggleOrientationLock() {
+        orientationLocked.toggle()
+        if orientationLocked {
+            if #available(iOS 16.0, *) {
+                guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+                let orientation = windowScene.interfaceOrientation
+                let mask: UIInterfaceOrientationMask = orientation.isPortrait ? .portrait : .landscape
+                AppDelegate.orientationLock = mask
+                windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
+            } else {
+                AppDelegate.orientationLock = .portrait
+            }
+        } else {
+            AppDelegate.orientationLock = .all
+            if #available(iOS 16.0, *) {
+                guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+                windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: .all))
             }
         }
     }
