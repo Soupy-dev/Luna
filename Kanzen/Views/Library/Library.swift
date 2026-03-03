@@ -242,6 +242,24 @@ struct KanzenLibraryView: View {
         .frame(width: 140)
     }
 
+    @ViewBuilder
+    private func unreadBadge(for item: MangaLibraryItem) -> some View {
+        let readCount = MangaReadingProgressManager.shared.readChapters(for: item.aniListId).count
+        let total = item.totalChapters ?? 0
+        let unread = max(0, total - readCount)
+        if unread > 0 {
+            Text("\(unread)")
+                .font(.caption2)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.accentColor)
+                .clipShape(Capsule())
+                .padding(4)
+        }
+    }
+
     // MARK: - Helpers
 
     @ViewBuilder
