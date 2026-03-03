@@ -603,6 +603,11 @@ struct MangaDetailView: View {
                     }
                 }
                 Divider()
+            }
+        }
+    }
+
+    // MARK: - Read / Continue Button
 
     @ViewBuilder
     private func readButton(chapters: [Chapter]) -> some View {
