@@ -126,11 +126,30 @@ var nextControllers: [UIViewController]?
     // Setter Functions
     func setIndex(_ index: Int) {
         self.index = index
+        // Persist page position for current chapter
+        if mangaId != 0, let chapter = selectedChapter {
+            MangaReadingProgressManager.shared.savePagePosition(
+                mangaId: mangaId,
+                chapterNumber: chapter.chapterNumber,
+                page: index
+            )
+        }
     }
 
     func setCurrChapter(_ currChapter: [PageData]) {
         self.currChapter = currChapter
         generateCurrControllers()
+        // Restore saved page position
+        if mangaId != 0, let chapter = selectedChapter {
+            let saved = MangaReadingProgressManager.shared.pagePosition(
+                mangaId: mangaId,
+                chapterNumber: chapter.chapterNumber
+            )
+            if saved > 0, saved < currChapter.count {
+                self.index = saved
+                self.changeIndex = true
+            }
+        }
     }
     
     func setPrevChapter(_ prevChapter: [PageData]) {

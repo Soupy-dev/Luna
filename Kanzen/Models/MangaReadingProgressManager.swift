@@ -13,6 +13,8 @@ struct MangaProgress: Codable {
     var readChapterNumbers: Set<String> = []
     var lastReadChapter: String?
     var lastReadDate: Date?
+    /// Page index keyed by chapter number, so reader can resume mid-chapter.
+    var pagePositions: [String: Int] = [:]
 }
 
 // MARK: - Progress Manager
@@ -41,6 +43,19 @@ final class MangaReadingProgressManager: ObservableObject {
 
     func lastReadChapter(for mangaId: Int) -> String? {
         progressMap[mangaId]?.lastReadChapter
+    }
+
+    func pagePosition(mangaId: Int, chapterNumber: String) -> Int {
+        progressMap[mangaId]?.pagePositions[chapterNumber] ?? 0
+    }
+
+    func savePagePosition(mangaId: Int, chapterNumber: String, page: Int) {
+        var progress = progressMap[mangaId] ?? MangaProgress()
+        progress.pagePositions[chapterNumber] = page
+        progress.lastReadChapter = chapterNumber
+        progress.lastReadDate = Date()
+        progressMap[mangaId] = progress
+        save()
     }
 
     // MARK: - Mutations

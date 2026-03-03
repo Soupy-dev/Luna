@@ -10,12 +10,21 @@ import Kingfisher
 
 #if !os(tvOS)
 struct MangaDetailView: View {
-    let manga: AniListManga
+    let initialManga: AniListManga
     @EnvironmentObject var moduleManager: ModuleManager
     @StateObject private var sourceFinder = MangaSourceFinder()
     @ObservedObject private var libraryManager = MangaLibraryManager.shared
     @ObservedObject private var progressManager = MangaReadingProgressManager.shared
     @AppStorage("kanzenAutoMode") private var autoModeEnabled: Bool = false
+
+    /// Full manga detail fetched from AniList (populated on appear if initial data is sparse)
+    @State private var manga: AniListManga
+    @State private var fetchedFullDetail = false
+
+    init(manga: AniListManga) {
+        self.initialManga = manga
+        _manga = State(initialValue: manga)
+    }
 
     // UI state
     @State private var expandedDescription: Bool = false
@@ -107,6 +116,13 @@ struct MangaDetailView: View {
             }
         }
         .task {
+            // If opened from library (sparse data), fetch full detail from AniList
+            if manga.description == nil, !fetchedFullDetail {
+                fetchedFullDetail = true
+                if let full = try? await AniListMangaService.shared.fetchMangaDetail(id: manga.id) {
+                    manga = full
+                }
+            }
             guard !moduleManager.modules.isEmpty else { return }
             // Don't re-search if we already have results or are searching
             guard sourceFinder.matches.isEmpty, !sourceFinder.isSearching, !sourceFinder.hasFinished else { return }
@@ -457,6 +473,10 @@ struct MangaDetailView: View {
         let displayed: [Chapter] = reverseChapters ? selected.chapters.reversed() : selected.chapters
 
         VStack(alignment: .leading, spacing: 0) {
+            // Read / Continue button
+            readButton(chapters: selected.chapters)
+                .padding(.bottom, 8)
+
             HStack {
                 Text("\(selected.chapters.count) Chapters")
                     .font(.headline)
@@ -487,36 +507,102 @@ struct MangaDetailView: View {
 
             ForEach(displayed) { chapter in
                 let isRead = progressManager.isChapterRead(mangaId: manga.id, chapterNumber: chapter.chapterNumber)
+                let chapterTitle = chapter.chapterData?.first?.title ?? ""
+
                 Button {
                     selectedChapterData = chapter
                 } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(chapter.chapterNumber)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(isRead ? .secondary : .primary)
-                            .lineLimit(1)
-
-                        HStack {
-                            if let data = chapter.chapterData, let first = data.first, !first.scanlationGroup.isEmpty {
-                                Text(first.scanlationGroup)
-                                    .font(.caption)
-                                    .foregroundColor(.accentColor)
-                            }
-                            Spacer()
-                            if isRead {
-                                Text("Read")
+                    HStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            // Chapter number + title
+                            if !chapterTitle.isEmpty {
+                                Text(chapter.chapterNumber)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(isRead ? .secondary : .primary)
+                                    .lineLimit(1)
+                                Text(chapterTitle)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            } else {
+                                Text(chapter.chapterNumber)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(isRead ? .secondary : .primary)
+                                    .lineLimit(1)
+                            }
+
+                            // Scanlation group
+                            if let data = chapter.chapterData, let first = data.first, !first.scanlationGroup.isEmpty {
+                                Text(first.scanlationGroup)
+                                    .font(.caption2)
+                                    .foregroundColor(.accentColor.opacity(0.8))
+                                    .lineLimit(1)
                             }
                         }
+
+                        Spacer(minLength: 8)
+
+                        if isRead {
+                            Text("Read")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.12))
+                                .cornerRadius(4)
+                        }
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                     .opacity(isRead ? 0.6 : 1.0)
                 }
                 .buttonStyle(.plain)
                 Divider()
             }
+        }
+    }
+
+    // MARK: - Read / Continue Button
+
+    @ViewBuilder
+    private func readButton(chapters: [Chapter]) -> some View {
+        let lastRead = progressManager.lastReadChapter(for: manga.id)
+        let hasProgress = lastRead != nil
+
+        // Find the chapter to resume/start
+        let targetChapter: Chapter? = {
+            if let lastRead = lastRead {
+                // Find the last-read chapter so we resume in it
+                if let ch = chapters.first(where: { $0.chapterNumber == lastRead }) {
+                    return ch
+                }
+            }
+            // No progress — start from first chapter (lowest index)
+            return chapters.last
+        }()
+
+        if let target = targetChapter {
+            Button {
+                selectedChapterData = target
+            } label: {
+                HStack {
+                    Image(systemName: hasProgress ? "book.fill" : "play.fill")
+                        .font(.subheadline)
+                    Text(hasProgress ? "Continue Reading" : "Start Reading")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .foregroundColor(.white)
+                .background(Color.accentColor)
+                .cornerRadius(10)
+            }
+            .buttonStyle(.plain)
         }
     }
 

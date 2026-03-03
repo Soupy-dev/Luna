@@ -65,7 +65,7 @@ struct ChapterData: Identifiable
         
         self.scanlationGroup = scanlationGroup
         self.params = params
-
+        self.title = dict["title"] as? String ?? ""
     }
 }
 
