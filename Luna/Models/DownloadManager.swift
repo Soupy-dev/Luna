@@ -707,10 +707,13 @@ final class DownloadManager: NSObject, ObservableObject {
     // MARK: - Persistence
     
     private func saveDownloads() {
+        // Capture the current downloads array on the calling thread (main) to avoid
+        // a data race when encoding on the background write queue.
+        let snapshot = self.downloads
         accessQueue.async(flags: .barrier) { [weak self] in
             guard let self = self else { return }
             do {
-                let data = try JSONEncoder().encode(self.downloads)
+                let data = try JSONEncoder().encode(snapshot)
                 try data.write(to: self.persistenceURL, options: .atomic)
             } catch {
                 Logger.shared.log("Failed to save downloads: \(error)", type: "Download")
@@ -723,9 +726,9 @@ final class DownloadManager: NSObject, ObservableObject {
         do {
             let data = try Data(contentsOf: persistenceURL)
             let loaded = try JSONDecoder().decode([DownloadItem].self, from: data)
-            DispatchQueue.main.async {
-                self.downloads = loaded
-            }
+            // Set synchronously so that cleanOrphanedFiles() and resumeInterruptedDownloads()
+            // see the correct data immediately after this call.
+            self.downloads = loaded
         } catch {
             Logger.shared.log("Failed to load downloads: \(error)", type: "Download")
         }
