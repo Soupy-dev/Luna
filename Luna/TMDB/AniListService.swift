@@ -658,6 +658,42 @@ final class AniListService {
             return lhs.anime.id < rhs.anime.id
         }
 
+        // Fix C: Prune entries that belong to a separate TMDB show.
+        // E.g. "Naruto" and "Naruto Shippuden" are separate TMDB entries;
+        // when viewing one, we shouldn't merge episodes from the other.
+        // Only keep entries contiguous with the root match that fit within the TMDB episode budget.
+        if let tvShowDetail, let tmdbTotalEps = tvShowDetail.numberOfEpisodes, tmdbTotalEps > 0 {
+            let anilistTotalEps = allAnimeToProcess.reduce(0) { $0 + ($1.anime.episodes ?? 0) }
+            if anilistTotalEps > Int(Double(tmdbTotalEps) * 1.25) {
+                let rootIndex = allAnimeToProcess.firstIndex(where: { $0.anime.id == anime.id }) ?? 0
+                var keepStart = rootIndex
+                var keepEnd = rootIndex
+                var total = allAnimeToProcess[rootIndex].anime.episodes ?? 0
+                let budget = Int(Double(tmdbTotalEps) * 1.25)
+
+                var canExpandLeft = true, canExpandRight = true
+                while canExpandLeft || canExpandRight {
+                    if canExpandLeft && keepStart > 0 {
+                        let eps = allAnimeToProcess[keepStart - 1].anime.episodes ?? 0
+                        if total + eps <= budget { keepStart -= 1; total += eps }
+                        else { canExpandLeft = false }
+                    } else { canExpandLeft = false }
+
+                    if canExpandRight && keepEnd < allAnimeToProcess.count - 1 {
+                        let eps = allAnimeToProcess[keepEnd + 1].anime.episodes ?? 0
+                        if total + eps <= budget { keepEnd += 1; total += eps }
+                        else { canExpandRight = false }
+                    } else { canExpandRight = false }
+                }
+
+                let pruned = allAnimeToProcess.count - (keepEnd - keepStart + 1)
+                if pruned > 0 {
+                    Logger.shared.log("AniListService: Pruned \(pruned) entries that exceed TMDB episode budget (\(anilistTotalEps) AniList eps vs \(tmdbTotalEps) TMDB eps)", type: "AniList")
+                    allAnimeToProcess = Array(allAnimeToProcess[keepStart...keepEnd])
+                }
+            }
+        }
+
         // Fetch all TMDB season data in parallel (excluding Season 0 specials)
         // Build an absolute episode index so we can map stills/runtime even when seasons reset numbering
         var tmdbEpisodesByAbsolute: [Int: TMDBEpisode] = [:]
