@@ -206,7 +206,7 @@ class StremioAddonManager: ObservableObject {
     // MARK: - Helpers
 
     private func generateAddonUUID(manifest: StremioManifest) -> UUID {
-        let input = "\(manifest.id)_\(manifest.version ?? "0")"
+        let input = manifest.id
         let hash = SHA256.hash(data: Data(input.utf8))
         let hashBytes = Array(hash)
         return UUID(uuid: (

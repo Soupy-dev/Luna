@@ -90,7 +90,7 @@ struct StremioStreamResponse: Codable {
 }
 
 struct StremioStream: Codable, Identifiable {
-    var id: String { url ?? infoHash ?? UUID().uuidString }
+    let id: String
 
     let url: String?
     let infoHash: String?
@@ -99,6 +99,22 @@ struct StremioStream: Codable, Identifiable {
     let description: String?
     let behaviorHints: StremioStreamBehaviorHints?
     let subtitles: [StremioSubtitle]?
+
+    enum CodingKeys: String, CodingKey {
+        case url, infoHash, title, name, description, behaviorHints, subtitles
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        infoHash = try container.decodeIfPresent(String.self, forKey: .infoHash)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        behaviorHints = try container.decodeIfPresent(StremioStreamBehaviorHints.self, forKey: .behaviorHints)
+        subtitles = try container.decodeIfPresent([StremioSubtitle].self, forKey: .subtitles)
+        id = url ?? infoHash ?? UUID().uuidString
+    }
 
     /// Whether this stream is a direct HTTP(S) link (safe, no torrent)
     var isDirectHTTP: Bool {

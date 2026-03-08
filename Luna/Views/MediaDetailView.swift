@@ -677,7 +677,8 @@ struct MediaDetailView: View {
                                 originCountry: detail.originCountry,
                                 type: detail.type,
                                 seasons: aniSeasons,
-                                contentRatings: detail.contentRatings
+                                contentRatings: detail.contentRatings,
+                                externalIds: detail.externalIds
                             )
                             
                             self.tvShowDetail = detailWithAniSeasons

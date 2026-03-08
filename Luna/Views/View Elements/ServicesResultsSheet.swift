@@ -54,7 +54,6 @@ final class ModulesSearchResultsViewModel: ObservableObject {
     // MARK: - Stremio addon results
     @Published var stremioResults: [UUID: [StremioStream]] = [:]
     @Published var stremioSearchedAddons: Set<UUID> = []
-    @Published var stremioFailedAddons: Set<UUID> = []
     @Published var isSearchingStremio = false
     @Published var selectedStremioStream: StremioStream? = nil
     @Published var selectedStremioAddon: StremioAddon? = nil
@@ -886,9 +885,6 @@ struct ModulesSearchResultsSheet: View {
                     Task { @MainActor in
                         self.viewModel.stremioResults[addon.id] = streams
                         self.viewModel.stremioSearchedAddons.insert(addon.id)
-                        if streams.isEmpty {
-                            self.viewModel.stremioFailedAddons.insert(addon.id)
-                        }
                     }
                 },
                 onComplete: {
@@ -955,13 +951,6 @@ struct ModulesSearchResultsSheet: View {
             Text(addon.manifest.name)
                 .font(.subheadline)
                 .fontWeight(.medium)
-
-            if viewModel.stremioFailedAddons.contains(addon.id) {
-                Image(systemName: "exclamationmark.octagon.fill")
-                    .foregroundColor(.red)
-                    .font(.caption)
-                    .padding(.leading, 6)
-            }
 
             Spacer()
 

@@ -7,8 +7,8 @@
 
 import CoreData
 
-public final class StremioAddonStore {
-    public static let shared = StremioAddonStore()
+final class StremioAddonStore {
+    static let shared = StremioAddonStore()
 
     private var container: NSPersistentContainer? = nil
 
@@ -35,7 +35,7 @@ public final class StremioAddonStore {
 
     // MARK: - CRUD
 
-    public func storeAddon(id: UUID, configuredURL: String, manifestJSON: String, isActive: Bool) {
+    func storeAddon(id: UUID, configuredURL: String, manifestJSON: String, isActive: Bool) {
         guard let container = container else {
             Logger.shared.log("Stremio: Container not initialized: storeAddon", type: "Storage")
             return
@@ -76,7 +76,7 @@ public final class StremioAddonStore {
         }
     }
 
-    public func getAddons() -> [StremioAddon] {
+    func getAddons() -> [StremioAddon] {
         guard let container = container else {
             Logger.shared.log("Stremio: Container not initialized: getAddons", type: "Storage")
             return []
@@ -98,7 +98,7 @@ public final class StremioAddonStore {
         return result
     }
 
-    public func getEntities() -> [StremioAddonEntity] {
+    func getEntities() -> [StremioAddonEntity] {
         guard let container = container else { return [] }
 
         var result: [StremioAddonEntity] = []
@@ -116,7 +116,7 @@ public final class StremioAddonStore {
         return result
     }
 
-    public func remove(_ addon: StremioAddon) {
+    func remove(_ addon: StremioAddon) {
         guard let container = container else { return }
 
         container.viewContext.performAndWait {
@@ -135,7 +135,7 @@ public final class StremioAddonStore {
         }
     }
 
-    public func save() {
+    func save() {
         guard let container = container else { return }
 
         container.viewContext.performAndWait {

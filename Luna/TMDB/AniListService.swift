@@ -1295,7 +1295,7 @@ final class AniListService {
         tmdbService: TMDBService
     ) async throws -> AniListUserListImport {
         // AniList caps perPage at 50 so we paginate per status
-        func fetchList(status: String, token: String) async throws -> [AniListListEntry] {
+        @Sendable func fetchList(status: String, token: String) async throws -> [AniListListEntry] {
             var entries: [AniListListEntry] = []
             var page = 1
             var hasNext = true
