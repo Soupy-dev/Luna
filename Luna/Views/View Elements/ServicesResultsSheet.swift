@@ -1082,11 +1082,123 @@ struct ModulesSearchResultsSheet: View {
     private func stremioStreamLabel(for stream: StremioStream) -> String {
         var parts: [String] = []
         if let name = stream.name, !name.isEmpty { parts.append(name) }
+
+        // Parse quality info from title lines (Torrentio/Comet format)
         if let title = stream.title, !title.isEmpty {
-            let firstLine = title.components(separatedBy: "\n").first ?? title
-            if firstLine != stream.name { parts.append(firstLine) }
+            let lines = title.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let qualityTags = extractQualityTags(from: lines)
+            if !qualityTags.isEmpty {
+                parts.append(qualityTags)
+            } else if let firstLine = lines.first, firstLine != stream.name {
+                parts.append(firstLine)
+            }
         }
-        return parts.isEmpty ? "Stream" : parts.joined(separator: " – ")
+
+        return parts.isEmpty ? "Stream" : parts.joined(separator: " · ")
+    }
+
+    private func extractQualityTags(from lines: [String]) -> String {
+        let resolutionPatterns = ["4k", "2160p", "1080p", "720p", "480p", "360p"]
+        let qualityPatterns = ["bluray", "blu-ray", "bdrip", "brrip", "dvdrip", "dvd", "webrip", "web-dl", "webdl", "web", "hdtv", "hdrip", "cam", "ts", "hdcam", "remux"]
+        let codecPatterns = ["hevc", "h265", "h.265", "x265", "h264", "h.264", "x264", "av1", "vp9", "xvid"]
+        let hdrPatterns = ["hdr10+", "hdr10", "hdr", "dolby vision", "dv", "sdr"]
+        let audioPatterns = ["atmos", "truehd", "dts-hd", "dts", "dd5.1", "dd+", "aac", "5.1", "7.1"]
+
+        var tags: [String] = []
+        let allText = lines.joined(separator: " ").lowercased()
+
+        // Resolution
+        for pattern in resolutionPatterns {
+            if allText.contains(pattern) {
+                tags.append(pattern == "4k" ? "4K" : pattern.uppercased())
+                break
+            }
+        }
+
+        // Source quality
+        for pattern in qualityPatterns {
+            if allText.contains(pattern) {
+                let display: String
+                switch pattern {
+                case "bluray", "blu-ray": display = "BluRay"
+                case "bdrip": display = "BDRip"
+                case "brrip": display = "BRRip"
+                case "dvdrip": display = "DVDRip"
+                case "dvd": display = "DVD"
+                case "webrip": display = "WEBRip"
+                case "web-dl", "webdl": display = "WEB-DL"
+                case "web": display = "WEB"
+                case "hdtv": display = "HDTV"
+                case "hdrip": display = "HDRip"
+                case "cam": display = "CAM"
+                case "ts": display = "TS"
+                case "hdcam": display = "HDCAM"
+                case "remux": display = "Remux"
+                default: display = pattern.uppercased()
+                }
+                tags.append(display)
+                break
+            }
+        }
+
+        // Codec
+        for pattern in codecPatterns {
+            if allText.contains(pattern) {
+                let display: String
+                switch pattern {
+                case "hevc", "h265", "h.265", "x265": display = "HEVC"
+                case "h264", "h.264", "x264": display = "H.264"
+                case "av1": display = "AV1"
+                default: display = pattern.uppercased()
+                }
+                tags.append(display)
+                break
+            }
+        }
+
+        // HDR
+        for pattern in hdrPatterns {
+            if allText.contains(pattern) {
+                let display: String
+                switch pattern {
+                case "hdr10+": display = "HDR10+"
+                case "hdr10": display = "HDR10"
+                case "hdr": display = "HDR"
+                case "dolby vision", "dv": display = "DV"
+                default: display = pattern.uppercased()
+                }
+                tags.append(display)
+                break
+            }
+        }
+
+        // Audio
+        for pattern in audioPatterns {
+            if allText.contains(pattern) {
+                let display: String
+                switch pattern {
+                case "atmos": display = "Atmos"
+                case "truehd": display = "TrueHD"
+                case "dts-hd": display = "DTS-HD"
+                case "dts": display = "DTS"
+                case "dd5.1": display = "DD5.1"
+                case "dd+": display = "DD+"
+                default: display = pattern
+                }
+                tags.append(display)
+                break
+            }
+        }
+
+        // File size (look for patterns like "2.5 GB", "800 MB")
+        let sizeRegex = try? NSRegularExpression(pattern: #"(\d+(?:\.\d+)?\s*(?:GB|MB|gb|mb))"#)
+        if let match = sizeRegex?.firstMatch(in: lines.joined(separator: " "), range: NSRange(location: 0, length: lines.joined(separator: " ").utf16.count)) {
+            if let range = Range(match.range(at: 1), in: lines.joined(separator: " ")) {
+                tags.append(String(lines.joined(separator: " ")[range]))
+            }
+        }
+
+        return tags.joined(separator: " · ")
     }
 
     // MARK: - Play / Download Stremio Stream
