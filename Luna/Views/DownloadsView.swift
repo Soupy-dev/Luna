@@ -141,6 +141,7 @@ struct DownloadsView: View {
     
     // MARK: - Downloads List
     
+    @ViewBuilder
     private var downloadsList: some View {
         if activeDownloads.isEmpty && failedDownloads.isEmpty {
             VStack(spacing: 16) {
@@ -160,7 +161,7 @@ struct DownloadsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-        List {
+            List {
             if !activeDownloads.isEmpty {
                 Section {
                     ForEach(activeDownloads) { item in
@@ -233,7 +234,7 @@ struct DownloadsView: View {
                     .listRowBackground(Color.clear)
             }
         }
-        .listStyle(.plain)
+            .listStyle(.plain)
         }
     }
     
