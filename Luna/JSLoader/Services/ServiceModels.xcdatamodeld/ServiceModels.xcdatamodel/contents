@@ -8,4 +8,11 @@
         <attribute name="sortIndex" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="url" optional="YES" attributeType="String"/>
     </entity>
+    <entity name="StremioAddonEntity" representedClassName="StremioAddonEntity" syncable="YES">
+        <attribute name="configuredURL" optional="YES" attributeType="String"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="isActive" attributeType="Boolean" defaultValueString="YES" usesScalarValueType="YES"/>
+        <attribute name="manifestJSON" optional="YES" attributeType="String"/>
+        <attribute name="sortIndex" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+    </entity>
 </model>

@@ -524,6 +524,7 @@ struct ContinueWatchingCard: View {
     @State private var originalTitle: String? = nil
     @State private var isMetadataReady = false
     @State private var pendingOpenSheet = false
+    @State private var imdbId: String? = nil
 
     private var cardWidth: CGFloat { isTvOS ? 380 : (isIPad ? 360 : 260) }
     private var cardHeight: CGFloat { isTvOS ? 220 : (isIPad ? 200 : 146) }
@@ -690,7 +691,8 @@ struct ContinueWatchingCard: View {
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: item.tmdbId,
                 animeSeasonTitle: isAnimeContent ? "anime" : nil,
-                posterPath: item.posterURL
+                posterPath: item.posterURL,
+                imdbId: imdbId
             )
         }
         .contextMenu {
@@ -766,6 +768,7 @@ struct ContinueWatchingCard: View {
                         self.logoURL = logo.fullURL
                     }
                     self.originalTitle = romaji
+                    self.imdbId = details.imdbId
                     self.isAnimeContent = false
                     self.isLoaded = true
                     self.isMetadataReady = true
@@ -795,6 +798,7 @@ struct ContinueWatchingCard: View {
                         self.logoURL = logo.fullURL
                     }
                     self.originalTitle = romaji
+                    self.imdbId = details.externalIds?.imdbId
                     self.isLoaded = true
                 }
 

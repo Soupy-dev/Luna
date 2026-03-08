@@ -50,6 +50,17 @@ final class ModulesSearchResultsViewModel: ObservableObject {
     @Published var selectedSeasonIndex = 0
     @Published var pendingEpisodes: [EpisodeLink] = []
     @Published var subtitleOptions: [(title: String, url: String)] = []
+
+    // MARK: - Stremio addon results
+    @Published var stremioResults: [UUID: [StremioStream]] = [:]
+    @Published var stremioSearchedAddons: Set<UUID> = []
+    @Published var stremioFailedAddons: Set<UUID> = []
+    @Published var isSearchingStremio = false
+    @Published var selectedStremioStream: StremioStream? = nil
+    @Published var selectedStremioAddon: StremioAddon? = nil
+    @Published var showingStremioPlayAlert = false
+    @Published var stremioStreamOptions: [StremioStream]? = nil
+    @Published var showingStremioStreamPicker = false
     
     var pendingSubtitles: [String]?
     var pendingService: Service?
@@ -95,6 +106,8 @@ struct ModulesSearchResultsSheet: View {
     /// Non-nil for anime to force E## format
     let animeSeasonTitle: String?
     let posterPath: String?
+    /// IMDB ID for Stremio addon lookups (tt-prefixed)
+    var imdbId: String? = nil
     /// Original TMDB season/episode numbers for anime (before AniList restructuring), used by TheIntroDB.
     var originalTMDBSeasonNumber: Int? = nil
     var originalTMDBEpisodeNumber: Int? = nil
@@ -108,6 +121,7 @@ struct ModulesSearchResultsSheet: View {
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var viewModel = ModulesSearchResultsViewModel()
     @StateObject private var serviceManager = ServiceManager.shared
+    @StateObject private var stremioManager = StremioAddonManager.shared
     @StateObject private var algorithmManager = AlgorithmManager.shared
 
     private var effectiveTitle: String { seasonTitleOverride ?? mediaTitle }
@@ -141,13 +155,15 @@ struct ModulesSearchResultsSheet: View {
     private var mediaTypeColor: Color { isMovie ? .purple : .green }
     
     private var searchStatusText: String {
-        viewModel.isSearching
-        ? "Searching... (\(viewModel.searchedServices.count)/\(viewModel.totalServicesCount))"
-        : "Search complete"
+        let anySearching = viewModel.isSearching || viewModel.isSearchingStremio
+        if anySearching {
+            return "Searching... (\(viewModel.searchedServices.count + viewModel.stremioSearchedAddons.count)/\(viewModel.totalServicesCount + stremioManager.activeAddons.count))"
+        }
+        return "Search complete"
     }
     
     private var searchStatusColor: Color {
-        viewModel.isSearching ? .secondary : .green
+        (viewModel.isSearching || viewModel.isSearchingStremio) ? .secondary : .green
     }
     
     private func lowerQualityResultsText(count: Int) -> String {
@@ -207,7 +223,7 @@ struct ModulesSearchResultsSheet: View {
             
             Spacer()
             
-            if viewModel.isSearching {
+            if viewModel.isSearching || viewModel.isSearchingStremio {
                 HStack(spacing: 8) {
                     ProgressView()
                         .scaleEffect(0.8)
@@ -235,7 +251,7 @@ struct ModulesSearchResultsSheet: View {
                     .font(.headline)
                     .fontWeight(.semibold)
                 
-                Text("You don't have any active services. Please go to the Services tab to download and activate services.")
+                Text("You don't have any active services or Stremio addons. Please go to the Services tab to download and activate services.")
                     .font(.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -583,10 +599,13 @@ struct ModulesSearchResultsSheet: View {
             List {
                 searchInfoSection
                 
-                if serviceManager.activeServices.isEmpty {
+                if serviceManager.activeServices.isEmpty && stremioManager.activeAddons.isEmpty {
                     noActiveServicesSection
                 } else {
-                    servicesResultsSection
+                    if !serviceManager.activeServices.isEmpty {
+                        servicesResultsSection
+                    }
+                    stremioResultsSection
                 }
             }
             .navigationTitle(downloadMode ? "Download Source" : "Services Result")
@@ -654,6 +673,7 @@ struct ModulesSearchResultsSheet: View {
         .overlay(streamFetchingOverlay)
         .onAppear {
             startProgressiveSearch()
+            startStremioSearch()
         }
         .alert("Quality Threshold", isPresented: $viewModel.showingFilterEditor) {
             qualityThresholdAlertContent
@@ -688,6 +708,28 @@ struct ModulesSearchResultsSheet: View {
             if let error = viewModel.streamError {
                 Text(error)
             }
+        }
+        .alert(downloadMode ? "Download Stream" : "Play Stream", isPresented: $viewModel.showingStremioPlayAlert) {
+            Button(actionVerb) {
+                viewModel.showingStremioPlayAlert = false
+                if let stream = viewModel.selectedStremioStream,
+                   let addon = viewModel.selectedStremioAddon {
+                    playStremioStream(stream, addon: addon)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                viewModel.selectedStremioStream = nil
+                viewModel.selectedStremioAddon = nil
+            }
+        } message: {
+            if let stream = viewModel.selectedStremioStream {
+                Text("\(actionVerb) '\(stream.displayName)'?")
+            }
+        }
+        .adaptiveConfirmationDialog("Select Stream", isPresented: $viewModel.showingStremioStreamPicker, titleVisibility: .visible) {
+            stremioStreamPickerContent
+        } message: {
+            stremioStreamPickerMessage
         }
     }
     
@@ -819,6 +861,433 @@ struct ModulesSearchResultsSheet: View {
                 }
             )
         }
+    }
+
+    // MARK: - Stremio Addon Search
+
+    private func startStremioSearch() {
+        let active = stremioManager.activeAddons
+        guard !active.isEmpty else { return }
+
+        viewModel.isSearchingStremio = true
+
+        let type = isMovie ? "movie" : "series"
+        let season = selectedEpisode?.seasonNumber
+        let episode = selectedEpisode?.episodeNumber
+
+        Task {
+            await stremioManager.fetchStreamsFromAddons(
+                tmdbId: tmdbId,
+                imdbId: imdbId,
+                type: type,
+                season: season,
+                episode: episode,
+                onResult: { addon, streams in
+                    Task { @MainActor in
+                        self.viewModel.stremioResults[addon.id] = streams
+                        self.viewModel.stremioSearchedAddons.insert(addon.id)
+                        if streams.isEmpty {
+                            self.viewModel.stremioFailedAddons.insert(addon.id)
+                        }
+                    }
+                },
+                onComplete: {
+                    Task { @MainActor in
+                        self.viewModel.isSearchingStremio = false
+                    }
+                }
+            )
+        }
+    }
+
+    // MARK: - Stremio Results Section
+
+    @ViewBuilder
+    private var stremioResultsSection: some View {
+        ForEach(stremioManager.activeAddons, id: \.id) { addon in
+            stremioAddonSection(addon: addon)
+        }
+    }
+
+    @ViewBuilder
+    private func stremioAddonSection(addon: StremioAddon) -> some View {
+        let streams = viewModel.stremioResults[addon.id]
+        let hasSearched = viewModel.stremioSearchedAddons.contains(addon.id)
+        let isCurrentlySearching = viewModel.isSearchingStremio && !hasSearched
+
+        if let streams = streams {
+            Section(header: stremioAddonHeader(for: addon, streamCount: streams.count, isSearching: false)) {
+                if streams.isEmpty {
+                    noResultsRow
+                } else {
+                    stremioMediaRow(streams: streams, addon: addon)
+                }
+            }
+        } else if isCurrentlySearching {
+            Section(header: stremioAddonHeader(for: addon, streamCount: 0, isSearching: true)) {
+                searchingRow
+            }
+        } else if !viewModel.isSearchingStremio && !hasSearched {
+            Section(header: stremioAddonHeader(for: addon, streamCount: 0, isSearching: false)) {
+                notSearchedRow
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func stremioAddonHeader(for addon: StremioAddon, streamCount: Int, isSearching: Bool) -> some View {
+        HStack {
+            if let logo = addon.manifest.logo, let logoURL = URL(string: logo) {
+                KFImage(logoURL)
+                    .placeholder {
+                        Image(systemName: "play.circle")
+                            .foregroundColor(.secondary)
+                    }
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 20, height: 20)
+            } else {
+                Image(systemName: "play.circle")
+                    .foregroundColor(.secondary)
+                    .frame(width: 20, height: 20)
+            }
+
+            Text(addon.manifest.name)
+                .font(.subheadline)
+                .fontWeight(.medium)
+
+            if viewModel.stremioFailedAddons.contains(addon.id) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .foregroundColor(.red)
+                    .font(.caption)
+                    .padding(.leading, 6)
+            }
+
+            Spacer()
+
+            if isSearching {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 12, height: 12)
+            } else if streamCount > 0 {
+                Text("\(streamCount)")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(Color.green.opacity(0.2))
+                    .foregroundColor(.green)
+                    .cornerRadius(4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func stremioMediaRow(streams: [StremioStream], addon: StremioAddon) -> some View {
+        Button(action: {
+            if streams.count == 1, let stream = streams.first {
+                viewModel.selectedStremioStream = stream
+                viewModel.selectedStremioAddon = addon
+                viewModel.showingStremioPlayAlert = true
+            } else {
+                viewModel.stremioStreamOptions = streams
+                viewModel.selectedStremioAddon = addon
+                viewModel.showingStremioStreamPicker = true
+            }
+        }) {
+            HStack(spacing: 12) {
+                KFImage(posterPath.flatMap { URL(string: "https://image.tmdb.org/t/p/w500\($0)") })
+                    .placeholder {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.gray.opacity(0.2))
+                            .overlay(
+                                Image(systemName: "photo")
+                                    .font(.title2)
+                                    .foregroundColor(.gray)
+                            )
+                    }
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 70, height: 95)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(displayTitle)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .foregroundColor(.primary)
+
+                    if let episode = selectedEpisode {
+                        HStack {
+                            Image(systemName: "tv")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            Text("Episode \(episode.episodeNumber)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            if !episode.name.isEmpty {
+                                Text("• \(episode.name)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+
+                    HStack {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 6, height: 6)
+
+                            Text("\(streams.count) stream\(streams.count == 1 ? "" : "s")")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .foregroundColor(.green)
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "play.circle.fill")
+                            .font(.title2)
+                            .foregroundColor(.accentColor)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    @ViewBuilder
+    private var stremioStreamPickerContent: some View {
+        if let streams = viewModel.stremioStreamOptions {
+            ForEach(streams) { stream in
+                Button {
+                    viewModel.showingStremioStreamPicker = false
+                    if let addon = viewModel.selectedStremioAddon {
+                        playStremioStream(stream, addon: addon)
+                    }
+                } label: {
+                    Text(stremioStreamLabel(for: stream))
+                }
+            }
+        }
+        Button("Cancel", role: .cancel) {
+            viewModel.stremioStreamOptions = nil
+            viewModel.selectedStremioAddon = nil
+        }
+    }
+
+    @ViewBuilder
+    private var stremioStreamPickerMessage: some View {
+        Text("Choose a stream to \(actionVerb.lowercased())")
+    }
+
+    private func stremioStreamLabel(for stream: StremioStream) -> String {
+        var parts: [String] = []
+        if let name = stream.name, !name.isEmpty { parts.append(name) }
+        if let title = stream.title, !title.isEmpty {
+            let firstLine = title.components(separatedBy: "\n").first ?? title
+            if firstLine != stream.name { parts.append(firstLine) }
+        }
+        return parts.isEmpty ? "Stream" : parts.joined(separator: " – ")
+    }
+
+    // MARK: - Play / Download Stremio Stream
+
+    private func playStremioStream(_ stream: StremioStream, addon: StremioAddon) {
+        // SAFETY: Double-check this is a direct HTTP(S) stream - NO torrents allowed
+        guard let urlString = stream.url, stream.isDirectHTTP else {
+            Logger.shared.log("Stremio: SAFETY BLOCK - Rejected non-HTTP stream", type: "Error")
+            return
+        }
+
+        // Gather subtitles from the stream if available
+        let subtitleURL = stream.subtitles?.first(where: { $0.url != nil })?.url
+
+        if downloadMode {
+            downloadStremioStream(urlString, addon: addon, subtitle: subtitleURL, headers: stream.proxyHeaders)
+        } else {
+            playStremioStreamURL(urlString, addon: addon, subtitle: subtitleURL, headers: stream.proxyHeaders)
+        }
+    }
+
+    private func playStremioStreamURL(_ url: String, addon: StremioAddon, subtitle: String?, headers: [String: String]?) {
+        viewModel.resetStreamState()
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+
+            guard let streamURL = URL(string: url) else {
+                Logger.shared.log("Invalid Stremio stream URL: \(url)", type: "Error")
+                viewModel.streamError = "Invalid stream URL from Stremio addon."
+                viewModel.showingStreamError = true
+                return
+            }
+
+            // SAFETY: Verify HTTP(S) scheme - NO torrents, magnet links, or other schemes ever
+            guard streamURL.scheme == "http" || streamURL.scheme == "https" else {
+                Logger.shared.log("Stremio: SAFETY BLOCK - Non-HTTP scheme: \(streamURL.scheme ?? "nil")", type: "Error")
+                return
+            }
+
+            let externalRaw = UserDefaults.standard.string(forKey: "externalPlayer") ?? ExternalPlayer.none.rawValue
+            let external = ExternalPlayer(rawValue: externalRaw) ?? .none
+            let schemeUrl = external.schemeURL(for: url)
+
+            if let scheme = schemeUrl, UIApplication.shared.canOpenURL(scheme) {
+                UIApplication.shared.open(scheme, options: [:], completionHandler: nil)
+                Logger.shared.log("Stremio: Opening external player with scheme: \(scheme)", type: "General")
+                return
+            }
+
+            var finalHeaders: [String: String] = [
+                "User-Agent": URLSession.randomUserAgent
+            ]
+
+            if let custom = headers {
+                for (k, v) in custom {
+                    finalHeaders[k] = v
+                }
+            }
+
+            Logger.shared.log("Stremio: Final headers: \(finalHeaders)", type: "Stream")
+
+            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
+            let inAppPlayer = inAppRaw
+
+            var playerMediaInfo: MediaInfo? = nil
+            let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+            if isMovie {
+                playerMediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL, isAnime: isAnimeContent)
+            } else if let episode = selectedEpisode {
+                playerMediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL, isAnime: isAnimeContent)
+            }
+
+            if inAppPlayer == "mpv" || inAppPlayer == "VLC" {
+                let preset = PlayerPreset.presets.first
+                let subtitleArray: [String]? = subtitle.map { [$0] }
+
+                let pvc = PlayerViewController(
+                    url: streamURL,
+                    preset: preset ?? PlayerPreset(id: .sdrRec709, title: "Default", summary: "", stream: nil, commands: []),
+                    headers: finalHeaders,
+                    subtitles: subtitleArray,
+                    mediaInfo: playerMediaInfo
+                )
+                let isAnimeHint = isAnimeContent || animeSeasonTitle != nil || TrackerManager.shared.cachedAniListId(for: tmdbId) != nil
+                pvc.isAnimeHint = isAnimeHint
+                pvc.originalTMDBSeasonNumber = originalTMDBSeasonNumber
+                pvc.originalTMDBEpisodeNumber = originalTMDBEpisodeNumber
+                pvc.onRequestNextEpisode = { seasonNumber, nextEpisodeNumber in
+                    NotificationCenter.default.post(
+                        name: .requestNextEpisode,
+                        object: nil,
+                        userInfo: [
+                            "tmdbId": tmdbId,
+                            "seasonNumber": seasonNumber,
+                            "episodeNumber": nextEpisodeNumber
+                        ]
+                    )
+                }
+
+                Logger.shared.log("Stremio: presenting \(inAppPlayer) player", type: "Stream")
+                pvc.modalPresentationStyle = .fullScreen
+
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let rootVC = windowScene.windows.first?.rootViewController,
+                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
+                    topmostVC.present(pvc, animated: true, completion: nil)
+                } else {
+                    Logger.shared.log("Failed to find root view controller to present player", type: "Error")
+                }
+                return
+            }
+
+            // Default AVPlayer path
+            let asset = AVURLAsset(url: streamURL, options: ["AVURLAssetHTTPHeaderFieldsKey": finalHeaders])
+            let playerVC = NormalPlayer()
+            let item = AVPlayerItem(asset: asset)
+            playerVC.player = AVPlayer(playerItem: item)
+            if isMovie {
+                playerVC.mediaInfo = .movie(id: tmdbId, title: mediaTitle, posterURL: posterURL, isAnime: isAnimeContent)
+            } else if let episode = selectedEpisode {
+                playerVC.mediaInfo = .episode(showId: tmdbId, seasonNumber: episode.seasonNumber, episodeNumber: episode.episodeNumber, showTitle: mediaTitle, showPosterURL: posterURL, isAnime: isAnimeContent)
+            }
+            playerVC.modalPresentationStyle = .fullScreen
+
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let rootVC = windowScene.windows.first?.rootViewController,
+               let topmostVC = rootVC.topmostViewController() as UIViewController? {
+                topmostVC.present(playerVC, animated: true) {
+                    playerVC.player?.play()
+                }
+            }
+        }
+    }
+
+    private func downloadStremioStream(_ url: String, addon: StremioAddon, subtitle: String?, headers: [String: String]?) {
+        // SAFETY: Verify HTTP(S) URL - NO torrents, magnet links, or other schemes ever
+        guard let parsed = URL(string: url),
+              parsed.scheme == "http" || parsed.scheme == "https" else {
+            Logger.shared.log("Stremio: SAFETY BLOCK - Non-HTTP download URL rejected", type: "Error")
+            return
+        }
+
+        viewModel.resetStreamState()
+
+        var finalHeaders: [String: String] = [
+            "User-Agent": URLSession.randomUserAgent
+        ]
+
+        if let custom = headers {
+            for (k, v) in custom {
+                finalHeaders[k] = v
+            }
+        }
+
+        let posterURL = posterPath.flatMap { "https://image.tmdb.org/t/p/w500\($0)" }
+
+        let displayTitle: String
+        if isMovie {
+            displayTitle = mediaTitle
+        } else if let ep = selectedEpisode {
+            if isAnimeContent || animeSeasonTitle != nil {
+                displayTitle = "\(animeEffectiveTitle) E\(ep.episodeNumber)"
+            } else {
+                displayTitle = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
+            }
+        } else {
+            displayTitle = mediaTitle
+        }
+
+        DownloadManager.shared.enqueueDownload(
+            tmdbId: tmdbId,
+            isMovie: isMovie,
+            title: mediaTitle,
+            displayTitle: displayTitle,
+            posterURL: posterURL,
+            seasonNumber: selectedEpisode?.seasonNumber,
+            episodeNumber: selectedEpisode?.episodeNumber,
+            episodeName: selectedEpisode?.name,
+            streamURL: url,
+            headers: finalHeaders,
+            subtitleURL: subtitle,
+            serviceBaseURL: addon.configuredURL,
+            isAnime: isAnimeContent
+        )
+
+        Logger.shared.log("Stremio: Download enqueued: \(displayTitle)", type: "Download")
+
+        onDownloadEnqueued?()
+        presentationMode.wrappedValue.dismiss()
     }
     
     @ViewBuilder

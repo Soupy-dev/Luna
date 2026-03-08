@@ -10,11 +10,16 @@ import Kingfisher
 
 struct ServicesView: View {
     @StateObject private var serviceManager = ServiceManager.shared
+    @StateObject private var stremioManager = StremioAddonManager.shared
     @Environment(\.editMode) private var editMode
     @State private var showDownloadAlert = false
     @State private var downloadURL = ""
     @State private var showServiceDownloadAlert = false
     @State private var autoUpdateEnabled: Bool = UserDefaults.standard.bool(forKey: "autoUpdateServicesEnabled")
+    @State private var showStremioAddAlert = false
+    @State private var stremioURL = ""
+    @State private var stremioError: String?
+    @State private var showStremioError = false
     
     var body: some View {
         ZStack {
@@ -102,6 +107,50 @@ struct ServicesView: View {
                     serviceManager.moveServices(fromOffsets: indices, toOffset: newOffset)
                 }
             }
+
+            Section(header: stremioSectionHeader) {
+                if stremioManager.addons.isEmpty {
+                    Text("No Stremio addons installed")
+                        .foregroundColor(.secondary)
+                        .font(.subheadline)
+                } else {
+                    ForEach(stremioManager.addons, id: \.id) { addon in
+                        StremioAddonRow(addon: addon, manager: stremioManager)
+                    }
+                    .onDelete(perform: deleteStremioAddons)
+                    .onMove { indices, newOffset in
+                        stremioManager.moveAddons(fromOffsets: indices, toOffset: newOffset)
+                    }
+                }
+            }
+        }
+        .modifier(AddStremioAddonInputModifier(
+            isPresented: $showStremioAddAlert,
+            addonURL: $stremioURL,
+            onAdd: { addStremioAddon() }
+        ))
+        .alert("Stremio Error", isPresented: $showStremioError) {
+            Button("OK", role: .cancel) { stremioError = nil }
+        } message: {
+            if let error = stremioError {
+                Text(error)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var stremioSectionHeader: some View {
+        HStack {
+            Text("Stremio Addons")
+            Spacer()
+            if editMode?.wrappedValue != .active {
+                Button {
+                    showStremioAddAlert = true
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .font(.caption)
+                }
+            }
         }
     }
     
@@ -109,6 +158,31 @@ struct ServicesView: View {
         for index in offsets {
             let service = serviceManager.services[index]
             serviceManager.removeService(service)
+        }
+    }
+
+    private func deleteStremioAddons(offsets: IndexSet) {
+        for index in offsets {
+            let addon = stremioManager.addons[index]
+            stremioManager.removeAddon(addon)
+        }
+    }
+
+    private func addStremioAddon() {
+        guard !stremioURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        Task {
+            do {
+                try await stremioManager.addAddon(from: stremioURL)
+                await MainActor.run {
+                    stremioURL = ""
+                }
+            } catch {
+                await MainActor.run {
+                    stremioError = error.localizedDescription
+                    showStremioError = true
+                }
+            }
         }
     }
     
@@ -266,6 +340,147 @@ private struct AddServiceInputModifier: ViewModifier {
                             ToolbarItem(placement: .cancellationAction) {
                                 Button("Cancel") {
                                     downloadURL = ""
+                                    isPresented = false
+                                }
+                            }
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Add") {
+                                    isPresented = false
+                                    onAdd()
+                                }
+                            }
+                        }
+                        #endif
+                    }
+                }
+        }
+    }
+}
+
+// MARK: - Stremio Addon Row
+
+struct StremioAddonRow: View {
+    let addon: StremioAddon
+    @ObservedObject var manager: StremioAddonManager
+
+    private var isAddonActive: Bool {
+        if let managed = manager.addons.first(where: { $0.id == addon.id }) {
+            return managed.isActive
+        }
+        return addon.isActive
+    }
+
+    var body: some View {
+        HStack {
+            if let logo = addon.manifest.logo, let logoURL = URL(string: logo) {
+                KFImage(logoURL)
+                    .placeholder {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.gray.opacity(0.2))
+                            .overlay(
+                                Image(systemName: "play.circle")
+                                    .foregroundColor(.secondary)
+                            )
+                    }
+                    .resizable()
+                    .frame(width: 40, height: 40)
+                    .clipShape(Circle())
+                    .padding(.trailing, 10)
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.gray.opacity(0.2))
+                    .overlay(
+                        Image(systemName: "play.circle")
+                            .foregroundColor(.secondary)
+                    )
+                    .frame(width: 40, height: 40)
+                    .clipShape(Circle())
+                    .padding(.trailing, 10)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(addon.manifest.name)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                HStack(spacing: 8) {
+                    if let version = addon.manifest.version {
+                        Text("v\(version)")
+                            .font(.caption)
+                            .foregroundStyle(.gray)
+                    }
+
+                    if let desc = addon.manifest.description, !desc.isEmpty {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundStyle(.gray)
+
+                        Text(desc)
+                            .font(.caption)
+                            .foregroundStyle(.gray)
+                            .lineLimit(1)
+                    }
+                }
+            }
+
+            Spacer()
+
+            if isAddonActive {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 20, height: 20)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                manager.setAddonState(addon, isActive: !isAddonActive)
+            }
+        }
+    }
+}
+
+// MARK: - iOS 15 compatible Add Stremio Addon input
+
+private struct AddStremioAddonInputModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    @Binding var addonURL: String
+    var onAdd: () -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 16, *) {
+            content
+                .alert("Add Stremio Addon", isPresented: $isPresented) {
+                    TextField("Addon URL", text: $addonURL)
+                    Button("Cancel", role: .cancel) {
+                        addonURL = ""
+                    }
+                    Button("Add") {
+                        onAdd()
+                    }
+                } message: {
+                    Text("Enter the Stremio addon manifest URL")
+                }
+        } else {
+            content
+                .sheet(isPresented: $isPresented) {
+                    NavigationView {
+                        Form {
+                            Section {
+                                TextField("Addon URL", text: $addonURL)
+                                    .autocapitalization(.none)
+                                    .disableAutocorrection(true)
+                            } header: {
+                                Text("Enter the Stremio addon manifest URL")
+                            }
+                        }
+                        .navigationTitle("Add Stremio Addon")
+                        #if !os(tvOS)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Cancel") {
+                                    addonURL = ""
                                     isPresented = false
                                 }
                             }

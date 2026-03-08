@@ -153,7 +153,8 @@ struct MediaDetailView: View {
                 selectedEpisode: selectedEpisodeForSearch,
                 tmdbId: searchResult.id,
                 animeSeasonTitle: isAnimeShow ? "anime" : nil,
-                posterPath: searchResult.isMovie ? movieDetail?.posterPath : tvShowDetail?.posterPath
+                posterPath: searchResult.isMovie ? movieDetail?.posterPath : tvShowDetail?.posterPath,
+                imdbId: searchResult.isMovie ? movieDetail?.imdbId : tvShowDetail?.externalIds?.imdbId
             )
         }
         .sheet(isPresented: $showingDownloadSheet) {
@@ -179,6 +180,7 @@ struct MediaDetailView: View {
                 tmdbId: searchResult.id,
                 animeSeasonTitle: isAnimeShow ? "anime" : nil,
                 posterPath: searchResult.isMovie ? movieDetail?.posterPath : tvShowDetail?.posterPath,
+                imdbId: searchResult.isMovie ? movieDetail?.imdbId : tvShowDetail?.externalIds?.imdbId,
                 downloadMode: true
             )
         }

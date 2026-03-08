@@ -268,6 +268,29 @@ struct TMDBMovieDetail: Codable, Identifiable {
     }
 }
 
+// MARK: - External IDs (for IMDB lookup)
+struct TMDBExternalIds: Codable {
+    let imdbId: String?
+    let freebaseMid: String?
+    let freebaseId: String?
+    let tvdbId: Int?
+    let tvrageId: Int?
+    let facebookId: String?
+    let instagramId: String?
+    let twitterId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case imdbId = "imdb_id"
+        case freebaseMid = "freebase_mid"
+        case freebaseId = "freebase_id"
+        case tvdbId = "tvdb_id"
+        case tvrageId = "tvrage_id"
+        case facebookId = "facebook_id"
+        case instagramId = "instagram_id"
+        case twitterId = "twitter_id"
+    }
+}
+
 // MARK: - TV Show Detail Model
 struct TMDBTVShowDetail: Codable, Identifiable {
     let id: Int
@@ -294,6 +317,7 @@ struct TMDBTVShowDetail: Codable, Identifiable {
     let originCountry: [String]?
     let type: String?
     let contentRatings: TMDBContentRatings?
+    let externalIds: TMDBExternalIds?
     
     enum CodingKeys: String, CodingKey {
         case id, name, overview, popularity, genres, tagline, status, adult, languages, type
@@ -311,6 +335,7 @@ struct TMDBTVShowDetail: Codable, Identifiable {
         case inProduction = "in_production"
         case originCountry = "origin_country"
         case contentRatings = "content_ratings"
+        case externalIds = "external_ids"
     }
     
     var fullPosterURL: String? {
@@ -450,6 +475,7 @@ struct TMDBTVShowWithSeasons: Codable, Identifiable {
     let type: String?
     let seasons: [TMDBSeason]
     let contentRatings: TMDBContentRatings?
+    let externalIds: TMDBExternalIds?
     
     enum CodingKeys: String, CodingKey {
         case id, name, overview, popularity, genres, tagline, status, adult, languages, type, seasons
@@ -467,6 +493,7 @@ struct TMDBTVShowWithSeasons: Codable, Identifiable {
         case inProduction = "in_production"
         case originCountry = "origin_country"
         case contentRatings = "content_ratings"
+        case externalIds = "external_ids"
     }
     
     var fullPosterURL: String? {

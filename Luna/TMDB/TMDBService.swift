@@ -114,7 +114,7 @@ class TMDBService: ObservableObject {
     
     // MARK: - Get TV Show Details
     func getTVShowDetails(id: Int) async throws -> TMDBTVShowDetail {
-        let urlString = "\(baseURL)/tv/\(id)?api_key=\(apiKey)&language=\(currentLanguage)&append_to_response=content_ratings"
+        let urlString = "\(baseURL)/tv/\(id)?api_key=\(apiKey)&language=\(currentLanguage)&append_to_response=content_ratings,external_ids"
         
         guard let url = URL(string: urlString) else {
             throw TMDBError.invalidURL
@@ -131,7 +131,7 @@ class TMDBService: ObservableObject {
     
     // MARK: - Get TV Show with Seasons
     func getTVShowWithSeasons(id: Int) async throws -> TMDBTVShowWithSeasons {
-        let urlString = "\(baseURL)/tv/\(id)?api_key=\(apiKey)&language=\(currentLanguage)&append_to_response=content_ratings"
+        let urlString = "\(baseURL)/tv/\(id)?api_key=\(apiKey)&language=\(currentLanguage)&append_to_response=content_ratings,external_ids"
         
         guard let url = URL(string: urlString) else {
             throw TMDBError.invalidURL

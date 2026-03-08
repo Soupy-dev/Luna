@@ -159,6 +159,7 @@ struct TVShowSeasonsSection: View {
                 tmdbId: tvShow?.id ?? 0,
                 animeSeasonTitle: isAnime ? currentSeasonTitle : nil,
                 posterPath: tvShow?.posterPath,
+                imdbId: tvShow?.externalIds?.imdbId,
                 originalTMDBSeasonNumber: originalTMDBNumbers?.season,
                 originalTMDBEpisodeNumber: originalTMDBNumbers?.episode
             )
@@ -193,6 +194,7 @@ struct TVShowSeasonsSection: View {
                 tmdbId: tvShow?.id ?? 0,
                 animeSeasonTitle: isAnime ? currentSeasonTitle : nil,
                 posterPath: tvShow?.posterPath,
+                imdbId: tvShow?.externalIds?.imdbId,
                 originalTMDBSeasonNumber: originalTMDBNumbers?.season,
                 originalTMDBEpisodeNumber: originalTMDBNumbers?.episode,
                 downloadMode: true,
