@@ -24,7 +24,7 @@ struct ServicesView: View {
     var body: some View {
         ZStack {
             VStack {
-                if serviceManager.services.isEmpty {
+                if serviceManager.services.isEmpty && stremioManager.addons.isEmpty {
                     emptyStateView
                 } else {
                     servicesList
@@ -33,16 +33,6 @@ struct ServicesView: View {
             .navigationTitle("Services")
 #if !os(tvOS)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    if editMode?.wrappedValue != .active {
-                        Button {
-                            showDownloadAlert = true
-                        } label: {
-                            Image(systemName: "plus.app")
-                        }
-                    }
-                }
-                
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         withAnimation {
@@ -86,6 +76,32 @@ struct ServicesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
+    /// A tagged union so services and Stremio addons can share one reorderable list.
+    private enum UnifiedItem: Identifiable {
+        case service(Service)
+        case stremio(StremioAddon)
+
+        var id: UUID {
+            switch self {
+            case .service(let s): return s.id
+            case .stremio(let a): return a.id
+            }
+        }
+
+        var sortIndex: Int64 {
+            switch self {
+            case .service(let s): return s.sortIndex
+            case .stremio(let a): return a.sortIndex
+            }
+        }
+    }
+
+    private var unifiedItems: [UnifiedItem] {
+        let services: [UnifiedItem] = serviceManager.services.map { .service($0) }
+        let addons: [UnifiedItem] = stremioManager.addons.map { .stremio($0) }
+        return (services + addons).sorted { $0.sortIndex < $1.sortIndex }
+    }
+
     @ViewBuilder
     private var servicesList: some View {
         List {
@@ -98,29 +114,22 @@ struct ServicesView: View {
                 Text("Automatically check for service updates when the app is opened.")
             }
 
-            Section {
-                ForEach(serviceManager.services, id: \.id) { service in
-                    ServiceRow(service: service, serviceManager: serviceManager)
-                }
-                .onDelete(perform: deleteServices)
-                .onMove { indices, newOffset in
-                    serviceManager.moveServices(fromOffsets: indices, toOffset: newOffset)
-                }
-            }
-
-            Section(header: stremioSectionHeader) {
-                if stremioManager.addons.isEmpty {
-                    Text("No Stremio addons installed")
+            Section(header: unifiedSectionHeader) {
+                if serviceManager.services.isEmpty && stremioManager.addons.isEmpty {
+                    Text("No services or addons installed")
                         .foregroundColor(.secondary)
                         .font(.subheadline)
                 } else {
-                    ForEach(stremioManager.addons, id: \.id) { addon in
-                        StremioAddonRow(addon: addon, manager: stremioManager)
+                    ForEach(unifiedItems) { item in
+                        switch item {
+                        case .service(let service):
+                            ServiceRow(service: service, serviceManager: serviceManager)
+                        case .stremio(let addon):
+                            StremioAddonRow(addon: addon, manager: stremioManager)
+                        }
                     }
-                    .onDelete(perform: deleteStremioAddons)
-                    .onMove { indices, newOffset in
-                        stremioManager.moveAddons(fromOffsets: indices, toOffset: newOffset)
-                    }
+                    .onDelete(perform: deleteUnifiedItems)
+                    .onMove(perform: moveUnifiedItems)
                 }
             }
         }
@@ -139,13 +148,22 @@ struct ServicesView: View {
     }
 
     @ViewBuilder
-    private var stremioSectionHeader: some View {
+    private var unifiedSectionHeader: some View {
         HStack {
-            Text("Stremio Addons")
+            Text("Services & Addons")
             Spacer()
             if editMode?.wrappedValue != .active {
-                Button {
-                    showStremioAddAlert = true
+                Menu {
+                    Button {
+                        showDownloadAlert = true
+                    } label: {
+                        Label("Add Service", systemImage: "doc.badge.plus")
+                    }
+                    Button {
+                        showStremioAddAlert = true
+                    } label: {
+                        Label("Add Stremio Addon", systemImage: "play.circle")
+                    }
                 } label: {
                     Image(systemName: "plus.circle")
                         .font(.caption)
@@ -153,21 +171,46 @@ struct ServicesView: View {
             }
         }
     }
+
+    private func deleteUnifiedItems(offsets: IndexSet) {
+        let items = unifiedItems
+        for index in offsets {
+            switch items[index] {
+            case .service(let service):
+                serviceManager.removeService(service)
+            case .stremio(let addon):
+                stremioManager.removeAddon(addon)
+            }
+        }
+    }
+
+    private func moveUnifiedItems(fromOffsets: IndexSet, toOffset: Int) {
+        var items = unifiedItems
+        items.move(fromOffsets: fromOffsets, toOffset: toOffset)
+
+        // Persist new sortIndex for each item across both stores
+        let serviceEntities = ServiceStore.shared.getEntities()
+        let stremioEntities = StremioAddonStore.shared.getEntities()
+
+        for (index, item) in items.enumerated() {
+            switch item {
+            case .service(let service):
+                if let entity = serviceEntities.first(where: { $0.id == service.id }) {
+                    entity.sortIndex = Int64(index)
+                }
+            case .stremio(let addon):
+                if let entity = stremioEntities.first(where: { $0.id == addon.id }) {
+                    entity.sortIndex = Int64(index)
+                }
+            }
+        }
+
+        ServiceStore.shared.save()
+        StremioAddonStore.shared.save()
+        serviceManager.loadServicesFromCloud()
+        stremioManager.loadAddons()
+    }
     
-    private func deleteServices(offsets: IndexSet) {
-        for index in offsets {
-            let service = serviceManager.services[index]
-            serviceManager.removeService(service)
-        }
-    }
-
-    private func deleteStremioAddons(offsets: IndexSet) {
-        for index in offsets {
-            let addon = stremioManager.addons[index]
-            stremioManager.removeAddon(addon)
-        }
-    }
-
     private func addStremioAddon() {
         guard !stremioURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 

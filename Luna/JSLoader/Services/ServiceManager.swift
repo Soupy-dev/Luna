@@ -332,7 +332,7 @@ class ServiceManager: ObservableObject {
         return jsContent
     }
 
-    private func loadServicesFromCloud() {
+    func loadServicesFromCloud() {
         services = ServiceStore.shared.getServices()
     }
 
