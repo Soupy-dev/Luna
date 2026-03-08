@@ -17,8 +17,6 @@ struct DownloadsView: View {
     @State private var seriesToDelete: (tmdbId: Int, title: String)? = nil
     @State private var selectedTab: DownloadsTab = .downloads
     
-    private let completedDisplayLimit = 25
-    
     private enum DownloadsTab: String, CaseIterable {
         case downloads = "Downloads"
         case library = "Library"
@@ -144,6 +142,24 @@ struct DownloadsView: View {
     // MARK: - Downloads List
     
     private var downloadsList: some View {
+        if activeDownloads.isEmpty && failedDownloads.isEmpty {
+            VStack(spacing: 16) {
+                Image(systemName: "checkmark.circle")
+                    .font(.system(size: 48))
+                    .foregroundColor(.secondary.opacity(0.5))
+                
+                Text("No Active Downloads")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
+                
+                Text("Completed downloads can be found\nin the Library tab.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary.opacity(0.7))
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
         List {
             if !activeDownloads.isEmpty {
                 Section {
@@ -212,43 +228,13 @@ struct DownloadsView: View {
                 }
             }
             
-            if !completedDownloads.isEmpty {
-                Section {
-                    ForEach(Array(completedDownloads.prefix(completedDisplayLimit))) { item in
-                        completedDownloadRow(item)
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                            .listRowBackground(Color.clear)
-#if os(iOS)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    downloadManager.removeDownload(id: item.id, deleteFile: true)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                if downloadManager.localFileURL(for: item) != nil {
-                                    Button {
-                                        shareDownloadedItem(item)
-                                    } label: {
-                                        Label("Share", systemImage: "square.and.arrow.up")
-                                    }
-                                    .tint(.blue)
-                                }
-                            }
-#endif
-                    }
-                } header: {
-                    sectionHeader("Completed", count: completedDownloads.count)
-                }
-            }
-            
             Section {
                 storageFooter
                     .listRowBackground(Color.clear)
             }
         }
         .listStyle(.plain)
+        }
     }
     
     // MARK: - Section Header
