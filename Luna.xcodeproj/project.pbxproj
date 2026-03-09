@@ -159,6 +159,7 @@
 		FDD444012F40000000FDD441 /* MangaAddToCollectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDD444002F40000000FDD440 /* MangaAddToCollectionView.swift */; };
 		FEE555012F40000000FEE551 /* MangaCreateCollectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEE555002F40000000FEE550 /* MangaCreateCollectionView.swift */; };
 		FFF666012F40000000FFF661 /* MangaCollectionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFF666002F40000000FFF660 /* MangaCollectionDetailView.swift */; };
+		GG1111012F60000000GG1111 /* NovelReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GG1111002F60000000GG1110 /* NovelReaderView.swift */; };
 
 /* Begin PBXCopyFilesBuildPhase section */
 		12F745372EB539F000889684 /* Embed Frameworks */ = {
@@ -326,6 +327,7 @@
 		FDD444002F40000000FDD440 /* MangaAddToCollectionView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MangaAddToCollectionView.swift; sourceTree = "<group>"; };
 		FEE555002F40000000FEE550 /* MangaCreateCollectionView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MangaCreateCollectionView.swift; sourceTree = "<group>"; };
 		FFF666002F40000000FFF660 /* MangaCollectionDetailView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MangaCollectionDetailView.swift; sourceTree = "<group>"; };
+		GG1111002F60000000GG1110 /* NovelReaderView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovelReaderView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -528,6 +530,7 @@
 			isa = PBXGroup;
 			children = (
 				13E1EDB72ED9E65F00087629 /* readerManagerView.swift */,
+				GG1111002F60000000GG1110 /* NovelReaderView.swift */,
 				13E1EDB82ED9E65F00087629 /* utils */,
 				13E1EDBB2ED9E65F00087629 /* Paged */,
 				13E1EDBD2ED9E65F00087629 /* WebToon */,
@@ -1146,6 +1149,7 @@
 				FDD444012F40000000FDD441 /* MangaAddToCollectionView.swift in Sources */,
 				FEE555012F40000000FEE551 /* MangaCreateCollectionView.swift in Sources */,
 				FFF666012F40000000FFF661 /* MangaCollectionDetailView.swift in Sources */,
+				GG1111012F60000000GG1111 /* NovelReaderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
