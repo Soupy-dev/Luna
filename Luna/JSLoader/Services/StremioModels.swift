@@ -87,6 +87,39 @@ struct StremioResourceDetail: Codable {
 
 struct StremioStreamResponse: Codable {
     let streams: [StremioStream]?
+
+    enum CodingKeys: String, CodingKey {
+        case streams
+    }
+
+    /// Lossy decoding: skips individual streams that fail to decode instead of
+    /// dropping the entire array (the default Codable behaviour).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Try decoding each element individually; skip failures
+        if var unkeyedContainer = try? container.nestedUnkeyedContainer(forKey: .streams) {
+            var decoded = [StremioStream]()
+            while !unkeyedContainer.isAtEnd {
+                if let stream = try? unkeyedContainer.decode(StremioStream.self) {
+                    decoded.append(stream)
+                } else {
+                    // Skip the bad element so the container advances
+                    _ = try? unkeyedContainer.decode(AnyCodable.self)
+                }
+            }
+            streams = decoded.isEmpty ? nil : decoded
+        } else {
+            streams = nil
+        }
+    }
+}
+
+/// Throwaway type used only to advance the unkeyed container past a bad element.
+private struct AnyCodable: Codable {
+    init(from decoder: Decoder) throws {
+        _ = try? decoder.singleValueContainer().decode(String.self)
+    }
+    func encode(to encoder: Encoder) throws {}
 }
 
 struct StremioStream: Codable, Identifiable {
@@ -111,8 +144,9 @@ struct StremioStream: Codable, Identifiable {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         description = try container.decodeIfPresent(String.self, forKey: .description)
-        behaviorHints = try container.decodeIfPresent(StremioStreamBehaviorHints.self, forKey: .behaviorHints)
-        subtitles = try container.decodeIfPresent([StremioSubtitle].self, forKey: .subtitles)
+        // Use try? so unexpected shapes don't kill the whole stream
+        behaviorHints = try? container.decodeIfPresent(StremioStreamBehaviorHints.self, forKey: .behaviorHints)
+        subtitles = try? container.decodeIfPresent([StremioSubtitle].self, forKey: .subtitles)
         id = url ?? infoHash ?? UUID().uuidString
     }
 
@@ -141,6 +175,25 @@ struct StremioStreamBehaviorHints: Codable {
     let bingeGroup: String?
     let proxyHeaders: StremioProxyHeaders?
     let filename: String?
+
+    enum CodingKeys: String, CodingKey {
+        case notWebReady, bingeGroup, proxyHeaders, filename
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // notWebReady can arrive as Bool, Int, or String from various addons
+        if let b = try? container.decodeIfPresent(Bool.self, forKey: .notWebReady) {
+            notWebReady = b
+        } else if let i = try? container.decodeIfPresent(Int.self, forKey: .notWebReady) {
+            notWebReady = i != 0
+        } else {
+            notWebReady = nil
+        }
+        bingeGroup = try? container.decodeIfPresent(String.self, forKey: .bingeGroup)
+        proxyHeaders = try? container.decodeIfPresent(StremioProxyHeaders.self, forKey: .proxyHeaders)
+        filename = try? container.decodeIfPresent(String.self, forKey: .filename)
+    }
 }
 
 struct StremioProxyHeaders: Codable {
@@ -151,6 +204,24 @@ struct StremioSubtitle: Codable {
     let id: String?
     let url: String?
     let lang: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, url, lang
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Some addons return subtitle id as an integer
+        if let s = try? container.decodeIfPresent(String.self, forKey: .id) {
+            id = s
+        } else if let i = try? container.decodeIfPresent(Int.self, forKey: .id) {
+            id = String(i)
+        } else {
+            id = nil
+        }
+        url = try? container.decodeIfPresent(String.self, forKey: .url)
+        lang = try? container.decodeIfPresent(String.self, forKey: .lang)
+    }
 }
 
 // MARK: - Stremio Addon Model (persisted)

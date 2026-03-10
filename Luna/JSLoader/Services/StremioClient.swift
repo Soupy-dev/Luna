@@ -76,8 +76,20 @@ final class StremioClient {
             throw StremioError.httpError(statusCode)
         }
 
-        let streamResponse = try decoder.decode(StremioStreamResponse.self, from: data)
+        let streamResponse: StremioStreamResponse
+        do {
+            streamResponse = try decoder.decode(StremioStreamResponse.self, from: data)
+        } catch {
+            // Log partial body so we can diagnose format mismatches
+            let preview = String(data: data.prefix(512), encoding: .utf8) ?? "<binary>"
+            Logger.shared.log("Stremio: Decode FAILED for \(cleanBase) — \(error.localizedDescription) body=\(preview)", type: "Stremio")
+            throw error
+        }
         let allStreams = streamResponse.streams ?? []
+
+        if allStreams.isEmpty, let preview = String(data: data.prefix(512), encoding: .utf8) {
+            Logger.shared.log("Stremio: 0 streams decoded from \(cleanBase) — body=\(preview)", type: "Stremio")
+        }
 
         // SAFETY: Filter out any stream that is NOT a direct HTTP(S) link.
         // This ensures NO torrent (infoHash-only) streams ever reach the user.
