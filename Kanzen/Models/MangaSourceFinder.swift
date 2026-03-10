@@ -124,10 +124,10 @@ final class MangaSourceFinder: ObservableObject {
             engine.searchInput(title, page: 0) { results in
                 if let results = results {
                     let mangas = results.compactMap { dict -> Manga? in
-                        guard let t = dict["title"] as? String,
-                              let imageURL = dict["imageURL"] as? String,
-                              let mangaId = dict["id"] as? String
-                        else { return nil }
+                        guard let t = dict["title"] as? String else { return nil }
+                        let imageURL = (dict["imageURL"] as? String) ?? (dict["image"] as? String) ?? ""
+                        let mangaId = (dict["id"] as? String) ?? (dict["href"] as? String) ?? ""
+                        guard !mangaId.isEmpty else { return nil }
                         return Manga(title: t, imageURL: imageURL, mangaId: mangaId, parentModule: module)
                     }
 

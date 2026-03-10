@@ -38,12 +38,10 @@ struct KanzenSearchView: View {
                     return
                 }
                 let item = result.compactMap{ dict -> Manga? in
-                    guard
-                        
-                        let title = dict["title"] as? String,
-                        let imageURL = dict["imageURL"] as? String,
-                        let mangaId = dict["id"] as? String
-                    else {  print(dict) ; print("error formating search Output") ;return nil }
+                    guard let title = dict["title"] as? String else { print(dict) ; print("error formating search Output") ; return nil }
+                    let imageURL = (dict["imageURL"] as? String) ?? (dict["image"] as? String) ?? ""
+                    let mangaId = (dict["id"] as? String) ?? (dict["href"] as? String) ?? ""
+                    guard !mangaId.isEmpty else { print(dict) ; print("error formating search Output") ; return nil }
                     return Manga(title: title, imageURL: imageURL, mangaId: mangaId,parentModule: module)
                     
                 }
