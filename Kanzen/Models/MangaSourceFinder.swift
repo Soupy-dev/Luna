@@ -106,7 +106,8 @@ final class MangaSourceFinder: ObservableObject {
         let engine = KanzenEngine()
         do {
             let script = try ModuleManager.shared.getModuleScript(module: module)
-            try engine.loadScript(script)
+            let isNovel = module.moduleData.novel == true
+            try engine.loadScript(script, isNovel: isNovel)
         } catch {
             Logger.shared.log("SourceFinder: Failed to load module \(module.moduleData.sourceName): \(error.localizedDescription)", type: "Error")
             completion([])
@@ -188,7 +189,8 @@ final class MangaSourceFinder: ObservableObject {
             let engine = KanzenEngine()
             do {
                 let script = try ModuleManager.shared.getModuleScript(module: candidate.module)
-                try engine.loadScript(script)
+                let isNovel = candidate.module.moduleData.novel == true
+                try engine.loadScript(script, isNovel: isNovel)
             } catch {
                 lock.lock()
                 refined.append(candidate)

@@ -673,7 +673,8 @@ struct MangaDetailView: View {
         let engine = KanzenEngine()
         do {
             let script = try ModuleManager.shared.getModuleScript(module: match.module)
-            try engine.loadScript(script)
+            let isNovel = match.module.moduleData.novel == true
+            try engine.loadScript(script, isNovel: isNovel)
         } catch {
             loadingChapters = false
             chapterLoadError = "Failed to load module: \(error.localizedDescription)"

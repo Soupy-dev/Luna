@@ -30,7 +30,8 @@ struct favouriteViewWrapper: View {
                     if let module = currModule {
                         do {
                             let content = try ModuleManager.shared.getModuleScript(module: module)
-                            try kanzen.loadScript(content)
+                            let isNovel = module.moduleData.novel == true
+                            try kanzen.loadScript(content, isNovel: isNovel)
                             self.moduleLoaded = true
                         }
                         catch{

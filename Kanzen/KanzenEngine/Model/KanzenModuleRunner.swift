@@ -219,7 +219,7 @@ class KanzenModuleRunner
         promise.invokeMethod("catch", withArguments: [rejectCallback as Any])
     }
     
-    func setUpEnvironMent()
+    func setUpEnvironMent(isNovel: Bool = false)
     {
         jsContext = JSContext()
         jsContext?.exceptionHandler = { _, exception in
@@ -227,14 +227,18 @@ class KanzenModuleRunner
             Logger.shared.log( "JS Error: \(exception?.toString() ?? "unknown error")",type: "Error")
             self.lastJSException = "JS Error: \(exception?.toString() ?? "unknown error")"
         }
-        jsContext?.setUpJSEnvirontment()
+        if isNovel {
+            jsContext?.setUpNovelJSEnvironment()
+        } else {
+            jsContext?.setUpJSEnvirontment()
+        }
     }
     
-    func loadScript(_ script: String) throws
+    func loadScript(_ script: String, isNovel: Bool = false) throws
     {
         
             lastJSException = nil
-            setUpEnvironMent()
+            setUpEnvironMent(isNovel: isNovel)
             jsContext?.evaluateScript(script)
 
         

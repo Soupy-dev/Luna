@@ -15,8 +15,8 @@ class KanzenEngine: ObservableObject
         self.controller = KanzenRunnerController(moduleRunner: moduleRunner)
     }
     
-    func loadScript(_ script: String) throws {
-        try self.controller.loadScript(_script: script)
+    func loadScript(_ script: String, isNovel: Bool = false) throws {
+        try self.controller.loadScript(_script: script, isNovel: isNovel)
     }
     
     func extractDetails(params:Any, completion: @escaping ([String:Any]?) -> Void)

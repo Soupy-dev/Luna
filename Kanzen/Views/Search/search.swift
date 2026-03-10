@@ -110,7 +110,8 @@ struct KanzenSearchView: View {
                 do {
                     if let module = module {
                         let content = try moduleManager.getModuleScript(module: module)
-                        try kanzen.loadScript(content)
+                        let isNovel = module.moduleData.novel == true
+                        try kanzen.loadScript(content, isNovel: isNovel)
                     }
                     // Auto-search if searchText is pre-filled
                     if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && searchArray.isEmpty {

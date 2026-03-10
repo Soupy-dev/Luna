@@ -13,9 +13,9 @@ class KanzenRunnerController {
         self.moduleRunner = moduleRunner
     }
     
-    func loadScript(_script: String) throws
+    func loadScript(_script: String, isNovel: Bool = false) throws
     {
-        try moduleRunner.loadScript(_script)
+        try moduleRunner.loadScript(_script, isNovel: isNovel)
     }
     
     func extractImages(params:Any,completion: @escaping ([String]?) -> Void)

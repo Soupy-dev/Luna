@@ -12,12 +12,14 @@ extension JSContext
 {
     func setupTimeOut()
     {
+        // Define `setTimeout` in Swift
         let setTimeout: @convention(block) (JSValue, Double) -> Void = { callback, delay in
-            let delayTime = DispatchTime.now() + delay / 1000.0
+            let delayTime = DispatchTime.now() + delay / 1000.0  // Convert ms to seconds
             DispatchQueue.main.asyncAfter(deadline: delayTime) {
                 callback.call(withArguments: [])
             }
         }
+        // Inject `setTimeout` into JSContext
         self.setObject(setTimeout, forKeyedSubscript: "setTimeout" as (NSCopying & NSObjectProtocol))
     }
     
@@ -35,11 +37,148 @@ extension JSContext
         } catch {
             Logger.shared.log("Error loading bundle.js: \(error)")
         }
+        
     }
     
-    // MARK: - Console (Sora-compatible)
+    // MARK: - Console (manga)
     
     func setUpConsole()
+    {
+        let consoleObject = JSValue(newObjectIn: self)
+        let consoleLogFunction: @convention(block) (String) -> Void = {
+            message in
+            Logger.shared.log(message,type: "Debug")
+        }
+        let consolePrintFunction: @convention(block) (JSValue) -> Void = {
+            message in
+            print(message)
+        }
+        
+        consoleObject?.setObject(consoleLogFunction, forKeyedSubscript: "log" as NSString)
+        consoleObject?.setObject(consolePrintFunction, forKeyedSubscript: "print" as NSString)
+        self.setObject(consoleObject, forKeyedSubscript: "console" as NSString)
+    }
+    
+    // MARK: - Fetch (manga: resolves with response object)
+    
+    func setUpFetch()
+    {
+        let fetch: @convention(block) (JSValue,JSValue) -> JSValue = {
+            jsUrl, jsOptions in
+            guard let urlStr = jsUrl.toString(), let url = URL(string: urlStr) else
+            {
+                return JSValue(newErrorFromMessage: "Invalid URL", in: self)
+            }
+            
+            guard let _ = self.objectForKeyedSubscript("Promise") else
+            {
+                fatalError("Promise constructor not found in JSContext")
+            }
+            
+            let executor: @convention(block) (@escaping (JSValue) -> Void, @escaping (JSValue) -> Void) -> Void = { resolve, reject in
+                var request  = URLRequest(url: url)
+                request.httpMethod = "GET"
+                if let options = jsOptions.toDictionary() as? [String: Any]
+                {
+                    if let method = options["method"] as? String
+                    {
+                        request.httpMethod = method.uppercased()
+                    }
+                    if let headers = options["headers"] as? [String: String]
+                    {
+                        for (key,value) in headers
+                        {
+                            request.addValue(value, forHTTPHeaderField: key)
+                        }
+                    }
+                    if let body = options["body"] as? String
+                    {
+                        let bodyData = body.data(using: .utf8)
+                        request.httpBody = bodyData
+                    }
+                }
+                
+                let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                    
+                    if let error = error
+                    {
+                        return reject(JSValue(newErrorFromMessage: error.localizedDescription, in: self))
+                    }
+                    guard let  httpResponse = response as? HTTPURLResponse
+                    else
+                    {
+                        reject(JSValue(newErrorFromMessage: "No Response", in: self ))
+                        return
+                    }
+                    let textFunc: @convention(block) () -> String = {
+                        if let data = data
+                        {
+                            return String(data: data, encoding: .utf8) ?? ""
+                        }
+                        return ""
+                    }
+                    let jsonFunc: @convention(block) () -> JSValue = {
+                        if let data = data {
+                            do{
+                                let json = try JSONSerialization.jsonObject(with: data, options: [])
+                                return JSValue(object: json, in: self)
+                            }
+                            catch
+                            {
+                                Logger.shared.log("JSON serialization failed",type:"Error")
+                            }
+                        }
+                        return JSValue(newErrorFromMessage: "No Data", in: self)
+                        
+                    }
+                    guard let textJs = JSValue(object: textFunc, in: self),
+                          let jsonJs = JSValue(object: jsonFunc, in: self)
+                    else
+                    {
+                        return reject(JSValue(newErrorFromMessage: "Failed to create JSValue", in: self))
+                    }
+                    let responseObject: [String: Any] = [
+                        "status": httpResponse.statusCode,
+                        "headers": httpResponse.allHeaderFields,
+                        "text": textJs,
+                        "json": jsonJs,
+                        "data": data?.base64EncodedString() ?? ""
+                    ]
+                    
+                    resolve(JSValue(object: responseObject, in: self))
+                    
+                }
+                task.resume()
+                
+            }
+            
+            let promise = JSValue(newPromiseIn: self, fromExecutor: { resolve, reject in
+                executor(
+                    { value in resolve?.call(withArguments: [value]) },
+                    { error in reject?.call(withArguments: [error]) }
+                )
+            })
+            
+            return promise ?? JSValue(newErrorFromMessage: "Promise not supported", in: self)
+            
+        }
+        
+        self.setObject(fetch, forKeyedSubscript: "fetch" as NSString)
+    }
+    
+    // MARK: - Manga JS Environment (original)
+    
+    func setUpJSEnvirontment()
+    {
+        setUpFetch()
+        setUpConsole()
+        setupBundle()
+        setupTimeOut()
+    }
+    
+    // MARK: - Novel/Sora-compatible Console
+    
+    func setUpNovelConsole()
     {
         let consoleObject = JSValue(newObjectIn: self)
         
@@ -61,9 +200,9 @@ extension JSContext
         self.setObject(logFunction, forKeyedSubscript: "log" as NSString)
     }
     
-    // MARK: - Fetch (Sora-compatible: resolves with text string)
+    // MARK: - Novel/Sora-compatible Fetch (resolves with text string)
     
-    func setUpFetch()
+    func setUpNovelFetch()
     {
         let fetchNativeFunction: @convention(block) (String, [String: String]?, JSValue, JSValue) -> Void = { urlString, headers, resolve, reject in
             guard let url = URL(string: urlString) else {
@@ -109,9 +248,9 @@ extension JSContext
         self.evaluateScript(fetchDefinition)
     }
     
-    // MARK: - FetchV2 (Sora-compatible: full HTTP with response object)
+    // MARK: - Novel/Sora-compatible FetchV2
     
-    func setUpFetchV2()
+    func setUpNovelFetchV2()
     {
         let fetchV2NativeFunction: @convention(block) (String, Any?, String?, String?, ObjCBool, String?, JSValue, JSValue) -> Void = { urlString, headersAny, method, body, redirect, encoding, resolve, reject in
             guard let url = URL(string: urlString) else {
@@ -261,7 +400,7 @@ extension JSContext
         self.evaluateScript(fetchv2Definition)
     }
     
-    // MARK: - Base64 Functions
+    // MARK: - Novel Base64 Functions
     
     func setupBase64Functions()
     {
@@ -277,7 +416,7 @@ extension JSContext
         self.setObject(atobFunction, forKeyedSubscript: "atob" as NSString)
     }
     
-    // MARK: - Scraping Utilities
+    // MARK: - Novel Scraping Utilities
     
     func setupScrapingUtilities()
     {
@@ -331,13 +470,13 @@ extension JSContext
         self.evaluateScript(scrapingUtils)
     }
     
-    // MARK: - Full Environment Setup
+    // MARK: - Novel JS Environment (Sora-compatible)
     
-    func setUpJSEnvirontment()
+    func setUpNovelJSEnvironment()
     {
-        setUpConsole()
-        setUpFetch()
-        setUpFetchV2()
+        setUpNovelConsole()
+        setUpNovelFetch()
+        setUpNovelFetchV2()
         setupBase64Functions()
         setupScrapingUtilities()
         setupBundle()
