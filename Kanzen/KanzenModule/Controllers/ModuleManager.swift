@@ -196,17 +196,24 @@ class ModuleManager: ObservableObject {
 
     // MARK: - Auto-Update
 
-    /// Re-downloads the JS scripts for all installed modules from their original URLs.
+    /// Re-downloads the JS scripts for installed modules whose version has changed.
     func updateModules() async {
         Logger.shared.log("ModuleManager: Starting module auto-update for \(modules.count) modules", type: "Info")
         for module in modules {
             do {
                 let metaData = try await validateModuleUrl(module.moduleurl)
+
+                // Skip update if version hasn't changed
+                if metaData.version == module.moduleData.version {
+                    Logger.shared.log("ModuleManager: \(module.moduleData.sourceName) is already up to date (v\(metaData.version))", type: "Info")
+                    continue
+                }
+
                 let jsContent = try await validateJSfile(metaData.scriptURL)
                 let localUrl = getDocumentsDirectory().appendingPathComponent(module.localPath)
                 try jsContent.write(to: localUrl, atomically: true, encoding: .utf8)
 
-                // Update metadata if it changed
+                // Update metadata
                 if let index = modules.firstIndex(where: { $0.id == module.id }) {
                     let updated = ModuleDataContainer(
                         id: module.id,
@@ -219,7 +226,7 @@ class ModuleManager: ObservableObject {
                         self.modules[index] = updated
                     }
                 }
-                Logger.shared.log("ModuleManager: Updated \(module.moduleData.sourceName)", type: "Info")
+                Logger.shared.log("ModuleManager: Updated \(module.moduleData.sourceName) to v\(metaData.version)", type: "Info")
             } catch {
                 Logger.shared.log("ModuleManager: Failed to update \(module.moduleData.sourceName): \(error.localizedDescription)", type: "Error")
             }
@@ -231,9 +238,17 @@ class ModuleManager: ObservableObject {
 
     /// Auto-update modules if enabled and enough time has passed since the last update.
     func autoUpdateModulesIfNeeded() async {
-        guard ModuleManager.isAutoUpdateEnabled else { return }
-        guard Date().timeIntervalSince(lastAutoUpdateDate) >= autoUpdateInterval else { return }
+        guard ModuleManager.isAutoUpdateEnabled, !modules.isEmpty else { return }
+
+        let elapsed = Date().timeIntervalSince(lastAutoUpdateDate)
+        guard elapsed >= autoUpdateInterval else {
+            Logger.shared.log("ModuleManager: Skipping auto-update, last update was \(Int(elapsed))s ago", type: "Info")
+            return
+        }
+
+        Logger.shared.log("ModuleManager: Starting automatic module update", type: "Info")
         await updateModules()
+        Logger.shared.log("ModuleManager: Automatic module update completed", type: "Info")
     }
     
 }
