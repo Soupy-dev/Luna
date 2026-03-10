@@ -37,8 +37,13 @@ final class MangaSourceFinder: ObservableObject {
 
     /// Search all installed modules for the given AniList manga.
     /// Uses all title variants (English, Romaji, Native) for each module.
+    /// Filters modules by type: novel modules for NOVEL format, non-novel for everything else.
     func searchAllModules(for manga: AniListManga) {
-        let modules = ModuleManager.shared.modules
+        let isNovel = manga.format == "NOVEL"
+        let modules = ModuleManager.shared.modules.filter { module in
+            let moduleIsNovel = module.moduleData.novel == true
+            return moduleIsNovel == isNovel
+        }
         guard !modules.isEmpty else {
             hasFinished = true
             return
