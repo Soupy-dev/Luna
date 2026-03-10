@@ -48,26 +48,49 @@ class KanzenModuleRunner
     
     func extractChapters(params:Any, completion: @escaping (JSValue?,Error?) -> Void)
     {
+        Logger.shared.log("ModuleRunner.extractChapters: called with params type=\(type(of: params)), value=\(params)", type: "Debug")
         guard let context = jsContext else {
+            Logger.shared.log("ModuleRunner.extractChapters: jsContext is nil", type: "Error")
             completion(nil, NSError(domain: "JSContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "JS function not found"]))
             return
         
         }
         guard let chaptersFunc = context.objectForKeyedSubscript("extractChapters") else {
+            Logger.shared.log("ModuleRunner.extractChapters: extractChapters function not found in JS", type: "Error")
             completion(nil, NSError(domain: "JSContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "JS function not found"]))
             return
         }
-        guard let promise = chaptersFunc.call(withArguments: [params]) else {
+        Logger.shared.log("ModuleRunner.extractChapters: calling JS extractChapters...", type: "Debug")
+        let callResult = chaptersFunc.call(withArguments: [params])
+        Logger.shared.log("ModuleRunner.extractChapters: call returned isUndefined=\(callResult?.isUndefined ?? true), isNull=\(callResult?.isNull ?? true), isObject=\(callResult?.isObject ?? false), isArray=\(callResult?.isArray ?? false)", type: "Debug")
+        if let exception = context.exception {
+            Logger.shared.log("ModuleRunner.extractChapters: JS exception after call: \(exception)", type: "Error")
+        }
+        guard let promise = callResult else {
+            Logger.shared.log("ModuleRunner.extractChapters: call result is nil", type: "Error")
             completion(nil, NSError(domain: "JSContext", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to call JS async function"]))
+            return
+        }
+        // Check if it's a Promise (has .then)
+        let isPromise = promise.hasProperty("then")
+        Logger.shared.log("ModuleRunner.extractChapters: isPromise=\(isPromise)", type: "Debug")
+        if !isPromise {
+            // Synchronous result - return directly
+            Logger.shared.log("ModuleRunner.extractChapters: sync result, returning directly", type: "Debug")
+            completion(promise, nil)
             return
         }
         // Prepare resolve and reject blocks
         let resolveBlock: @convention(block) (JSValue) -> Void = { result in
-
+            Logger.shared.log("ModuleRunner.extractChapters: Promise resolved, isArray=\(result.isArray), isObject=\(result.isObject), isString=\(result.isString), isUndefined=\(result.isUndefined)", type: "Debug")
+            if let str = result.toString() {
+                let preview = str.prefix(200)
+                Logger.shared.log("ModuleRunner.extractChapters: resolved toString preview: \(preview)", type: "Debug")
+            }
             completion(result, nil)
         }
         let rejectBlock: @convention(block) (JSValue) -> Void = { error in
-
+            Logger.shared.log("ModuleRunner.extractChapters: Promise rejected: \(error.toString() ?? "unknown")", type: "Error")
             let err = NSError(domain: "JSContext", code: 3, userInfo: [NSLocalizedDescriptionKey: error.toString() ?? "-"])
             completion(nil, err)
         }
@@ -152,22 +175,41 @@ class KanzenModuleRunner
     
     func extractText(params:Any, completion: @escaping (JSValue?,Error?) -> Void)
     {
+        Logger.shared.log("ModuleRunner.extractText: called with params type=\(type(of: params)), value=\(params)", type: "Debug")
         guard let context = jsContext else {
+            Logger.shared.log("ModuleRunner.extractText: jsContext is nil", type: "Error")
             completion(nil, NSError(domain: "JSContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "JS function not found"]))
             return
         }
         guard let textFunc = context.objectForKeyedSubscript("extractText") else {
+            Logger.shared.log("ModuleRunner.extractText: extractText function not found in JS", type: "Error")
             completion(nil, NSError(domain: "JSContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "JS function not found"]))
             return
         }
-        guard let promise = textFunc.call(withArguments: [params]) else {
+        Logger.shared.log("ModuleRunner.extractText: calling JS extractText...", type: "Debug")
+        let callResult = textFunc.call(withArguments: [params])
+        if let exception = context.exception {
+            Logger.shared.log("ModuleRunner.extractText: JS exception after call: \(exception)", type: "Error")
+        }
+        Logger.shared.log("ModuleRunner.extractText: call returned isUndefined=\(callResult?.isUndefined ?? true), isNull=\(callResult?.isNull ?? true), hasProperty('then')=\(callResult?.hasProperty("then") ?? false)", type: "Debug")
+        guard let promise = callResult else {
+            Logger.shared.log("ModuleRunner.extractText: call result is nil", type: "Error")
             completion(nil, NSError(domain: "JSContext", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to call JS async function"]))
             return
         }
+        // Check if it's a Promise
+        let isPromise = promise.hasProperty("then")
+        if !isPromise {
+            Logger.shared.log("ModuleRunner.extractText: sync result, returning directly", type: "Debug")
+            completion(promise, nil)
+            return
+        }
         let resolveBlock: @convention(block) (JSValue) -> Void = { result in
+            Logger.shared.log("ModuleRunner.extractText: Promise resolved, isString=\(result.isString), isUndefined=\(result.isUndefined)", type: "Debug")
             completion(result, nil)
         }
         let rejectBlock: @convention(block) (JSValue) -> Void = { error in
+            Logger.shared.log("ModuleRunner.extractText: Promise rejected: \(error.toString() ?? "unknown")", type: "Error")
             let err = NSError(domain: "JSContext", code: 3, userInfo: [NSLocalizedDescriptionKey: error.toString() ?? "-"])
             completion(nil, err)
         }
