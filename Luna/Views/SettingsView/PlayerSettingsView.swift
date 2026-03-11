@@ -319,7 +319,7 @@ struct PlayerSettingsView: View {
                                 .font(.subheadline)
                                 .fontWeight(.medium)
 
-                            Text("Show subtitle appearance options in VLC player UI. May reduce performance; native VLC subtitle rendering is generally cleaner.")
+                            Text("Show subtitle appearance options in VLC player UI. Only works with Luna services; Stremio addons are not supported. May reduce performance.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.leading)
