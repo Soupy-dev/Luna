@@ -16,6 +16,7 @@ final class HomeViewModel: ObservableObject {
     @Published var ambientColor: Color = Color.black
     @Published var hasLoadedContent = false
     @Published var widgetData: [String: [TMDBSearchResult]] = [:]
+    @Published var becauseYouWatchedTitle: String = ""
     
     init() {
         // Init body can be simplified if needed
@@ -225,6 +226,17 @@ final class HomeViewModel: ObservableObject {
                     }
                 }
                 
+                // Generate "Because you watched X" catalog
+                let (bywTitle, bywResults) = await RecommendationEngine.shared.generateBecauseYouWatched(
+                    tmdbService: tmdbService
+                )
+                if !bywResults.isEmpty {
+                    await MainActor.run {
+                        self.catalogResults["becauseYouWatched"] = bywResults
+                        self.becauseYouWatchedTitle = bywTitle
+                    }
+                }
+                
                 // Load widget data in secondary pass (non-blocking, progressive)
                 self.loadWidgetData(tmdbService: tmdbService, catalogManager: catalogManager)
             } catch {
@@ -345,6 +357,7 @@ final class HomeViewModel: ObservableObject {
         heroContent = nil
         hasLoadedContent = false
         featuredGenreName = ""
+        becauseYouWatchedTitle = ""
         RecommendationEngine.shared.invalidateCache()
     }
 }

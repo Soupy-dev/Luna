@@ -19,6 +19,11 @@ final class RecommendationEngine {
     private var cacheDate: Date?
     private let cacheTTL: TimeInterval = 300 // 5 minutes
 
+    // "Because you watched" cache
+    private var becauseYouWatchedTitle: String = ""
+    private var becauseYouWatchedResults: [TMDBSearchResult] = []
+    private var becauseYouWatchedCacheDate: Date?
+
     private static let fileURL: URL = {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("RecommendationCache.json")
@@ -87,6 +92,101 @@ final class RecommendationEngine {
     func invalidateCache() {
         cachedRecommendations = []
         cacheDate = nil
+        becauseYouWatchedResults = []
+        becauseYouWatchedTitle = ""
+        becauseYouWatchedCacheDate = nil
+    }
+
+    // MARK: - Because You Watched
+
+    /// Picks the most-recently-watched item with meaningful progress and fetches
+    /// TMDB recommendations for it. Returns (displayTitle, recommendations).
+    func generateBecauseYouWatched(
+        tmdbService: TMDBService
+    ) async -> (title: String, results: [TMDBSearchResult]) {
+        // Return cache if fresh
+        if let cacheDate = becauseYouWatchedCacheDate,
+           Date().timeIntervalSince(cacheDate) < cacheTTL,
+           !becauseYouWatchedResults.isEmpty {
+            return (becauseYouWatchedTitle, becauseYouWatchedResults)
+        }
+
+        let progressData = ProgressManager.shared.getProgressData()
+
+        // Collect recently watched movies (≥30% watched)
+        let movieCandidates = progressData.movieProgress
+            .filter { $0.progress >= 0.3 }
+            .sorted { $0.lastUpdated > $1.lastUpdated }
+
+        // Collect recently watched shows (any episode ≥30% watched)
+        var showLastWatched: [Int: Date] = [:]
+        for ep in progressData.episodeProgress where ep.progress >= 0.3 {
+            if let existing = showLastWatched[ep.showId] {
+                showLastWatched[ep.showId] = max(existing, ep.lastUpdated)
+            } else {
+                showLastWatched[ep.showId] = ep.lastUpdated
+            }
+        }
+
+        // Build a unified candidate list with title and date
+        struct Candidate {
+            let id: Int
+            let title: String
+            let isMovie: Bool
+            let date: Date
+        }
+
+        var candidates: [Candidate] = movieCandidates.map {
+            Candidate(id: $0.id, title: $0.title, isMovie: true, date: $0.lastUpdated)
+        }
+        for (showId, date) in showLastWatched {
+            let title = progressData.getShowMetadata(showId: showId)?.title ?? ""
+            if !title.isEmpty {
+                candidates.append(Candidate(id: showId, title: title, isMovie: false, date: date))
+            }
+        }
+
+        // Sort by most recent and pick the top
+        candidates.sort { $0.date > $1.date }
+        guard let pick = candidates.first else { return ("", []) }
+
+        // Fetch TMDB recommendations for this item
+        var recs: [TMDBSearchResult] = []
+        if pick.isMovie {
+            if let movies = try? await tmdbService.getMovieRecommendations(id: pick.id) {
+                recs = movies.prefix(15).map { movie in
+                    TMDBSearchResult(
+                        id: movie.id, mediaType: "movie", title: movie.title, name: nil,
+                        overview: movie.overview, posterPath: movie.posterPath,
+                        backdropPath: movie.backdropPath, releaseDate: movie.releaseDate,
+                        firstAirDate: nil, voteAverage: movie.voteAverage,
+                        popularity: movie.popularity, adult: movie.adult, genreIds: movie.genreIds
+                    )
+                }
+            }
+        } else {
+            if let shows = try? await tmdbService.getTVRecommendations(id: pick.id) {
+                recs = shows.prefix(15).map { show in
+                    TMDBSearchResult(
+                        id: show.id, mediaType: "tv", title: nil, name: show.name,
+                        overview: show.overview, posterPath: show.posterPath,
+                        backdropPath: show.backdropPath, releaseDate: nil,
+                        firstAirDate: show.firstAirDate, voteAverage: show.voteAverage,
+                        popularity: show.popularity, adult: nil, genreIds: show.genreIds
+                    )
+                }
+            }
+        }
+
+        // Filter out already-watched items
+        let watchedIds = Set(progressData.movieProgress.map { $0.id } +
+                            Array(showLastWatched.keys))
+        recs = recs.filter { !watchedIds.contains($0.id) }
+
+        becauseYouWatchedTitle = pick.title
+        becauseYouWatchedResults = recs
+        becauseYouWatchedCacheDate = Date()
+        return (pick.title, recs)
     }
 
     // MARK: - Persistence
@@ -177,7 +277,23 @@ final class RecommendationEngine {
             }
         }
 
-        // 3. Derive genre weights from bookmarked items for watched content
+        // 3. User star ratings — direct signal
+        for rating in UserRatingManager.shared.allRatings() {
+            // Highly-rated items (4-5 stars) boost their genres significantly
+            // Low-rated items (1-2 stars) dampen their genres
+            let ratingWeight: Double = Double(rating.stars) - 3.0 // -2 to +2
+            for collection in collections {
+                for item in collection.items where item.searchResult.id == rating.tmdbId {
+                    if let genres = item.searchResult.genreIds {
+                        for genreId in genres {
+                            genreWeights[genreId, default: 0] += ratingWeight * 2.0
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Derive genre weights from bookmarked items for watched content
         //    (watched movies/shows don't carry genreIds in ProgressManager,
         //     so we use bookmarks + catalog cross-reference)
         //    The actual genre scoring happens at item-score time using the item's own genreIds.

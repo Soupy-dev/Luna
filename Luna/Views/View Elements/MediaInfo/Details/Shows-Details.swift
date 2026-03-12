@@ -8,7 +8,7 @@
 import SwiftUI
 import Kingfisher
 
-struct TVShowSeasonsSection: View {
+struct TVShowSeasonsSection<InsertedContent: View>: View {
     let tvShow: TMDBTVShowWithSeasons?
     let isAnime: Bool
     @Binding var selectedSeason: TMDBSeason?
@@ -17,6 +17,7 @@ struct TVShowSeasonsSection: View {
     var animeEpisodes: [AniListEpisode]? = nil
     var animeSeasonTitles: [Int: String]? = nil
     let tmdbService: TMDBService
+    let insertedContent: () -> InsertedContent
     
     @State private var isLoadingSeason = false
     @State private var showingSearchResults = false
@@ -95,6 +96,8 @@ struct TVShowSeasonsSection: View {
                 .padding(.vertical, 16)
                 .applyLiquidGlassBackground(cornerRadius: 16)
                 .padding(.horizontal)
+                
+                insertedContent()
                 
                 if !tvShow.seasons.isEmpty {
                     if isGroupedBySeasons && !useSeasonMenu {

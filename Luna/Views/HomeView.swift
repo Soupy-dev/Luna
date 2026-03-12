@@ -352,8 +352,15 @@ struct HomeView: View {
                             ? limitedItems.filter { $0.id != homeViewModel.heroContent?.id }
                             : limitedItems
                         
+                        let displayTitle: String = {
+                            if catalog.id == "becauseYouWatched" && !homeViewModel.becauseYouWatchedTitle.isEmpty {
+                                return "Because You Watched \(homeViewModel.becauseYouWatchedTitle)"
+                            }
+                            return catalog.name
+                        }()
+                        
                         MediaSection(
-                            title: catalog.name,
+                            title: displayTitle,
                             items: displayItems
                         )
                     }

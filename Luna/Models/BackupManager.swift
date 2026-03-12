@@ -94,6 +94,9 @@ struct BackupData: Codable {
     // Recommendations
     var recommendationCache: [TMDBSearchResult] = []
 
+    // User Ratings
+    var userRatings: [String: Int] = [:]
+
     enum CodingKeys: String, CodingKey {
         case version, createdDate
         case accentColor, tmdbLanguage, selectedAppearance, enableSubtitlesByDefault, defaultSubtitleLanguage, enableVLCSubtitleEditMenu, preferredAnimeAudioLanguage, inAppPlayer, playerChoice, showScheduleTab, showLocalScheduleTime
@@ -106,6 +109,7 @@ struct BackupData: Codable {
         case collections, progressData, trackerState, catalogs, services
         case mangaCollections, mangaReadingProgress, mangaCatalogs, kanzenModules
         case recommendationCache
+        case userRatings
     }
 
     init(from decoder: Decoder) throws {
@@ -181,6 +185,7 @@ struct BackupData: Codable {
         mangaCatalogs = try container.decodeIfPresent([MangaCatalog].self, forKey: .mangaCatalogs) ?? []
         kanzenModules = try container.decodeIfPresent([BackupKanzenModule].self, forKey: .kanzenModules) ?? []
         recommendationCache = try container.decodeIfPresent([TMDBSearchResult].self, forKey: .recommendationCache) ?? []
+        userRatings = try container.decodeIfPresent([String: Int].self, forKey: .userRatings) ?? [:]
     }
 
     func encode(to encoder: Encoder) throws {
@@ -252,6 +257,7 @@ struct BackupData: Codable {
         try container.encode(mangaCatalogs, forKey: .mangaCatalogs)
         try container.encode(kanzenModules, forKey: .kanzenModules)
         try container.encode(recommendationCache, forKey: .recommendationCache)
+        try container.encode(userRatings, forKey: .userRatings)
     }
     
     init(
@@ -321,7 +327,8 @@ struct BackupData: Codable {
         mangaReadingProgress: [String: MangaProgress] = [:],
         mangaCatalogs: [MangaCatalog] = [],
         kanzenModules: [BackupKanzenModule] = [],
-        recommendationCache: [TMDBSearchResult] = []
+        recommendationCache: [TMDBSearchResult] = [],
+        userRatings: [String: Int] = [:]
     ) {
         self.version = version
         self.createdDate = createdDate
@@ -384,6 +391,7 @@ struct BackupData: Codable {
         self.mangaCatalogs = mangaCatalogs
         self.kanzenModules = kanzenModules
         self.recommendationCache = recommendationCache
+        self.userRatings = userRatings
     }
 
 }
@@ -665,7 +673,8 @@ class BackupManager {
             mangaReadingProgress: mangaReadingProgress,
             mangaCatalogs: mangaCatalogs,
             kanzenModules: kanzenModules,
-            recommendationCache: RecommendationEngine.shared.getRecommendationCache()
+            recommendationCache: RecommendationEngine.shared.getRecommendationCache(),
+            userRatings: UserRatingManager.shared.getRatingsForBackup()
         )
         
         return backup
@@ -887,6 +896,11 @@ class BackupManager {
                 }
             }
         }
+
+        var userRatings: [String: Int] = [:]
+        if let ratingsDict = json["userRatings"] as? [String: Int] {
+            userRatings = ratingsDict
+        }
         
         return BackupData(
             version: version,
@@ -941,7 +955,8 @@ class BackupManager {
             mangaReadingProgress: mangaReadingProgress,
             mangaCatalogs: mangaCatalogs,
             kanzenModules: kanzenModules,
-            recommendationCache: recommendationCache
+            recommendationCache: recommendationCache,
+            userRatings: userRatings
         )
     }
     
@@ -1110,6 +1125,11 @@ class BackupManager {
         // Restore recommendation cache
         if !backup.recommendationCache.isEmpty {
             RecommendationEngine.shared.restoreRecommendationCache(backup.recommendationCache)
+        }
+
+        // Restore user ratings
+        if !backup.userRatings.isEmpty {
+            UserRatingManager.shared.restoreRatings(backup.userRatings)
         }
         
         Logger.shared.log("Backup restored successfully", type: "Info")

@@ -345,16 +345,14 @@ struct MediaDetailView: View {
                 
                 if searchResult.isMovie {
                     MovieDetailsSection(movie: movieDetail)
+                    
+                    if !castMembers.isEmpty {
+                        castSection
+                    }
+                    
+                    StarRatingView(mediaId: searchResult.id)
                 } else {
                     episodesSection
-                }
-                
-                if !castMembers.isEmpty {
-                    castSection
-                }
-                
-                if !relatedMedia.isEmpty {
-                    relatedSection
                 }
                 
                 Spacer(minLength: 50)
@@ -532,7 +530,13 @@ struct MediaDetailView: View {
                 animeEpisodes: anilistEpisodes,
                 animeSeasonTitles: animeSeasonTitles,
                 tmdbService: tmdbService
-            )
+            ) {
+                if !castMembers.isEmpty {
+                    castSection
+                }
+                
+                StarRatingView(mediaId: searchResult.id)
+            }
         }
     }
     
@@ -605,81 +609,6 @@ struct MediaDetailView: View {
     }
     
     // MARK: - Related Section
-    
-    @ViewBuilder
-    private var relatedSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Related")
-                .font(.title2)
-                .fontWeight(.bold)
-                .foregroundColor(.white)
-                .padding(.horizontal)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 12) {
-                    ForEach(relatedMedia.prefix(15)) { item in
-                        NavigationLink(destination: MediaDetailView(searchResult: item)) {
-                            HStack(spacing: 12) {
-                                KFImage(URL(string: item.fullPosterURL ?? ""))
-                                    .placeholder {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.white.opacity(0.08))
-                                            .frame(width: 90, height: 135)
-                                    }
-                                    .resizable()
-                                    .aspectRatio(2/3, contentMode: .fill)
-                                    .frame(width: 90, height: 135)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.displayTitle)
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.white)
-                                        .lineLimit(2)
-                                        .multilineTextAlignment(.leading)
-                                    
-                                    if let rating = item.voteAverage, rating > 0 {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "star.fill")
-                                                .font(.caption2)
-                                                .foregroundColor(.yellow)
-                                            Text(String(format: "%.1f", rating))
-                                                .font(.caption)
-                                                .foregroundColor(.white.opacity(0.7))
-                                        }
-                                    }
-                                    
-                                    if !item.displayDate.isEmpty {
-                                        Text(item.displayDate)
-                                            .font(.caption)
-                                            .foregroundColor(.white.opacity(0.5))
-                                    }
-                                    
-                                    if let overview = item.overview, !overview.isEmpty {
-                                        Text(overview)
-                                            .font(.caption2)
-                                            .foregroundColor(.white.opacity(0.5))
-                                            .lineLimit(3)
-                                            .multilineTextAlignment(.leading)
-                                    }
-                                }
-                                .frame(width: 170, alignment: .leading)
-                            }
-                            .padding(10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color.white.opacity(0.06))
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                }
-                .padding(.horizontal)
-            }
-        }
-        .padding(.top, 8)
-    }
     
     private func updateBookmarkStatus() {
         isBookmarked = libraryManager.isBookmarked(searchResult)

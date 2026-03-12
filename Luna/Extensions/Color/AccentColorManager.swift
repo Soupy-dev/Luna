@@ -10,7 +10,9 @@ import SwiftUI
 class AccentColorManager: ObservableObject {
     static let shared = AccentColorManager()
     
-    @Published var currentAccentColor: Color = .blue
+    static let defaultAccentColor = Color(red: 0.25, green: 0.12, blue: 0.45)
+    
+    @Published var currentAccentColor: Color = AccentColorManager.defaultAccentColor
     
     private init() {
         loadAccentColor()
@@ -29,7 +31,7 @@ class AccentColorManager: ObservableObject {
     
     private func loadAccentColor() {
         guard let colorData = UserDefaults.standard.data(forKey: "accentColor"), !colorData.isEmpty else {
-            currentAccentColor = .blue
+            currentAccentColor = Self.defaultAccentColor
             return
         }
         
@@ -38,7 +40,7 @@ class AccentColorManager: ObservableObject {
                 currentAccentColor = Color(uiColor)
             }
         } catch {
-            currentAccentColor = .blue
+            currentAccentColor = Self.defaultAccentColor
         }
     }
 }
