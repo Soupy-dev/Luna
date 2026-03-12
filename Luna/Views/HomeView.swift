@@ -10,6 +10,7 @@ struct HomeView: View {
     @State private var isHoveringWatchNow = false
     @State private var isHoveringWatchlist = false
     @State private var continueWatchingItems: [ContinueWatchingItem] = []
+    @ObservedObject private var libraryManager = LibraryManager.shared
     @State private var scrollOffset: CGFloat = 0
     
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
@@ -265,12 +266,16 @@ struct HomeView: View {
                     }
                     
                     Button(action: {
-                        // TODO: Add to watchlist
+                        if let hero = homeViewModel.heroContent {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                libraryManager.toggleBookmark(for: hero)
+                            }
+                        }
                     }) {
                         HStack(spacing: 8) {
-                            Image(systemName: "plus")
+                            Image(systemName: libraryManager.isBookmarked(hero) ? "checkmark" : "plus")
                                 .font(.subheadline)
-                            Text("Watchlist")
+                            Text(libraryManager.isBookmarked(hero) ? "In Watchlist" : "Watchlist")
                                 .fontWeight(.semibold)
                                 .fixedSize()
                                 .lineLimit(1)

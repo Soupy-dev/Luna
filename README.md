@@ -1,4 +1,4 @@
-My fork of Luna. will eventually be merged into the main repo.
+My fork of Luna.
 
 Features added:
 
@@ -13,15 +13,15 @@ Features added:
 9: Minor but episodes now have their full descriptions in the services result sheet
 10: VLC player (Requires proxy setting enabled to work with every service, otherwise only works with some)
 11: Made Crancis Continue Watching respect the TMDB+AniList system
-12: Downloads support, ui needed minor revision to add this tab. Settings is now in the top right. HLS downloads are slower due to needing proper playback from mpv and VLC
+12: Downloads support, ui needed minor revision to add this tab. Settings is now in the top right. HLS downloads are slower and nonbackgroundable due to needing proper playback support from mpv and VLC
 13: VLC does have subtitle editing. But I just removed pip. I went through many implementations and spent a bunch of time. But VLC just isn't ready for pip, waiting for VLC v4 for better stability and native pip is the best call. I've pretty much pushed VLC as far as it can go.
-14: Manga mode completed (ugly ui lowkey but I ain't a designer)
+14: Manga mode completed (ugly ui lowkey tho, works but I didn't care much for this mode. I just didn't want to leave it abandoned and be dead code.)
 15: Stremio addon support (only ones that return streams, dw they work with downloads and act mostly like regular services)
 16: LN support
 17: Major overhaul of UI
 
 Notes:
 
-I have 700+ workflows it took a long time. VLC and this Luna in general has come a long way. There are likely minor issues with VLC that can't be fixed/smoothed without v4.
+I have 750+ workflows it took a long time. VLC and this Luna in general has come a long way. There are likely minor issues with VLC that can't be fixed/smoothed without v4.
 
 

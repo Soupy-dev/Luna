@@ -21,7 +21,7 @@ final class UserRatingManager {
         ratings = Self.load(from: fileURL)
     }
 
-    // MARK: - Public API
+    
 
     func rating(for tmdbId: Int) -> Int? {
         lock.lock()

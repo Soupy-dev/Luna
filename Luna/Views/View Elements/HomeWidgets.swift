@@ -79,7 +79,7 @@ struct NetworkSectionWidget: View {
                 Text(network.name)
                     .font(.title2)
                     .fontWeight(.heavy)
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
             }
             .padding(.leading, 16)
@@ -177,7 +177,7 @@ struct GenreSectionWidget: View {
             Text(genre.name)
                 .font(.subheadline)
                 .fontWeight(.bold)
-                .foregroundColor(.white)
+                .foregroundStyle(.white)
                 .lineLimit(1)
                 .padding(.trailing, 14)
         }
@@ -274,7 +274,7 @@ struct CompanySectionWidget: View {
             Text(company.name)
                 .font(isIPad ? .title3 : .headline)
                 .fontWeight(.heavy)
-                .foregroundColor(.white)
+                .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 2)
         }
         .frame(maxWidth: .infinity)
