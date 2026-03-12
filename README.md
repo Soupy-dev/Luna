@@ -19,6 +19,7 @@ Features added:
 15: Stremio addon support (only ones that return streams, dw they work with downloads and act mostly like regular services)
 16: LN support
 17: Major overhaul of UI
+18: All local Recommendation engine, with ratings
 
 Notes:
 
