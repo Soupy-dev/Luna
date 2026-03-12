@@ -11,6 +11,7 @@ import Kingfisher
 #if !os(tvOS)
 struct KanzenHistoryView: View {
     @ObservedObject private var progressManager = MangaReadingProgressManager.shared
+    @State private var scrollOffset: CGFloat = 0
 
     private var historyItems: [(id: Int, progress: MangaProgress)] {
         progressManager.recentlyReadMangaIds()
@@ -67,14 +68,24 @@ struct KanzenHistoryView: View {
                                 .padding(.vertical, 4)
                             }
                         }
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: ScrollOffsetPreferenceKey.self,
+                                    value: -geo.frame(in: .named("kanzenHistoryScroll")).origin.y
+                                )
+                            }
+                        )
                     }
+                    .coordinateSpace(name: "kanzenHistoryScroll")
+                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { scrollOffset = $0 }
                     .listStyle(.plain)
                     .lunaHideScrollBackground()
                 }
             }
             .navigationTitle("History")
             .navigationBarTitleDisplayMode(.large)
-            .background(GlobalGradientBackground().ignoresSafeArea())
+            .background(GlobalGradientBackground(scrollOffset: scrollOffset).ignoresSafeArea())
         }
     }
 

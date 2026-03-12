@@ -65,7 +65,7 @@ struct NetworkSectionWidget: View {
                         .placeholder { Color.gray.opacity(0.3) }
                         .resizable()
                         .aspectRatio(2/3, contentMode: .fill)
-                        .frame(width: 80, height: 120)
+                        .frame(width: isIPad ? 100 : 80, height: isIPad ? 150 : 120)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                         .rotationEffect(.degrees(Double(index - 1) * 5))
                         .offset(y: index == 1 ? -5 : 5)
@@ -84,7 +84,7 @@ struct NetworkSectionWidget: View {
             }
             .padding(.leading, 16)
         }
-        .frame(width: isIPad ? 320 : 260, height: 160)
+        .frame(width: isIPad ? 340 : 260, height: isIPad ? 190 : 160)
         .background(
             LinearGradient(
                 colors: [Color.white.opacity(0.12), Color.white.opacity(0.04)],
@@ -107,10 +107,20 @@ struct GenreSectionWidget: View {
     let tmdbService: TMDBService
     
     private let genres = WidgetGenre.curated
-    private let columns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
-    ]
+    private var columns: [GridItem] {
+        if isIPad {
+            return [
+                GridItem(.flexible(), spacing: 14),
+                GridItem(.flexible(), spacing: 14),
+                GridItem(.flexible(), spacing: 14)
+            ]
+        } else {
+            return [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ]
+        }
+    }
     
     var body: some View {
         let availableGenres = genres.filter { genre in
@@ -156,7 +166,7 @@ struct GenreSectionWidget: View {
                     .placeholder { Color.gray.opacity(0.3) }
                     .resizable()
                     .aspectRatio(2/3, contentMode: .fill)
-                    .frame(width: 60, height: 80)
+                    .frame(width: 60 * iPadScale, height: 80 * iPadScale)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .padding(.leading, 10)
                     .padding(.vertical, 10)
@@ -172,7 +182,7 @@ struct GenreSectionWidget: View {
                 .padding(.trailing, 14)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 80)
+        .frame(height: 80 * iPadScale)
         .background(
             LinearGradient(
                 colors: [Color.yellow.opacity(0.15), Color.orange.opacity(0.08)],
@@ -195,10 +205,20 @@ struct CompanySectionWidget: View {
     let tmdbService: TMDBService
     
     private let companies = WidgetCompany.curated
-    private let columns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
-    ]
+    private var columns: [GridItem] {
+        if isIPad {
+            return [
+                GridItem(.flexible(), spacing: 14),
+                GridItem(.flexible(), spacing: 14),
+                GridItem(.flexible(), spacing: 14)
+            ]
+        } else {
+            return [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ]
+        }
+    }
     
     var body: some View {
         let availableCompanies = companies.filter { company in
@@ -252,13 +272,13 @@ struct CompanySectionWidget: View {
             }
             
             Text(company.name)
-                .font(.headline)
+                .font(isIPad ? .title3 : .headline)
                 .fontWeight(.heavy)
                 .foregroundColor(.white)
                 .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 2)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 100)
+        .frame(height: 100 * iPadScale)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
@@ -353,7 +373,7 @@ struct RankedListWidget: View {
             .padding(.top, 10)
             .padding(.bottom, 14)
         }
-        .frame(width: isIPad ? 320 : 280)
+        .frame(width: isIPad ? 360 : 280)
         .background(
             LinearGradient(
                 colors: [Color.white.opacity(0.1), Color.white.opacity(0.04)],
@@ -425,7 +445,7 @@ struct FeaturedSpotlightWidget: View {
                 }
                 .resizable()
                 .aspectRatio(16/9, contentMode: .fill)
-                .frame(height: 200)
+                .frame(height: isIPad ? 280 : 200)
                 .clipped()
             
             // Gradient overlay
@@ -460,7 +480,7 @@ struct FeaturedSpotlightWidget: View {
             .padding(16)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 200)
+        .frame(height: isIPad ? 280 : 200)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)

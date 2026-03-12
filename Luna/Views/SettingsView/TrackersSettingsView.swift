@@ -12,18 +12,16 @@ struct TrackersSettingsView: View {
     @State private var selectedTracker: TrackerService?
     @State private var showImportConfirmation = false
 
-    var body: some View {
-        ZStack {
-            SettingsGradientBackground()
-                .ignoresSafeArea()
+    @State private var scrollOffset: CGFloat = 0
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Trackers")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal)
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Trackers")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal)
 
                     VStack(spacing: 12) {
                         // Sync Toggle
@@ -79,8 +77,19 @@ struct TrackersSettingsView: View {
                 .padding(.vertical)
                 .frame(maxWidth: isIPad ? 700 : .infinity)
                 .frame(maxWidth: .infinity)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: ScrollOffsetPreferenceKey.self,
+                            value: -geo.frame(in: .named("trackersScroll")).origin.y
+                        )
+                    }
+                )
             }
         }
+        .coordinateSpace(name: "trackersScroll")
+        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { scrollOffset = $0 }
+        .background(SettingsGradientBackground(scrollOffset: scrollOffset).ignoresSafeArea())
         .navigationTitle("Trackers")
         #if !os(tvOS)
         .navigationBarTitleDisplayMode(.inline)

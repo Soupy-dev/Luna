@@ -33,6 +33,7 @@ struct MangaCatalogSettingsView: View {
                     catalogManager.moveCatalog(from: from, to: to)
                 }
             }
+            .background(LunaScrollTracker())
         }
         .navigationTitle("Home Catalogs")
         .navigationBarTitleDisplayMode(.inline)

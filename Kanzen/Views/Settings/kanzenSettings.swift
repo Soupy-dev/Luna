@@ -29,6 +29,7 @@ struct KanzenSettingsView : View
                         Text("Home Catalogs")
                     }
                 }
+                .background(LunaScrollTracker())
                 Section(header: Text("Modules"), footer: Text("Auto Mode will automatically search all modules and pick the best match when you tap a manga. This isn't fully reliable due to the vast amount of media — title variations across languages and regions can cause mismatches.")) {
                     NavigationLink(destination: KanzenModuleView().environmentObject(moduleManager)) {
                         Text("Manage Modules")

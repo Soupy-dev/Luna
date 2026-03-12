@@ -50,7 +50,6 @@ struct BackupData: Codable {
     var kanzenAutoUpdateModules: Bool = true
     var seasonMenu: Bool = false
     var horizontalEpisodeList: Bool = false
-    var homeSections: Data?
     var mediaColumnsPortrait: Int = 3
     var mediaColumnsLandscape: Int = 5
 
@@ -100,7 +99,7 @@ struct BackupData: Codable {
         case accentColor, tmdbLanguage, selectedAppearance, enableSubtitlesByDefault, defaultSubtitleLanguage, enableVLCSubtitleEditMenu, preferredAnimeAudioLanguage, inAppPlayer, playerChoice, showScheduleTab, showLocalScheduleTime
         case holdSpeedPlayer, externalPlayer, alwaysLandscape, aniSkipAutoSkip, skip85sEnabled, showNextEpisodeButton, nextEpisodeThreshold, vlcHeaderProxyEnabled
         case subtitleForegroundColor, subtitleStrokeColor, subtitleStrokeWidth, subtitleFontSize, subtitleVerticalOffset
-        case showKanzen, kanzenAutoMode, kanzenAutoUpdateModules, seasonMenu, horizontalEpisodeList, homeSections, mediaColumnsPortrait, mediaColumnsLandscape
+        case showKanzen, kanzenAutoMode, kanzenAutoUpdateModules, seasonMenu, horizontalEpisodeList, mediaColumnsPortrait, mediaColumnsLandscape
         case readingMode
         case readerFontSize, readerFontFamily, readerFontWeight, readerColorPreset, readerTextAlignment, readerLineSpacing, readerMargin
         case autoClearCacheEnabled, autoClearCacheThresholdMB, highQualityThreshold
@@ -152,7 +151,6 @@ struct BackupData: Codable {
         kanzenAutoUpdateModules = try container.decodeIfPresent(Bool.self, forKey: .kanzenAutoUpdateModules) ?? true
         seasonMenu = try container.decodeIfPresent(Bool.self, forKey: .seasonMenu) ?? false
         horizontalEpisodeList = try container.decodeIfPresent(Bool.self, forKey: .horizontalEpisodeList) ?? false
-        homeSections = try container.decodeIfPresent(Data.self, forKey: .homeSections)
         mediaColumnsPortrait = try container.decodeIfPresent(Int.self, forKey: .mediaColumnsPortrait) ?? 3
         mediaColumnsLandscape = try container.decodeIfPresent(Int.self, forKey: .mediaColumnsLandscape) ?? 5
 
@@ -224,7 +222,6 @@ struct BackupData: Codable {
         try container.encode(kanzenAutoUpdateModules, forKey: .kanzenAutoUpdateModules)
         try container.encode(seasonMenu, forKey: .seasonMenu)
         try container.encode(horizontalEpisodeList, forKey: .horizontalEpisodeList)
-        try container.encodeIfPresent(homeSections, forKey: .homeSections)
         try container.encode(mediaColumnsPortrait, forKey: .mediaColumnsPortrait)
         try container.encode(mediaColumnsLandscape, forKey: .mediaColumnsLandscape)
 
@@ -295,7 +292,6 @@ struct BackupData: Codable {
         kanzenAutoUpdateModules: Bool = true,
         seasonMenu: Bool = false,
         horizontalEpisodeList: Bool = false,
-        homeSections: Data? = nil,
         mediaColumnsPortrait: Int = 3,
         mediaColumnsLandscape: Int = 5,
 
@@ -361,7 +357,6 @@ struct BackupData: Codable {
         self.kanzenAutoUpdateModules = kanzenAutoUpdateModules
         self.seasonMenu = seasonMenu
         self.horizontalEpisodeList = horizontalEpisodeList
-        self.homeSections = homeSections
         self.mediaColumnsPortrait = mediaColumnsPortrait
         self.mediaColumnsLandscape = mediaColumnsLandscape
 
@@ -530,7 +525,6 @@ class BackupManager {
         let kanzenAutoUpdateModules = ModuleManager.isAutoUpdateEnabled
         let seasonMenu = userDefaults.bool(forKey: "seasonMenu")
         let horizontalEpisodeList = userDefaults.bool(forKey: "horizontalEpisodeList")
-        let homeSections = userDefaults.data(forKey: "homeSections")
         let mediaColumnsPortrait = userDefaults.object(forKey: "mediaColumnsPortrait") != nil ? userDefaults.integer(forKey: "mediaColumnsPortrait") : 3
         let mediaColumnsLandscape = userDefaults.object(forKey: "mediaColumnsLandscape") != nil ? userDefaults.integer(forKey: "mediaColumnsLandscape") : 5
 
@@ -645,7 +639,6 @@ class BackupManager {
             kanzenAutoUpdateModules: kanzenAutoUpdateModules,
             seasonMenu: seasonMenu,
             horizontalEpisodeList: horizontalEpisodeList,
-            homeSections: homeSections,
             mediaColumnsPortrait: mediaColumnsPortrait,
             mediaColumnsLandscape: mediaColumnsLandscape,
 
@@ -765,7 +758,6 @@ class BackupManager {
         let kanzenAutoUpdateModules = json["kanzenAutoUpdateModules"] as? Bool ?? true
         let seasonMenu = json["seasonMenu"] as? Bool ?? false
         let horizontalEpisodeList = json["horizontalEpisodeList"] as? Bool ?? false
-        let homeSections = json["homeSections"] as? Data
         let mediaColumnsPortrait = json["mediaColumnsPortrait"] as? Int ?? 3
         let mediaColumnsLandscape = json["mediaColumnsLandscape"] as? Int ?? 5
 
@@ -927,7 +919,6 @@ class BackupManager {
             kanzenAutoUpdateModules: kanzenAutoUpdateModules,
             seasonMenu: seasonMenu,
             horizontalEpisodeList: horizontalEpisodeList,
-            homeSections: homeSections,
             mediaColumnsPortrait: mediaColumnsPortrait,
             mediaColumnsLandscape: mediaColumnsLandscape,
             readingMode: readingMode,
@@ -1006,9 +997,6 @@ class BackupManager {
         userDefaults.set(backup.kanzenAutoUpdateModules, forKey: "kanzenAutoUpdateModules")
         userDefaults.set(backup.seasonMenu, forKey: "seasonMenu")
         userDefaults.set(backup.horizontalEpisodeList, forKey: "horizontalEpisodeList")
-        if let homeSections = backup.homeSections {
-            userDefaults.set(homeSections, forKey: "homeSections")
-        }
         userDefaults.set(backup.mediaColumnsPortrait, forKey: "mediaColumnsPortrait")
         userDefaults.set(backup.mediaColumnsLandscape, forKey: "mediaColumnsLandscape")
 

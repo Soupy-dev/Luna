@@ -51,12 +51,10 @@ struct HomeView: View {
             GlobalGradientBackground(scrollOffset: scrollOffset)
                 .ignoresSafeArea(.all)
             
-            if !LunaTheme.shared.globalGradientEnabled {
-                Group {
-                    homeViewModel.ambientColor
-                }
-                .ignoresSafeArea(.all)
+            Group {
+                homeViewModel.ambientColor
             }
+            .ignoresSafeArea(.all)
             
             if homeViewModel.isLoading {
                 loadingView
@@ -406,7 +404,7 @@ struct HomeView: View {
         }
         .background(
             LinearGradient(
-                colors: [ambientColor, LunaTheme.shared.globalGradientEnabled ? LunaTheme.shared.globalGradientColor.opacity(0.15) : Color.clear, LunaTheme.shared.backgroundBase],
+                colors: [ambientColor, Color.clear, LunaTheme.shared.backgroundBase],
                 startPoint: .top,
                 endPoint: UnitPoint(x: 0.5, y: 0.3)
             )

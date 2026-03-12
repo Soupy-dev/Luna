@@ -90,6 +90,7 @@ struct LoggerView: View {
                             LogEntryRow(log: log)
                                 .id(log.id)
                         }
+                        .background(LunaScrollTracker())
                     }
                     .listStyle(PlainListStyle())
                 }

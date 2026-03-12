@@ -47,6 +47,7 @@ struct StorageView: View {
                 }
                 .disabled(isClearing || (isLoading && cacheSizeBytes == 0))
             }
+            .background(LunaScrollTracker())
             
             Section(header: Text("AUTO-CLEAR CACHE"), footer: Text("Automatically clear cache when it exceeds the specified size.")) {
                 Toggle("Enable Auto-Clear", isOn: $autoClearCacheEnabled)

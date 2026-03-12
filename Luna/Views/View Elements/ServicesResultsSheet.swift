@@ -627,6 +627,7 @@ struct ModulesSearchResultsSheet: View {
         NavigationView {
             List {
                 searchInfoSection
+                    .background(LunaScrollTracker())
                 
                 if serviceManager.activeServices.isEmpty && stremioManager.activeAddons.isEmpty {
                     noActiveServicesSection
@@ -634,6 +635,7 @@ struct ModulesSearchResultsSheet: View {
                     unifiedResultsSections
                 }
             }
+            .lunaSettingsStyle()
             .navigationTitle(downloadMode ? "Download Source" : "Services Result")
 #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

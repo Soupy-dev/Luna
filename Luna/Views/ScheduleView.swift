@@ -66,19 +66,11 @@ struct ScheduleView: View {
         .onReceive(dayChangeTimer) { _ in
             Task { await viewModel.handleDayChangeIfNeeded(localTimeZone: showLocalScheduleTime) }
         }
-        .background(
-            NavigationLink(
-                destination: Group {
-                    if let result = selectedTMDBResult {
-                        MediaDetailView(searchResult: result)
-                    }
-                },
-                isActive: $showingMediaDetail
-            ) {
-                EmptyView()
+        .navigationDestination(isPresented: $showingMediaDetail) {
+            if let result = selectedTMDBResult {
+                MediaDetailView(searchResult: result)
             }
-            .hidden()
-        )
+        }
         .alert(isPresented: $showNoTMDBAlert) {
             Alert(
                 title: Text("No TMDB Entry"),

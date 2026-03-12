@@ -16,14 +16,6 @@ class LunaTheme: ObservableObject {
         didSet { saveColor(settingsGradientColor, key: "lunaThemeGradientColor") }
     }
     
-    @Published var globalGradientEnabled: Bool {
-        didSet { UserDefaults.standard.set(globalGradientEnabled, forKey: "lunaGlobalGradientEnabled") }
-    }
-    
-    @Published var globalGradientColor: Color {
-        didSet { saveColor(globalGradientColor, key: "lunaGlobalGradientColor") }
-    }
-    
     // MARK: - Constants
     
     let cardCornerRadius: CGFloat = 16
@@ -46,10 +38,7 @@ class LunaTheme: ObservableObject {
     
     private init() {
         self.settingsGradientColor = Self.gradientPresets[0].color
-        self.globalGradientEnabled = UserDefaults.standard.bool(forKey: "lunaGlobalGradientEnabled")
-        self.globalGradientColor = Self.gradientPresets[0].color
         self.settingsGradientColor = loadColor(key: "lunaThemeGradientColor") ?? Self.gradientPresets[0].color
-        self.globalGradientColor = loadColor(key: "lunaGlobalGradientColor") ?? Self.gradientPresets[0].color
     }
     
     // MARK: - Persistence
@@ -85,10 +74,7 @@ extension View {
     
     /// Apply the gradient background used in Settings screens
     func lunaGradientBackground() -> some View {
-        self.background(
-            SettingsGradientBackground()
-                .ignoresSafeArea()
-        )
+        self.modifier(LunaAutoGradientModifier())
     }
     
     /// Hide list/scroll-view chrome (iOS 16+, unavailable on tvOS)
@@ -126,5 +112,23 @@ extension View {
             .lunaHideScrollBackground()
             .lunaGradientBackground()
             .lunaDarkToolbar()
+    }
+}
+
+// MARK: - Auto-tracking gradient modifier
+
+private struct LunaAutoGradientModifier: ViewModifier {
+    @State private var scrollOffset: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .coordinateSpace(name: "lunaGradientScroll")
+            .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                scrollOffset = value
+            }
+            .background(
+                SettingsGradientBackground(scrollOffset: scrollOffset)
+                    .ignoresSafeArea()
+            )
     }
 }

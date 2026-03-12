@@ -63,6 +63,7 @@ struct BackupManagementView: View {
             } footer: {
                 Text("Create a backup file containing all your collections, settings, watch progress, and service configurations.")
             }
+            .background(LunaScrollTracker())
             
             Section {
                 Button(action: { showDocumentPicker = true }) {

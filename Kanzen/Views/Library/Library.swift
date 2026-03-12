@@ -13,6 +13,7 @@ struct KanzenLibraryView: View {
     @ObservedObject private var libraryManager = MangaLibraryManager.shared
     @EnvironmentObject var moduleManager: ModuleManager
     @State private var showCreateCollection = false
+    @State private var scrollOffset: CGFloat = 0
 
     private var bookmarksCollection: MangaLibraryCollection? {
         libraryManager.collections.first { $0.name == "Bookmarks" }
@@ -146,10 +147,20 @@ struct KanzenLibraryView: View {
                     }
                 }
                 .padding(.vertical, 8)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: ScrollOffsetPreferenceKey.self,
+                            value: -geo.frame(in: .named("kanzenLibScroll")).origin.y
+                        )
+                    }
+                )
             }
+            .coordinateSpace(name: "kanzenLibScroll")
+            .onPreferenceChange(ScrollOffsetPreferenceKey.self) { scrollOffset = $0 }
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.inline)
-            .background(GlobalGradientBackground().ignoresSafeArea())
+            .background(GlobalGradientBackground(scrollOffset: scrollOffset).ignoresSafeArea())
             .sheet(isPresented: $showCreateCollection) {
                 MangaCreateCollectionView()
                     .environmentObject(libraryManager)

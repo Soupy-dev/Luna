@@ -31,6 +31,7 @@ struct KanzenGeneralSettingsView: View {
                 
                 
                             }
+            .background(LunaScrollTracker())
         }
         .navigationTitle(Text("Preferences"))
         .lunaSettingsStyle()

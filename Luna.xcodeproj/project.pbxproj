@@ -129,8 +129,6 @@
 		13F187B12E6F38CE00747F7E /* CollectionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F187AB2E6F38CE00747F7E /* CollectionDetailView.swift */; };
 		13F315B02EAD03F70025BD7A /* SubtitleLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F315AF2EAD03F70025BD7A /* SubtitleLoader.swift */; };
 		13F518432EBCE42B00DEF778 /* StorageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F518422EBCE42B00DEF778 /* StorageView.swift */; };
-		13F5B58F2E7308F300565E75 /* HomeSectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B58E2E7308F300565E75 /* HomeSectionsView.swift */; };
-		13F5B5922E73090000565E75 /* HomeSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5912E73090000565E75 /* HomeSection.swift */; };
 		13F5B5952E730CB200565E75 /* TMDBContentFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */; };
 		13F5B5972E730CDB00565E75 /* TMDBFiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F5B5962E730CDB00565E75 /* TMDBFiltersView.swift */; };
 		14BBB0033FFF111100AAAAAA /* BackupManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14BBB0043FFF111100AAAAAA /* BackupManagementView.swift */; };
@@ -306,8 +304,6 @@
 		13F187AB2E6F38CE00747F7E /* CollectionDetailView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CollectionDetailView.swift; sourceTree = "<group>"; };
 		13F315AF2EAD03F70025BD7A /* SubtitleLoader.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SubtitleLoader.swift; sourceTree = "<group>"; };
 		13F518422EBCE42B00DEF778 /* StorageView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StorageView.swift; sourceTree = "<group>"; };
-		13F5B58E2E7308F300565E75 /* HomeSectionsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HomeSectionsView.swift; sourceTree = "<group>"; };
-		13F5B5912E73090000565E75 /* HomeSection.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HomeSection.swift; sourceTree = "<group>"; };
 		13F5B5942E730CB200565E75 /* TMDBContentFilter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBContentFilter.swift; sourceTree = "<group>"; };
 		13F5B5962E730CDB00565E75 /* TMDBFiltersView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TMDBFiltersView.swift; sourceTree = "<group>"; };
 		14BBB0043FFF111100AAAAAA /* BackupManagementView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BackupManagementView.swift; sourceTree = "<group>"; };
@@ -862,7 +858,6 @@
 			children = (
 				13830AEF2E55C04F00B3CDE4 /* AlgorithmSelectionView.swift */,
 				13631B312E4F1A200035C39F /* ServiceSettingsView.swift */,
-				13F5B58E2E7308F300565E75 /* HomeSectionsView.swift */,
 				139509A12E7DDAE100CB60D4 /* PlayerSettingsView.swift */,
 				BB7777902F20000000BB7790 /* VLCLanguageSelectionView.swift */,
 				13830AF12E55F51300B3CDE4 /* AlternativeUIView.swift */,
@@ -901,7 +896,6 @@
 			isa = PBXGroup;
 			children = (
 				13F5B5932E730B0200565E75 /* Library */,
-				13F5B5912E73090000565E75 /* HomeSection.swift */,
 				14BBB0063FFF111100AAAAAA /* BackupManager.swift */,
 				13C6F3452EA4C6BC00DECD2B /* CacheManager.swift */,
 				DD1111102FB0000000DD1110 /* DownloadManager.swift */,
@@ -1098,9 +1092,7 @@
 				1324E7BD2E940BD70036B5F5 /* PlayerViewController.swift in Sources */,
 				1324E7BE2E940BD70036B5F5 /* SampleBufferDisplayView.swift in Sources */,
 				13E1EDD32ED9E65F00087629 /* mangaModel.xcdatamodeld in Sources */,
-				13F5B58F2E7308F300565E75 /* HomeSectionsView.swift in Sources */,
 				13F0729B2E4B2D9200EF90EB /* ServicesEntity.swift in Sources */,
-				13F5B5922E73090000565E75 /* HomeSection.swift in Sources */,
 				13F0729C2E4B2D9200EF90EB /* JavaScriptCore+Extensions.swift in Sources */,
 				13F072B22E4B2D9200EF90EB /* FallbackImageView.swift in Sources */,
 				13F072B62E4B2D9200EF90EB /* AmbientColor.swift in Sources */,

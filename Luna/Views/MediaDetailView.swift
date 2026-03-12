@@ -320,17 +320,6 @@ struct MediaDetailView: View {
                         startPoint: .top,
                         endPoint: UnitPoint(x: 0.5, y: 0.35)
                     )
-                    if LunaTheme.shared.globalGradientEnabled {
-                        LinearGradient(
-                            stops: [
-                                .init(color: Color.clear, location: 0.0),
-                                .init(color: LunaTheme.shared.globalGradientColor.opacity(0.12), location: 0.3),
-                                .init(color: Color.clear, location: 0.7)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    }
                 }
             )
         }

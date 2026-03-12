@@ -235,8 +235,12 @@ struct DownloadsView: View {
                 storageFooter
                     .listRowBackground(Color.clear)
             }
+            .background(LunaScrollTracker())
         }
             .listStyle(.plain)
+            .lunaHideScrollBackground()
+            .coordinateSpace(name: "lunaGradientScroll")
+            .onPreferenceChange(ScrollOffsetPreferenceKey.self) { scrollOffset = $0 }
         }
     }
     

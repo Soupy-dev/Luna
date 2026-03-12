@@ -36,6 +36,7 @@ struct TMDBFiltersView: View {
             } footer: {
                 Text("Filters apply to all TMDB content including search results and home contents.")
             }
+            .background(LunaScrollTracker())
             
             Section {
                 HStack() {

@@ -49,6 +49,7 @@ struct AlgorithmSelectionView: View {
             } footer: {
                 Text("The similarity algorithm determines how search results are matched and ranked. Jaro-Winkler is recommended for media titles as it performs better with names and short strings, but can fail sometimes.")
             }
+            .background(LunaScrollTracker())
         }
         .navigationTitle("Algorithm")
         .lunaSettingsStyle()

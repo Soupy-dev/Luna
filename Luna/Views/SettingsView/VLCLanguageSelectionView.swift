@@ -55,6 +55,7 @@ struct VLCLanguageSelectionView: View {
                     dismiss()
                 }
             }
+            .background(LunaScrollTracker())
         }
         .navigationTitle(title)
         .lunaSettingsStyle()

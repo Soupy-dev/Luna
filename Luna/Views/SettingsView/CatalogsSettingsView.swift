@@ -50,6 +50,7 @@ struct CatalogsSettingsView: View {
             } footer: {
                 Text("Enable/disable content catalogs and drag to reorder them. The order here determines the order on your home screen.")
             }
+            .background(LunaScrollTracker())
             
             Section {
                 VStack(alignment: .leading, spacing: 8) {

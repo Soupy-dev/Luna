@@ -12,6 +12,7 @@ import Kingfisher
 struct KanzenHomeView: View {
     @StateObject private var homeViewModel = MangaHomeViewModel()
     @StateObject private var catalogManager = MangaCatalogManager.shared
+    @State private var scrollOffset: CGFloat = 0
 
     private var enabledCatalogs: [MangaCatalog] {
         catalogManager.getEnabledCatalogs()
@@ -63,14 +64,24 @@ struct KanzenHomeView: View {
                             }
                         }
                         .padding(.bottom, 30)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: ScrollOffsetPreferenceKey.self,
+                                    value: -geo.frame(in: .named("kanzenHomeScroll")).origin.y
+                                )
+                            }
+                        )
                     }
+                    .coordinateSpace(name: "kanzenHomeScroll")
+                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { scrollOffset = $0 }
                     .refreshable {
                         homeViewModel.resetContent()
                         homeViewModel.loadContent(catalogManager: catalogManager)
                     }
                 }
             }
-            .background(GlobalGradientBackground().ignoresSafeArea())
+            .background(GlobalGradientBackground(scrollOffset: scrollOffset).ignoresSafeArea())
             .navigationTitle("Home")
             .navigationBarTitleDisplayMode(.large)
         }

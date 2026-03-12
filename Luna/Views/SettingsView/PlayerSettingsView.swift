@@ -168,6 +168,7 @@ struct PlayerSettingsView: View {
                 }
             }
             .disabled(store.externalPlayer != .none)
+            .background(LunaScrollTracker())
             
             Section(header: Text("Media Player")) {
                 HStack {

@@ -158,13 +158,6 @@ struct SettingsView: View {
                         
                         GlassDivider()
                         
-                        NavigationLink(destination: HomeSectionsView()) {
-                            GlassSettingsRow(icon: "rectangle.stack", iconColor: .mint, title: "Home Sections")
-                        }
-                        .buttonStyle(.plain)
-                        
-                        GlassDivider()
-                        
                         NavigationLink(destination: ServicesView()) {
                             GlassSettingsRow(icon: "server.rack", iconColor: .indigo, title: "Services")
                         }
@@ -278,7 +271,6 @@ struct SettingsView: View {
             NavigationLink(destination: PlayerSettingsView()) { Text("Media Player") }
             NavigationLink(destination: AlternativeUIView()) { Text("Appearance") }
             NavigationLink(destination: CatalogsSettingsView()) { Text("Catalogs") }
-            NavigationLink(destination: HomeSectionsView()) { Text("Home Sections") }
             NavigationLink(destination: ServicesView()) { Text("Services") }
             NavigationLink(destination: TrackersSettingsView()) { Text("Trackers") }
         }
@@ -340,6 +332,7 @@ struct LanguageSelectionView: View {
                 }
             }
             .padding(.top, 16)
+            .background(LunaScrollTracker())
         }
         .navigationTitle("Language")
         .lunaGradientBackground()

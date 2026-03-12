@@ -60,11 +60,11 @@ struct ContentView: View {
                     settingsFullScreen
                         .transition(.asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
-                            removal: .move(edge: .trailing).combined(with: .opacity)
+                            removal: .move(edge: .trailing).combined(with: .opacity).combined(with: .scale(scale: 0.95, anchor: .trailing))
                         ))
                 }
             }
-            .animation(.easeInOut(duration: 0.3), value: showingSettings)
+            .animation(.spring(response: 0.35, dampingFraction: 0.86), value: showingSettings)
             .task { await ServiceManager.shared.autoUpdateServicesIfNeeded() }
             .onChange(of: scenePhase) { newPhase in
                 if newPhase == .active {
@@ -85,11 +85,11 @@ struct ContentView: View {
                     settingsFullScreen
                         .transition(.asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
-                            removal: .move(edge: .trailing).combined(with: .opacity)
+                            removal: .move(edge: .trailing).combined(with: .opacity).combined(with: .scale(scale: 0.95, anchor: .trailing))
                         ))
                 }
             }
-            .animation(.easeInOut(duration: 0.3), value: showingSettings)
+            .animation(.spring(response: 0.35, dampingFraction: 0.86), value: showingSettings)
             .task { await ServiceManager.shared.autoUpdateServicesIfNeeded() }
             .onChange(of: scenePhase) { newPhase in
                 if newPhase == .active {
@@ -111,11 +111,11 @@ struct ContentView: View {
                 settingsFullScreen
                     .transition(.asymmetric(
                         insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .trailing).combined(with: .opacity)
+                        removal: .move(edge: .trailing).combined(with: .opacity).combined(with: .scale(scale: 0.95, anchor: .trailing))
                     ))
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: showingSettings)
+        .animation(.spring(response: 0.35, dampingFraction: 0.86), value: showingSettings)
         .task { await ServiceManager.shared.autoUpdateServicesIfNeeded() }
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .active {

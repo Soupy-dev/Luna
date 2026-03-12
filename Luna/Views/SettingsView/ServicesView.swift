@@ -130,6 +130,7 @@ struct ServicesView: View {
             } footer: {
                 Text("Automatically check for service updates when the app is opened.")
             }
+            .background(LunaScrollTracker())
 
             Section(header: unifiedSectionHeader) {
                 if serviceManager.services.isEmpty && stremioManager.addons.isEmpty {
