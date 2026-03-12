@@ -409,6 +409,22 @@ class TMDBService: ObservableObject {
     
     // MARK: - Helper function to get romaji title
     func getRomajiTitle(for mediaType: String, id: Int) async -> String? {
+        do {
+            if mediaType == "movie" {
+                let alternativeTitles = try await getMovieAlternativeTitles(id: id)
+                return alternativeTitles.titles.first { title in
+                    title.iso31661 == "JP" && (title.type?.lowercased().contains("romaji") == true || title.type?.lowercased().contains("romanized") == true)
+                }?.title
+            } else {
+                let alternativeTitles = try await getTVShowAlternativeTitles(id: id)
+                return alternativeTitles.results.first { title in
+                    title.iso31661 == "JP" && (title.type?.lowercased().contains("romaji") == true || title.type?.lowercased().contains("romanized") == true)
+                }?.title
+            }
+        } catch {
+            return nil
+        }
+    }
 
     // MARK: - Discover by Genre
     func discoverByGenre(genreId: Int, mediaType: String = "movie", page: Int = 1) async throws -> [TMDBSearchResult] {
@@ -454,22 +470,6 @@ class TMDBService: ObservableObject {
             return response.results.map {
                 TMDBSearchResult(id: $0.id, mediaType: "tv", title: nil, name: $0.name, overview: $0.overview, posterPath: $0.posterPath, backdropPath: $0.backdropPath, releaseDate: nil, firstAirDate: $0.firstAirDate, voteAverage: $0.voteAverage, popularity: $0.popularity, adult: nil, genreIds: $0.genreIds)
             }
-        }
-    }
-        do {
-            if mediaType == "movie" {
-                let alternativeTitles = try await getMovieAlternativeTitles(id: id)
-                return alternativeTitles.titles.first { title in
-                    title.iso31661 == "JP" && (title.type?.lowercased().contains("romaji") == true || title.type?.lowercased().contains("romanized") == true)
-                }?.title
-            } else {
-                let alternativeTitles = try await getTVShowAlternativeTitles(id: id)
-                return alternativeTitles.results.first { title in
-                    title.iso31661 == "JP" && (title.type?.lowercased().contains("romaji") == true || title.type?.lowercased().contains("romanized") == true)
-                }?.title
-            }
-        } catch {
-            return nil
         }
     }
     

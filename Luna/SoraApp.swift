@@ -32,6 +32,9 @@ struct SoraApp: App {
     @StateObject private var moduleManager = ModuleManager.shared
     @StateObject private var favouriteManager = FavouriteManager.shared
 
+    @State private var splashFinished = false
+    @State private var showSplash = true
+
 #if !os(tvOS)
     @AppStorage("showKanzen") private var showKanzen: Bool = false
     let kanzen = KanzenEngine();
@@ -48,18 +51,37 @@ struct SoraApp: App {
 
     var body: some Scene {
         WindowGroup {
+            ZStack {
 #if os(tvOS)
-            ContentView()
-#else
-            if showKanzen {
-                    KanzenMenu().environmentObject(settings).environmentObject(moduleManager).environmentObject(favouriteManager)
-                    .environment(\.managedObjectContext, favouriteManager.container.viewContext)
-                    .accentColor(settings.accentColor)
-            }
-            else{
                 ContentView()
-            }
+                    .onAppear { splashFinished = true }
+#else
+                if showKanzen {
+                    KanzenMenu().environmentObject(settings).environmentObject(moduleManager).environmentObject(favouriteManager)
+                        .environment(\.managedObjectContext, favouriteManager.container.viewContext)
+                        .accentColor(settings.accentColor)
+                        .onAppear { splashFinished = true }
+                } else {
+                    ContentView()
+                        .onAppear { splashFinished = true }
+                }
 #endif
+
+                if showSplash {
+                    SplashScreenView(isFinished: $splashFinished)
+                        .ignoresSafeArea()
+                        .zIndex(1)
+                        .onDisappear { showSplash = false }
+                }
+            }
+            .onChange(of: splashFinished) { finished in
+                if finished {
+                    // Give the dismiss animation time to play, then remove the splash layer
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        showSplash = false
+                    }
+                }
+            }
         }
     }
 }

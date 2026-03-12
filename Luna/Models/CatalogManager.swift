@@ -38,13 +38,13 @@ class CatalogManager: ObservableObject {
             Catalog(id: "topRatedAnime", name: "Top Rated Anime", source: .anilist, isEnabled: true, order: 12),
             Catalog(id: "airingAnime", name: "Currently Airing Anime", source: .anilist, isEnabled: false, order: 13),
             Catalog(id: "upcomingAnime", name: "Upcoming Anime", source: .anilist, isEnabled: false, order: 14),
-            Catalog(id: "networks", name: "Network", source: .tmdb, displayStyle: .network, isEnabled: true, order: 15),
-            Catalog(id: "genres", name: "Category", source: .tmdb, displayStyle: .genre, isEnabled: true, order: 16),
-            Catalog(id: "companies", name: "Company", source: .tmdb, displayStyle: .company, isEnabled: true, order: 17),
-            Catalog(id: "bestTVShows", name: "Best TV Shows", source: .tmdb, displayStyle: .ranked, isEnabled: true, order: 18),
-            Catalog(id: "bestMovies", name: "Best Movies", source: .tmdb, displayStyle: .ranked, isEnabled: true, order: 19),
-            Catalog(id: "bestAnime", name: "Best Anime", source: .anilist, displayStyle: .ranked, isEnabled: true, order: 20),
-            Catalog(id: "featured", name: "Featured", source: .tmdb, displayStyle: .featured, isEnabled: true, order: 21)
+            Catalog(id: "networks", name: "Network", source: .tmdb, isEnabled: true, order: 15, displayStyle: .network),
+            Catalog(id: "genres", name: "Category", source: .tmdb, isEnabled: true, order: 16, displayStyle: .genre),
+            Catalog(id: "companies", name: "Company", source: .tmdb, isEnabled: true, order: 17, displayStyle: .company),
+            Catalog(id: "bestTVShows", name: "Best TV Shows", source: .tmdb, isEnabled: true, order: 18, displayStyle: .ranked),
+            Catalog(id: "bestMovies", name: "Best Movies", source: .tmdb, isEnabled: true, order: 19, displayStyle: .ranked),
+            Catalog(id: "bestAnime", name: "Best Anime", source: .anilist, isEnabled: true, order: 20, displayStyle: .ranked),
+            Catalog(id: "featured", name: "Featured", source: .tmdb, isEnabled: true, order: 21, displayStyle: .featured)
         ]
         
         // Try to load saved catalogs

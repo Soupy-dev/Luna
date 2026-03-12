@@ -140,7 +140,8 @@ struct DiscoverDetailView: View {
                 .lineLimit(1)
             
             HStack(spacing: 4) {
-                if let date = item.displayDate, !date.isEmpty {
+                if !item.displayDate.isEmpty {
+                    let date = item.displayDate
                     Text(String(date.prefix(4)))
                         .font(.caption2)
                         .foregroundColor(.white.opacity(0.6))

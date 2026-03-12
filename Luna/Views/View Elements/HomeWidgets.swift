@@ -493,7 +493,8 @@ struct FeaturedSpotlightWidget: View {
                 .frame(width: 120 * iPadScale, alignment: .leading)
             
             HStack(spacing: 4) {
-                if let date = item.displayDate, !date.isEmpty {
+                if !item.displayDate.isEmpty {
+                    let date = item.displayDate
                     Text(String(date.prefix(10)))
                         .font(.caption2)
                         .foregroundColor(.white.opacity(0.6))
