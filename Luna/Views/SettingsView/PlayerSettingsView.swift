@@ -75,6 +75,14 @@ final class PlayerSettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(aniSkipAutoSkip, forKey: "aniSkipAutoSkip") }
     }
 
+    @Published var aniSkipEnabled: Bool {
+        didSet { UserDefaults.standard.set(aniSkipEnabled, forKey: "aniSkipEnabled") }
+    }
+
+    @Published var introDBEnabled: Bool {
+        didSet { UserDefaults.standard.set(introDBEnabled, forKey: "introDBEnabled") }
+    }
+
     @Published var skip85sEnabled: Bool {
         didSet { UserDefaults.standard.set(skip85sEnabled, forKey: "skip85sEnabled") }
     }
@@ -102,6 +110,18 @@ final class PlayerSettingsStore: ObservableObject {
         self.vlcSubtitleEditMenuEnabled = UserDefaults.standard.bool(forKey: "enableVLCSubtitleEditMenu")
 
         self.aniSkipAutoSkip = UserDefaults.standard.bool(forKey: "aniSkipAutoSkip")
+
+        if UserDefaults.standard.object(forKey: "aniSkipEnabled") == nil {
+            self.aniSkipEnabled = true
+        } else {
+            self.aniSkipEnabled = UserDefaults.standard.bool(forKey: "aniSkipEnabled")
+        }
+
+        if UserDefaults.standard.object(forKey: "introDBEnabled") == nil {
+            self.introDBEnabled = true
+        } else {
+            self.introDBEnabled = UserDefaults.standard.bool(forKey: "introDBEnabled")
+        }
 
         self.skip85sEnabled = UserDefaults.standard.bool(forKey: "skip85sEnabled")
 
@@ -473,11 +493,47 @@ struct PlayerSettingsView: View {
                 Section(header: Text("Skip Segments")) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
+                            Text("AniSkip")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+
+                            Text("Fetch skip segments from AniSkip for anime content.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: $store.aniSkipEnabled)
+                            .tint(accentColorManager.currentAccentColor)
+                    }
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("TheIntroDB")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+
+                            Text("Fetch skip segments from TheIntroDB for all content.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: $store.introDBEnabled)
+                            .tint(accentColorManager.currentAccentColor)
+                    }
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text("Auto Skip")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
 
-                            Text("Automatically skip intros, outros, recaps, and previews when detected via AniSkip or TheIntroDB. A skip button is always shown regardless of this setting.")
+                            Text("Automatically skip intros, outros, recaps, and previews when detected. A skip button is always shown regardless of this setting.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.leading)
@@ -495,7 +551,7 @@ struct PlayerSettingsView: View {
                                 .font(.subheadline)
                                 .fontWeight(.medium)
 
-                            Text("Show a skip 85 seconds button when AniSkip and TheIntroDB don't return any skip data for the current episode.")
+                            Text("Show a skip 85 seconds button when no skip data is returned for the current episode.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.leading)

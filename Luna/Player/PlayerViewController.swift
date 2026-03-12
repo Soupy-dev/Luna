@@ -1830,8 +1830,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
             var segments: [SkipSegment] = []
 
+            let aniSkipEnabled = UserDefaults.standard.object(forKey: "aniSkipEnabled") as? Bool ?? true
+            let introDBEnabled = UserDefaults.standard.object(forKey: "introDBEnabled") as? Bool ?? true
+
             // ── Anime content: try AniSkip first (better anime coverage) ──
-            if isAnime, let ep = episodeNumber {
+            if aniSkipEnabled, isAnime, let ep = episodeNumber {
                 segments = await self.fetchAniSkipSegments(
                     tmdbId: tmdbId,
                     seasonNumber: seasonNumber ?? 1,
@@ -1849,7 +1852,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             // For anime, use original TMDB S/E (pre-AniList restructuring) since TheIntroDB uses TMDB numbering
             let introDBSeason = self.originalTMDBSeasonNumber ?? seasonNumber
             let introDBEpisode = self.originalTMDBEpisodeNumber ?? episodeNumber
-            if segments.isEmpty {
+            if introDBEnabled, segments.isEmpty {
                 do {
                     let introDBSegments = try await IntroDBService.shared.fetchSkipTimes(
                         tmdbId: tmdbId,
