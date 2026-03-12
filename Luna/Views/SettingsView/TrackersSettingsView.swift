@@ -23,69 +23,68 @@ struct TrackersSettingsView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal)
 
-                    VStack(spacing: 12) {
-                        // Sync Toggle
-                        Toggle("Enable Sync", isOn: $trackerManager.trackerState.syncEnabled)
-                            .foregroundColor(.white)
-                            .padding()
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(12)
-
-                        // AniList Section
-                        trackerRow(
-                            service: .anilist,
-                            isConnected: trackerManager.trackerState.getAccount(for: .anilist) != nil,
-                            username: trackerManager.trackerState.getAccount(for: .anilist)?.username,
-                            onConnect: { trackerManager.startAniListAuth() },
-                            onDisconnect: { trackerManager.disconnectTracker(.anilist) }
-                        )
-
-                        // AniList Import Section
-                        if trackerManager.trackerState.getAccount(for: .anilist) != nil {
-                            aniListImportSection
-                        }
-
-                        // Trakt Section
-                        trackerRow(
-                            service: .trakt,
-                            isConnected: trackerManager.trackerState.getAccount(for: .trakt) != nil,
-                            username: trackerManager.trackerState.getAccount(for: .trakt)?.username,
-                            onConnect: { trackerManager.startTraktAuth() },
-                            onDisconnect: { trackerManager.disconnectTracker(.trakt) }
-                        )
-                    }
-                    .padding(.horizontal)
-
-                    if let error = trackerManager.authError {
-                        VStack {
-                            HStack {
-                                Image(systemName: "exclamationmark.circle")
-                                    .foregroundColor(.orange)
-                                Text(error)
-                                    .font(.caption)
-                                    .foregroundColor(.orange)
-                            }
-                        }
+                VStack(spacing: 12) {
+                    // Sync Toggle
+                    Toggle("Enable Sync", isOn: $trackerManager.trackerState.syncEnabled)
+                        .foregroundColor(.white)
                         .padding()
-                        .background(Color.orange.opacity(0.1))
-                        .cornerRadius(8)
-                        .padding(.horizontal)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(12)
+
+                    // AniList Section
+                    trackerRow(
+                        service: .anilist,
+                        isConnected: trackerManager.trackerState.getAccount(for: .anilist) != nil,
+                        username: trackerManager.trackerState.getAccount(for: .anilist)?.username,
+                        onConnect: { trackerManager.startAniListAuth() },
+                        onDisconnect: { trackerManager.disconnectTracker(.anilist) }
+                    )
+
+                    // AniList Import Section
+                    if trackerManager.trackerState.getAccount(for: .anilist) != nil {
+                        aniListImportSection
                     }
 
-                    Spacer()
+                    // Trakt Section
+                    trackerRow(
+                        service: .trakt,
+                        isConnected: trackerManager.trackerState.getAccount(for: .trakt) != nil,
+                        username: trackerManager.trackerState.getAccount(for: .trakt)?.username,
+                        onConnect: { trackerManager.startTraktAuth() },
+                        onDisconnect: { trackerManager.disconnectTracker(.trakt) }
+                    )
                 }
-                .padding(.vertical)
-                .frame(maxWidth: isIPad ? 700 : .infinity)
-                .frame(maxWidth: .infinity)
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: ScrollOffsetPreferenceKey.self,
-                            value: -geo.frame(in: .named("trackersScroll")).origin.y
-                        )
+                .padding(.horizontal)
+
+                if let error = trackerManager.authError {
+                    VStack {
+                        HStack {
+                            Image(systemName: "exclamationmark.circle")
+                                .foregroundColor(.orange)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
                     }
-                )
+                    .padding()
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(8)
+                    .padding(.horizontal)
+                }
+
+                Spacer()
             }
+            .padding(.vertical)
+            .frame(maxWidth: isIPad ? 700 : .infinity)
+            .frame(maxWidth: .infinity)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: ScrollOffsetPreferenceKey.self,
+                        value: -geo.frame(in: .named("trackersScroll")).origin.y
+                    )
+                }
+            )
         }
         .coordinateSpace(name: "trackersScroll")
         .onPreferenceChange(ScrollOffsetPreferenceKey.self) { scrollOffset = $0 }
