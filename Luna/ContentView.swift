@@ -14,9 +14,16 @@ struct ContentView: View {
     
     @StateObject private var accentColorManager = AccentColorManager.shared
     @ObservedObject private var downloadManager = DownloadManager.shared
+    @AppStorage("githubReleaseShowAlertPending") private var githubReleaseShowAlertPending = false
+    @AppStorage("githubReleaseLatestVersion") private var githubReleaseLatestVersion = ""
+    @AppStorage("githubReleaseURL") private var githubReleaseURL = ""
+
     @State private var selectedTab: AppTab = .home
     @State private var showingSettings = false
+    @State private var showingReleaseAlert = false
+
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @Namespace private var heroNamespace
     
     init() {
@@ -126,11 +133,52 @@ struct ContentView: View {
             }
         }
 #endif
+        .onAppear {
+            presentUpdateAlertIfNeeded()
+        }
+        .onChange(of: githubReleaseShowAlertPending) { pending in
+            if pending {
+                presentUpdateAlertIfNeeded()
+            }
+        }
+        .alert("Update Available", isPresented: $showingReleaseAlert) {
+            Button("Later", role: .cancel) {
+                consumeUpdateAlert()
+            }
+
+            Button("Open Release") {
+                consumeUpdateAlert()
+                if let url = URL(string: githubReleaseURL), !githubReleaseURL.isEmpty {
+                    openURL(url)
+                }
+            }
+        } message: {
+            if githubReleaseLatestVersion.isEmpty {
+                Text("A new Luna release is available on GitHub.")
+            } else {
+                Text("A new Luna release (\(githubReleaseLatestVersion)) is available on GitHub.")
+            }
+        }
     }
 
     private func runBackgroundAutoChecks() async {
         await ServiceManager.shared.autoUpdateServicesIfNeeded()
         await GitHubReleaseChecker.checkForUpdatesIfNeeded()
+
+        await MainActor.run {
+            presentUpdateAlertIfNeeded()
+        }
+    }
+
+    private func presentUpdateAlertIfNeeded() {
+        guard githubReleaseShowAlertPending else { return }
+        showingReleaseAlert = true
+    }
+
+    private func consumeUpdateAlert() {
+        GitHubReleaseChecker.consumePendingUpdatePrompt()
+        githubReleaseShowAlertPending = false
+        showingReleaseAlert = false
     }
     
 #if compiler(>=6.0)

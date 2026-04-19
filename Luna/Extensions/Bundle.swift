@@ -25,6 +25,8 @@ enum GitHubReleaseChecker {
     private static let updateAvailableKey = "githubReleaseUpdateAvailable"
     private static let latestVersionKey = "githubReleaseLatestVersion"
     private static let latestReleaseURLKey = "githubReleaseURL"
+    private static let pendingPromptKey = "githubReleaseShowAlertPending"
+    private static let lastPromptedVersionKey = "githubReleaseLastPromptedVersion"
 
     // Keep release checks lightweight and avoid excessive GitHub API calls.
     private static let autoCheckInterval: TimeInterval = 6 * 3600
@@ -34,7 +36,9 @@ enum GitHubReleaseChecker {
             autoCheckEnabledKey: true,
             updateAvailableKey: false,
             latestVersionKey: "",
-            latestReleaseURLKey: ""
+            latestReleaseURLKey: "",
+            pendingPromptKey: false,
+            lastPromptedVersionKey: ""
         ])
     }
 
@@ -77,6 +81,15 @@ enum GitHubReleaseChecker {
             UserDefaults.standard.set(updateAvailable, forKey: updateAvailableKey)
             UserDefaults.standard.set(release.tagName, forKey: latestVersionKey)
             UserDefaults.standard.set(release.htmlUrl, forKey: latestReleaseURLKey)
+
+            if updateAvailable {
+                let lastPromptedVersion = UserDefaults.standard.string(forKey: lastPromptedVersionKey) ?? ""
+                if lastPromptedVersion != release.tagName {
+                    UserDefaults.standard.set(true, forKey: pendingPromptKey)
+                }
+            } else {
+                UserDefaults.standard.set(false, forKey: pendingPromptKey)
+            }
 
             if updateAvailable {
                 Logger.shared.log("Update available: current=\(Bundle.main.appVersion), latest=\(release.tagName)", type: "Update")
@@ -148,6 +161,15 @@ enum GitHubReleaseChecker {
         }
 
         return false
+    }
+
+    static func consumePendingUpdatePrompt() {
+        let latestVersion = UserDefaults.standard.string(forKey: latestVersionKey) ?? ""
+        UserDefaults.standard.set(false, forKey: pendingPromptKey)
+
+        if !latestVersion.isEmpty {
+            UserDefaults.standard.set(latestVersion, forKey: lastPromptedVersionKey)
+        }
     }
 }
 
