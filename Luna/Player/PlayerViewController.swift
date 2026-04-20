@@ -1876,6 +1876,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                     let skip85sEnabled = UserDefaults.standard.bool(forKey: "skip85sEnabled")
                     if skip85sEnabled {
                         self.showSkip85sButton()
+                    } else {
+                        self.hideSkip85sButton()
                     }
                 }
 #endif
@@ -1890,6 +1892,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 self.progressModel.skipSegments = segments.map { seg in
                     (start: seg.startTime / liveDuration, end: seg.endTime / liveDuration)
                 }
+#if !os(tvOS)
+                let skip85sEnabled = UserDefaults.standard.bool(forKey: "skip85sEnabled")
+                let skip85sAlwaysVisible = UserDefaults.standard.bool(forKey: "skip85sAlwaysVisible")
+                if skip85sEnabled && skip85sAlwaysVisible {
+                    self.showSkip85sButton()
+                } else {
+                    self.hideSkip85sButton()
+                }
+#endif
             }
         }
     }

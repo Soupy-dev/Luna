@@ -122,6 +122,7 @@ struct ModulesSearchResultsSheet: View {
     @StateObject private var serviceManager = ServiceManager.shared
     @StateObject private var stremioManager = StremioAddonManager.shared
     @StateObject private var algorithmManager = AlgorithmManager.shared
+    @State private var autoModeDidRun = false
 
     private var effectiveTitle: String { seasonTitleOverride ?? mediaTitle }
     private var animeEffectiveTitle: String {
@@ -622,6 +623,162 @@ struct ModulesSearchResultsSheet: View {
         
         return (highQuality, lowQuality)
     }
+
+    private var isAutoModeEnabled: Bool {
+        !downloadMode && UserDefaults.standard.bool(forKey: "servicesAutoModeEnabled")
+    }
+
+    private var selectedAutoModeSourceIds: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: "servicesAutoModeSourceIds") ?? [])
+    }
+
+    private func autoModeSourceId(for item: ResultItem) -> String {
+        switch item {
+        case .service(let service):
+            return "service:\(service.id.uuidString)"
+        case .stremio(let addon):
+            return "stremio:\(addon.id.uuidString)"
+        }
+    }
+
+    private func normalizeTitle(_ title: String) -> String {
+        title
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func resultSimilarity(_ result: SearchItem) -> Double {
+        let primarySimilarity = algorithmManager.calculateSimilarity(original: mediaTitle, result: result.title)
+        let originalSimilarity = originalTitle.map { algorithmManager.calculateSimilarity(original: $0, result: result.title) } ?? 0.0
+        return max(primarySimilarity, originalSimilarity)
+    }
+
+    private func resultTieBreakScore(_ result: SearchItem) -> Int {
+        let normalizedResult = normalizeTitle(result.title)
+        let expectedTitles = [displayTitle, effectiveTitle, mediaTitle, originalTitle]
+            .compactMap { $0 }
+            .map(normalizeTitle)
+            .filter { !$0.isEmpty }
+
+        var score = 0
+        for candidate in expectedTitles {
+            if normalizedResult == candidate {
+                score += 10
+            } else if normalizedResult.contains(candidate) || candidate.contains(normalizedResult) {
+                score += 4
+            }
+        }
+
+        if let episode = selectedEpisode {
+            let seasonEpisodeToken = "s\(episode.seasonNumber)e\(episode.episodeNumber)"
+            let episodeToken = "e\(episode.episodeNumber)"
+            if normalizedResult.contains(seasonEpisodeToken) || normalizedResult.contains(episodeToken) {
+                score += 3
+            }
+        }
+
+        return score
+    }
+
+    private func bestServiceResult(for service: Service) -> SearchItem? {
+        guard let results = viewModel.moduleResults[service.id], !results.isEmpty else { return nil }
+        let threshold = viewModel.highQualityThreshold
+
+        let ranked = results.map { result in
+            let similarity = resultSimilarity(result)
+            let tieBreak = resultTieBreakScore(result)
+            let lengthDelta = abs(result.title.count - displayTitle.count)
+            return (result: result, similarity: similarity, tieBreak: tieBreak, lengthDelta: lengthDelta)
+        }
+        .filter { $0.similarity >= threshold }
+        .sorted { lhs, rhs in
+            if lhs.similarity != rhs.similarity { return lhs.similarity > rhs.similarity }
+            if lhs.tieBreak != rhs.tieBreak { return lhs.tieBreak > rhs.tieBreak }
+            if lhs.lengthDelta != rhs.lengthDelta { return lhs.lengthDelta < rhs.lengthDelta }
+            return lhs.result.title.localizedCaseInsensitiveCompare(rhs.result.title) == .orderedAscending
+        }
+
+        return ranked.first?.result
+    }
+
+    private func stremioStreamScore(_ stream: StremioStream) -> Double {
+        let title = [stream.name, stream.title, stream.description].compactMap { $0 }.joined(separator: " ")
+        let baseSimilarity = algorithmManager.calculateSimilarity(original: displayTitle, result: title)
+        let lower = title.lowercased()
+
+        let qualityBonus: Double
+        if lower.contains("2160") || lower.contains("4k") {
+            qualityBonus = 0.08
+        } else if lower.contains("1080") {
+            qualityBonus = 0.06
+        } else if lower.contains("720") {
+            qualityBonus = 0.04
+        } else {
+            qualityBonus = 0.0
+        }
+
+        return baseSimilarity + qualityBonus
+    }
+
+    private func bestStremioStream(from streams: [StremioStream]) -> StremioStream? {
+        guard !streams.isEmpty else { return nil }
+        guard let candidate = streams.max(by: { lhs, rhs in
+            let lhsScore = stremioStreamScore(lhs)
+            let rhsScore = stremioStreamScore(rhs)
+            if lhsScore == rhsScore {
+                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedDescending
+            }
+            return lhsScore < rhsScore
+        }) else {
+            return nil
+        }
+
+        return stremioStreamScore(candidate) >= viewModel.highQualityThreshold ? candidate : nil
+    }
+
+    @MainActor
+    private func maybeRunAutoModeSelection() {
+        guard isAutoModeEnabled,
+              !autoModeDidRun,
+              !viewModel.isSearching,
+              !viewModel.isSearchingStremio else { return }
+
+        autoModeDidRun = true
+        Task { @MainActor in
+            await runAutoModeSelection()
+        }
+    }
+
+    @MainActor
+    private func runAutoModeSelection() async {
+        let configuredIds = selectedAutoModeSourceIds
+        let orderedSelections = sortedResultItems.filter { configuredIds.contains(autoModeSourceId(for: $0)) }
+
+        guard !orderedSelections.isEmpty else {
+            viewModel.streamError = "Auto Mode is enabled, but no active service/addon is selected in Services settings."
+            viewModel.showingStreamError = true
+            return
+        }
+
+        for item in orderedSelections {
+            switch item {
+            case .service(let service):
+                if let result = bestServiceResult(for: service) {
+                    await playContent(result)
+                    return
+                }
+            case .stremio(let addon):
+                if let stream = bestStremioStream(from: viewModel.stremioResults[addon.id] ?? []) {
+                    playStremioStream(stream, addon: addon)
+                    return
+                }
+            }
+        }
+
+        viewModel.streamError = "Auto Mode could not find a match above your quality threshold in the selected services/addons."
+        viewModel.showingStreamError = true
+    }
     
     var body: some View {
         NavigationView {
@@ -700,8 +857,15 @@ struct ModulesSearchResultsSheet: View {
         }
         .overlay(streamFetchingOverlay)
         .onAppear {
+            autoModeDidRun = false
             startProgressiveSearch()
             startStremioSearch()
+        }
+        .onChangeComp(of: viewModel.isSearching) { _, _ in
+            maybeRunAutoModeSelection()
+        }
+        .onChangeComp(of: viewModel.isSearchingStremio) { _, _ in
+            maybeRunAutoModeSelection()
         }
         .alert("Quality Threshold", isPresented: $viewModel.showingFilterEditor) {
             qualityThresholdAlertContent

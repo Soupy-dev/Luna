@@ -70,33 +70,30 @@ struct LoggerView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
+        List {
+            LunaScrollTracker()
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .lunaHideListRowSeparator()
+
             if filteredLogs.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "doc.text")
                         .font(.system(size: 50))
                         .foregroundColor(.secondary)
-                    
+
                     Text("No logs found")
                         .font(.headline)
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 20)
+                .listRowBackground(Color.clear)
+                .lunaHideListRowSeparator()
             } else {
-                ScrollViewReader { proxy in
-                    List {
-                        LunaScrollTracker()
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .lunaHideListRowSeparator()
-
-                        ForEach(filteredLogs) { log in
-                            LogEntryRow(log: log)
-                                .id(log.id)
-                        }
-                    }
-                    .listStyle(PlainListStyle())
+                ForEach(filteredLogs) { log in
+                    LogEntryRow(log: log)
+                        .id(log.id)
                 }
             }
         }
