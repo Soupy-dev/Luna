@@ -1,4 +1,4 @@
-My fork of Luna.
+My fork of Luna. Has no affiliation with the parent repo. And user is responsible for what they do with the app. Does not come with services or addons.
 
 Features added:
 
@@ -12,7 +12,7 @@ Features added:
 8: Auto subtitles, auto anime language, Next episode button, AniSkip, and TheIntroDB for VLC only
 9: Minor but episodes now have their full descriptions in the services result sheet
 10: VLC player (Requires proxy setting enabled to work with every service, otherwise only works with some)
-11: Made Crancis Continue Watching respect the TMDB+AniList system
+11: Made Continue Watching respect the TMDB+AniList system
 12: Downloads support, ui needed minor revision to add this tab. Settings is now in the top right. HLS downloads are slower and nonbackgroundable due to needing proper playback support from mpv and VLC
 13: VLC does have subtitle editing. But I just removed pip. I went through many implementations and spent a bunch of time. But VLC just isn't ready for pip, waiting for VLC v4 for better stability and native pip is the best call. I've pretty much pushed VLC as far as it can go.
 14: Manga mode completed (ugly ui lowkey tho, works but I didn't care much for this mode. I just didn't want to leave it abandoned and be dead code.)
@@ -23,5 +23,6 @@ Features added:
 Notes:
 
 I have 750+ workflows it took a long time. VLC and this Luna in general has come a long way. There are likely minor issues with VLC that can't be fixed/smoothed without v4.
+
 
 
