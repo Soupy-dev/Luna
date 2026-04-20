@@ -51,35 +51,49 @@ struct ContentView: View {
     }
     
     var body: some View {
+        Group {
 #if compiler(>=6.0)
-        if #available(iOS 26.0, tvOS 26.0, *) {
-            ZStack {
-                modernTabView
-                    .accentColor(accentColorManager.currentAccentColor)
-                    .heroNamespace(heroNamespace)
-                    .overlay(alignment: .topTrailing) {
-                        if (selectedTab == .home || selectedTab == .schedule) && !showingSettings {
-                            FloatingSettingsOverlay(showingSettings: $showingSettings)
+            if #available(iOS 26.0, tvOS 26.0, *) {
+                ZStack {
+                    modernTabView
+                        .accentColor(accentColorManager.currentAccentColor)
+                        .heroNamespace(heroNamespace)
+                        .overlay(alignment: .topTrailing) {
+                            if (selectedTab == .home || selectedTab == .schedule) && !showingSettings {
+                                FloatingSettingsOverlay(showingSettings: $showingSettings)
+                            }
                         }
+                    
+                    if showingSettings {
+                        settingsFullScreen
+                            .zIndex(1)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .move(edge: .trailing).combined(with: .opacity).combined(with: .scale(scale: 0.95, anchor: .trailing))
+                            ))
                     }
-                
-                if showingSettings {
-                    settingsFullScreen
-                        .zIndex(1)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .trailing).combined(with: .opacity),
-                            removal: .move(edge: .trailing).combined(with: .opacity).combined(with: .scale(scale: 0.95, anchor: .trailing))
-                        ))
+                }
+            } else {
+                ZStack {
+                    olderTabView
+                        .heroNamespace(heroNamespace)
+                        .overlay {
+                            if (selectedTab == .home || selectedTab == .schedule) && !showingSettings {
+                                FloatingSettingsOverlay(showingSettings: $showingSettings)
+                            }
+                        }
+                    
+                    if showingSettings {
+                        settingsFullScreen
+                            .zIndex(1)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .move(edge: .trailing).combined(with: .opacity).combined(with: .scale(scale: 0.95, anchor: .trailing))
+                            ))
+                    }
                 }
             }
-            .animation(.spring(response: 0.35, dampingFraction: 0.86), value: showingSettings)
-            .task { await runBackgroundAutoChecks() }
-            .onChange(of: scenePhase) { newPhase in
-                if newPhase == .active {
-                    Task { await runBackgroundAutoChecks() }
-                }
-            }
-        } else {
+#else
             ZStack {
                 olderTabView
                     .heroNamespace(heroNamespace)
@@ -98,32 +112,7 @@ struct ContentView: View {
                         ))
                 }
             }
-            .animation(.spring(response: 0.35, dampingFraction: 0.86), value: showingSettings)
-            .task { await runBackgroundAutoChecks() }
-            .onChange(of: scenePhase) { newPhase in
-                if newPhase == .active {
-                    Task { await runBackgroundAutoChecks() }
-                }
-            }
-        }
-#else
-        ZStack {
-            olderTabView
-                .heroNamespace(heroNamespace)
-                .overlay {
-                    if (selectedTab == .home || selectedTab == .schedule) && !showingSettings {
-                        FloatingSettingsOverlay(showingSettings: $showingSettings)
-                    }
-                }
-            
-            if showingSettings {
-                settingsFullScreen
-                    .zIndex(1)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .trailing).combined(with: .opacity).combined(with: .scale(scale: 0.95, anchor: .trailing))
-                    ))
-            }
+#endif
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.86), value: showingSettings)
         .task { await runBackgroundAutoChecks() }
@@ -132,7 +121,6 @@ struct ContentView: View {
                 Task { await runBackgroundAutoChecks() }
             }
         }
-#endif
         .onAppear {
             presentUpdateAlertIfNeeded()
         }
