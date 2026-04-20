@@ -67,10 +67,6 @@ final class PlayerSettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(inAppPlayer.rawValue, forKey: "inAppPlayer") }
     }
 
-    @Published var vlcSubtitleEditMenuEnabled: Bool {
-        didSet { UserDefaults.standard.set(vlcSubtitleEditMenuEnabled, forKey: "enableVLCSubtitleEditMenu") }
-    }
-
     @Published var aniSkipAutoSkip: Bool {
         didSet { UserDefaults.standard.set(aniSkipAutoSkip, forKey: "aniSkipAutoSkip") }
     }
@@ -85,6 +81,10 @@ final class PlayerSettingsStore: ObservableObject {
 
     @Published var skip85sEnabled: Bool {
         didSet { UserDefaults.standard.set(skip85sEnabled, forKey: "skip85sEnabled") }
+    }
+
+    @Published var skip85sAlwaysVisible: Bool {
+        didSet { UserDefaults.standard.set(skip85sAlwaysVisible, forKey: "skip85sAlwaysVisible") }
     }
 
     @Published var showNextEpisodeButton: Bool {
@@ -107,8 +107,6 @@ final class PlayerSettingsStore: ObservableObject {
         let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? InAppPlayer.normal.rawValue
         self.inAppPlayer = InAppPlayer(rawValue: inAppRaw) ?? .normal
 
-        self.vlcSubtitleEditMenuEnabled = UserDefaults.standard.bool(forKey: "enableVLCSubtitleEditMenu")
-
         self.aniSkipAutoSkip = UserDefaults.standard.bool(forKey: "aniSkipAutoSkip")
 
         if UserDefaults.standard.object(forKey: "aniSkipEnabled") == nil {
@@ -124,6 +122,7 @@ final class PlayerSettingsStore: ObservableObject {
         }
 
         self.skip85sEnabled = UserDefaults.standard.bool(forKey: "skip85sEnabled")
+        self.skip85sAlwaysVisible = UserDefaults.standard.bool(forKey: "skip85sAlwaysVisible")
 
         // Default to true if key has never been set
         if UserDefaults.standard.object(forKey: "showNextEpisodeButton") == nil {
@@ -335,25 +334,6 @@ struct PlayerSettingsView: View {
                     }
 
                     HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Subtitle Edit Menu")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-
-                            Text("Show subtitle appearance options in VLC player UI. Only works with Luna services; Stremio addons are not supported. May reduce performance.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.leading)
-                        }
-
-                        Spacer()
-
-                        Toggle("", isOn: $store.vlcSubtitleEditMenuEnabled)
-                            .tint(accentColorManager.currentAccentColor)
-                    }
-
-                    if store.vlcSubtitleEditMenuEnabled {
-                        HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Subtitle Text Color")
                                     .font(.subheadline)
@@ -487,7 +467,6 @@ struct PlayerSettingsView: View {
                                     .foregroundColor(accentColorManager.currentAccentColor)
                             }
                         }
-                    }
                 }
 
                 Section(header: Text("Skip Segments")) {
@@ -560,6 +539,24 @@ struct PlayerSettingsView: View {
                         Spacer()
 
                         Toggle("", isOn: $store.skip85sEnabled)
+                            .tint(accentColorManager.currentAccentColor)
+                    }
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Always Show Skip 85s")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+
+                            Text("Keep the Skip 85s button visible even when skip segments are available.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: $store.skip85sAlwaysVisible)
                             .tint(accentColorManager.currentAccentColor)
                     }
                 }

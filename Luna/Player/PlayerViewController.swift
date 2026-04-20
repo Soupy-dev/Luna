@@ -1829,6 +1829,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }
 
             var segments: [SkipSegment] = []
+            let skip85sEnabled = UserDefaults.standard.bool(forKey: "skip85sEnabled")
+            let skip85sAlwaysVisible = UserDefaults.standard.bool(forKey: "skip85sAlwaysVisible")
 
             let aniSkipEnabled = UserDefaults.standard.object(forKey: "aniSkipEnabled") as? Bool ?? true
             let introDBEnabled = UserDefaults.standard.object(forKey: "introDBEnabled") as? Bool ?? true
@@ -1873,9 +1875,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 Logger.shared.log("SkipData: No skip data found from any source for tmdbId=\(tmdbId)", type: "Skip")
 #if !os(tvOS)
                 await MainActor.run {
-                    let skip85sEnabled = UserDefaults.standard.bool(forKey: "skip85sEnabled")
                     if skip85sEnabled {
                         self.showSkip85sButton()
+                    } else {
+                        self.hideSkip85sButton()
                     }
                 }
 #endif
@@ -1890,6 +1893,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 self.progressModel.skipSegments = segments.map { seg in
                     (start: seg.startTime / liveDuration, end: seg.endTime / liveDuration)
                 }
+#if !os(tvOS)
+                if skip85sEnabled && skip85sAlwaysVisible {
+                    self.showSkip85sButton()
+                } else {
+                    self.hideSkip85sButton()
+                }
+#endif
             }
         }
     }

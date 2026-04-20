@@ -20,6 +20,8 @@ struct ServicesView: View {
     @State private var stremioURL = ""
     @State private var stremioError: String?
     @State private var showStremioError = false
+    @State private var servicesAutoModeEnabled: Bool = UserDefaults.standard.bool(forKey: "servicesAutoModeEnabled")
+    @State private var selectedAutoModeSourceIds: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "servicesAutoModeSourceIds") ?? [])
     
     var body: some View {
         ZStack {
@@ -111,6 +113,27 @@ struct ServicesView: View {
             case .stremio(let a): return a.sortIndex
             }
         }
+
+        var isActive: Bool {
+            switch self {
+            case .service(let s): return s.isActive
+            case .stremio(let a): return a.isActive
+            }
+        }
+
+        var displayName: String {
+            switch self {
+            case .service(let s): return s.metadata.sourceName
+            case .stremio(let a): return a.manifest.name
+            }
+        }
+
+        var autoModeSourceId: String {
+            switch self {
+            case .service(let s): return "service:\(s.id.uuidString)"
+            case .stremio(let a): return "stremio:\(a.id.uuidString)"
+            }
+        }
     }
 
     private var unifiedItems: [UnifiedItem] {
@@ -131,6 +154,38 @@ struct ServicesView: View {
                 Text("Automatically check for service updates when the app is opened.")
             }
             .background(LunaScrollTracker())
+
+            Section {
+                Toggle("Auto Mode", isOn: $servicesAutoModeEnabled)
+                    .onChange(of: servicesAutoModeEnabled) { newValue in
+                        UserDefaults.standard.set(newValue, forKey: "servicesAutoModeEnabled")
+                    }
+
+                if servicesAutoModeEnabled {
+                    let activeItems = unifiedItems.filter(\.isActive)
+                    if activeItems.isEmpty {
+                        Text("Activate at least one service or addon to use Auto Mode.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(activeItems) { item in
+                            Toggle(item.displayName, isOn: Binding(
+                                get: { selectedAutoModeSourceIds.contains(item.autoModeSourceId) },
+                                set: { isSelected in
+                                    if isSelected {
+                                        selectedAutoModeSourceIds.insert(item.autoModeSourceId)
+                                    } else {
+                                        selectedAutoModeSourceIds.remove(item.autoModeSourceId)
+                                    }
+                                    persistAutoModeSelection()
+                                }
+                            ))
+                        }
+                    }
+                }
+            } footer: {
+                Text("Auto Mode checks selected active services/addons from top to bottom and auto-picks the best match above your quality threshold.")
+            }
 
             Section(header: unifiedSectionHeader) {
                 if serviceManager.services.isEmpty && stremioManager.addons.isEmpty {
@@ -163,6 +218,9 @@ struct ServicesView: View {
                 Text(error)
             }
         }
+        .onAppear {
+            syncAutoModeSelectionWithInstalledSources()
+        }
     }
 
     @ViewBuilder
@@ -180,6 +238,7 @@ struct ServicesView: View {
                 stremioManager.removeAddon(addon)
             }
         }
+        syncAutoModeSelectionWithInstalledSources()
     }
 
     private func moveUnifiedItems(fromOffsets: IndexSet, toOffset: Int) {
@@ -207,6 +266,7 @@ struct ServicesView: View {
         StremioAddonStore.shared.save()
         serviceManager.loadServicesFromCloud()
         stremioManager.loadAddons()
+        syncAutoModeSelectionWithInstalledSources()
     }
     
     private func addStremioAddon() {
@@ -224,6 +284,22 @@ struct ServicesView: View {
                     showStremioError = true
                 }
             }
+        }
+    }
+
+    private func persistAutoModeSelection() {
+        let ordered = unifiedItems
+            .map(\.autoModeSourceId)
+            .filter { selectedAutoModeSourceIds.contains($0) }
+        UserDefaults.standard.set(ordered, forKey: "servicesAutoModeSourceIds")
+    }
+
+    private func syncAutoModeSelectionWithInstalledSources() {
+        let validIds = Set(unifiedItems.map(\.autoModeSourceId))
+        let previous = selectedAutoModeSourceIds
+        selectedAutoModeSourceIds = selectedAutoModeSourceIds.intersection(validIds)
+        if selectedAutoModeSourceIds != previous {
+            persistAutoModeSelection()
         }
     }
     

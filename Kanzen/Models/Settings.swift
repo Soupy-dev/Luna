@@ -43,8 +43,13 @@ class Settings: ObservableObject {
     }
 
     var enableVLCSubtitleEditMenu: Bool {
-        get { UserDefaults.standard.bool(forKey: "enableVLCSubtitleEditMenu") }
-        set { UserDefaults.standard.set(newValue, forKey: "enableVLCSubtitleEditMenu") }
+        get {
+            if UserDefaults.standard.object(forKey: "enableVLCSubtitleEditMenu") as? Bool != true {
+                UserDefaults.standard.set(true, forKey: "enableVLCSubtitleEditMenu")
+            }
+            return true
+        }
+        set { UserDefaults.standard.set(true, forKey: "enableVLCSubtitleEditMenu") }
     }
     
     enum PlayerChoice: String {
