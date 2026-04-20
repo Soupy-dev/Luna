@@ -89,6 +89,7 @@ struct MediaDetailView: View {
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @AppStorage("tmdbLanguage") private var selectedLanguage = "en-US"
+    private let nextEpisodeSheetPresentationDelay: TimeInterval = 1.2
 
     private var headerHeight: CGFloat {
 #if os(tvOS)
@@ -160,7 +161,6 @@ struct MediaDetailView: View {
             updateBookmarkStatus()
         }
         .onReceive(NotificationCenter.default.publisher(for: .requestNextEpisode)) { notification in
-            guard !showingSearchResults else { return }
             guard let userInfo = notification.userInfo,
                   let tmdbId = userInfo["tmdbId"] as? Int,
                   tmdbId == searchResult.id,
@@ -171,9 +171,9 @@ struct MediaDetailView: View {
             if let episodes = seasonDetail?.episodes,
                let nextEp = episodes.first(where: { $0.seasonNumber == seasonNumber && $0.episodeNumber == episodeNumber }) {
                 selectedEpisodeForSearch = nextEp
+                showingSearchResults = false
                 // Delay to ensure the player is fully dismissed before presenting the sheet
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    guard !showingSearchResults else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + nextEpisodeSheetPresentationDelay) {
                     showingSearchResults = true
                 }
             } else {
