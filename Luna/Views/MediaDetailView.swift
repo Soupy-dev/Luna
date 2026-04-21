@@ -79,6 +79,7 @@ struct MediaDetailView: View {
     @State private var anilistEpisodes: [AniListEpisode]? = nil
     @State private var animeSeasonTitles: [Int: String]? = nil
     @State private var relatedAnimeEntries: [AniListRelatedAnimeEntry] = []
+    @State private var allowRelatedAnimeRendering = false
     @State private var initialRelatedAniListId: Int?
     
     @State private var castMembers: [TMDBCastMember] = []
@@ -545,8 +546,8 @@ struct MediaDetailView: View {
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
                 animeEpisodes: anilistEpisodes,
                 animeSeasonTitles: animeSeasonTitles,
-                relatedAnimeEntries: relatedAnimeEntries,
-                initialRelatedAniListId: initialRelatedAniListId,
+                relatedAnimeEntries: allowRelatedAnimeRendering ? relatedAnimeEntries : [],
+                initialRelatedAniListId: allowRelatedAnimeRendering ? initialRelatedAniListId : nil,
                 tmdbService: tmdbService
             ) {
                 if !castMembers.isEmpty {
@@ -556,7 +557,7 @@ struct MediaDetailView: View {
                 StarRatingView(mediaId: searchResult.id)
             }
             .onAppear {
-                Logger.shared.log("MediaDetailView episodesSection appeared: tmdbId=\(searchResult.id) isAnime=\(isAnimeShow) tvSeasons=\(tvShowDetail?.seasons.count ?? 0) selectedSeason=\(selectedSeason?.seasonNumber.description ?? "nil") anilistEpisodes=\(anilistEpisodes?.count ?? 0) related=\(relatedAnimeEntries.count)", type: "CrashProbe")
+                Logger.shared.log("MediaDetailView episodesSection appeared: tmdbId=\(searchResult.id) isAnime=\(isAnimeShow) tvSeasons=\(tvShowDetail?.seasons.count ?? 0) selectedSeason=\(selectedSeason?.seasonNumber.description ?? "nil") anilistEpisodes=\(anilistEpisodes?.count ?? 0) related=\(relatedAnimeEntries.count) allowRelated=\(allowRelatedAnimeRendering)", type: "CrashProbe")
             }
         }
     }
@@ -633,6 +634,24 @@ struct MediaDetailView: View {
     
     private func updateBookmarkStatus() {
         isBookmarked = libraryManager.isBookmarked(searchResult)
+    }
+
+    private func scheduleRelatedAnimeRendering(reason: String) {
+        let count = relatedAnimeEntries.count
+        guard count > 0 else {
+            Logger.shared.log("MediaDetailView: related render skipped reason=\(reason) count=0", type: "CrashProbe")
+            return
+        }
+
+        Logger.shared.log("MediaDetailView: related render scheduled reason=\(reason) count=\(count)", type: "CrashProbe")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            guard self.hasLoadedContent, !self.isLoading, !self.searchResult.isMovie else {
+                Logger.shared.log("MediaDetailView: related render enable aborted reason=\(reason) hasLoaded=\(self.hasLoadedContent) isLoading=\(self.isLoading)", type: "CrashProbe")
+                return
+            }
+            Logger.shared.log("MediaDetailView: related render enabling reason=\(reason) count=\(self.relatedAnimeEntries.count)", type: "CrashProbe")
+            self.allowRelatedAnimeRendering = true
+        }
     }
     
     private func searchInServices() {
@@ -738,11 +757,13 @@ struct MediaDetailView: View {
                 self.anilistEpisodes = cached.anilistEpisodes
                 self.animeSeasonTitles = cached.animeSeasonTitles
                 self.relatedAnimeEntries = cached.relatedAnimeEntries
+                self.allowRelatedAnimeRendering = false
                 self.initialRelatedAniListId = cached.initialRelatedAniListId
                 self.castMembers = cached.castMembers
                 self.isLoading = false
                 self.hasLoadedContent = true
                 Logger.shared.log("MediaDetail cache state applied: key=\(detailCacheKey) tvSeasons=\(cached.tvShowDetail?.seasons.count ?? 0) selectedSeason=\(cached.selectedSeason?.seasonNumber.description ?? "nil") anilistEpisodes=\(cached.anilistEpisodes?.count ?? 0) related=\(cached.relatedAnimeEntries.count) initialRelated=\(cached.initialRelatedAniListId?.description ?? "nil")", type: "CrashProbe")
+                self.scheduleRelatedAnimeRendering(reason: "cache")
             }
             return
         }
@@ -959,6 +980,7 @@ struct MediaDetailView: View {
                             self.animeSeasonTitles = seasonTitles
                             self.anilistEpisodes = allEpisodes
                             self.relatedAnimeEntries = animeData.relatedEntries
+                            self.allowRelatedAnimeRendering = false
                             self.initialRelatedAniListId = animeData.initialRelatedAniListId
                             Logger.shared.log("MediaDetailView: related anime entries=\(animeData.relatedEntries.count) initial=\(animeData.initialRelatedAniListId.map(String.init) ?? "none")", type: "CrashProbe")
                             
@@ -971,6 +993,7 @@ struct MediaDetailView: View {
                             Logger.shared.log("MediaDetailView: animeData is nil — falling back to pure TMDB seasons (\(detail.seasons.count) seasons)", type: "AniList")
                             self.tvShowDetail = detail
                             self.relatedAnimeEntries = []
+                            self.allowRelatedAnimeRendering = false
                             self.initialRelatedAniListId = nil
                             if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
                                 self.selectedSeason = firstSeason
@@ -1002,6 +1025,7 @@ struct MediaDetailView: View {
                             timestamp: Date()
                         ))
                         Logger.shared.log("MediaDetailView: cache stored key=\(detailCacheKey) related=\(self.relatedAnimeEntries.count) selectedSeason=\(self.selectedSeason?.seasonNumber.description ?? "nil")", type: "CrashProbe")
+                        self.scheduleRelatedAnimeRendering(reason: "fresh-load")
                     }
                     Logger.shared.log("TV detail fetch complete: tmdbId=\(searchResult.id)", type: "CrashProbe")
                 }
