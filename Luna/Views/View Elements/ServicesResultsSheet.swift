@@ -112,6 +112,8 @@ struct ModulesSearchResultsSheet: View {
     var originalTMDBEpisodeNumber: Int? = nil
     /// When true, selecting a stream downloads instead of playing
     var downloadMode: Bool = false
+    /// When true, show only the compact Auto Mode runner instead of the full results picker.
+    var autoModeOnly: Bool = false
     /// Called when a download has been enqueued (for Download All flow)
     var onDownloadEnqueued: (() -> Void)? = nil
     /// Called when user taps "Skip" (for Download All flow)
@@ -123,6 +125,9 @@ struct ModulesSearchResultsSheet: View {
     @StateObject private var stremioManager = StremioAddonManager.shared
     @StateObject private var algorithmManager = AlgorithmManager.shared
     @State private var autoModeDidRun = false
+    @State private var autoModeRunToken: String?
+    @State private var autoModeCancelled = false
+    @State private var showManualPicker = false
 
     private var effectiveTitle: String { seasonTitleOverride ?? mediaTitle }
     private var animeEffectiveTitle: String {
@@ -284,6 +289,17 @@ struct ModulesSearchResultsSheet: View {
         let services: [ResultItem] = serviceManager.activeServices.map { .service($0) }
         let addons: [ResultItem] = stremioManager.activeAddons.map { .stremio($0) }
         return (services + addons).sorted { $0.sortIndex < $1.sortIndex }
+    }
+
+    private var activeAutoModeItems: [ResultItem] {
+        let configuredIds = selectedAutoModeSourceIds
+        let selectedItems = sortedResultItems.filter { configuredIds.contains(autoModeSourceId(for: $0)) }
+        let byId = Dictionary(uniqueKeysWithValues: selectedItems.map { (autoModeSourceId(for: $0), $0) })
+        let orderedIds = UserDefaults.standard.stringArray(forKey: "servicesAutoModeSourceOrderIds") ?? []
+        var ordered = orderedIds.compactMap { byId[$0] }
+        let existing = Set(ordered.map { autoModeSourceId(for: $0) })
+        ordered.append(contentsOf: selectedItems.filter { !existing.contains(autoModeSourceId(for: $0)) })
+        return ordered
     }
 
     @ViewBuilder
@@ -611,11 +627,14 @@ struct ModulesSearchResultsSheet: View {
     }
     
     private func filterResults(for results: [SearchItem]) -> (highQuality: [SearchItem], lowQuality: [SearchItem]) {
-        let sortedResults = results.map { result -> (result: SearchItem, similarity: Double) in
+        let sortedResults = results.enumerated().map { index, result -> (index: Int, result: SearchItem, similarity: Double) in
             let primarySimilarity = algorithmManager.calculateSimilarity(original: mediaTitle, result: result.title)
             let originalSimilarity = originalTitle.map { algorithmManager.calculateSimilarity(original: $0, result: result.title) } ?? 0.0
-            return (result: result, similarity: max(primarySimilarity, originalSimilarity))
-        }.sorted { $0.similarity > $1.similarity }
+            return (index: index, result: result, similarity: max(primarySimilarity, originalSimilarity))
+        }.sorted {
+            if $0.similarity != $1.similarity { return $0.similarity > $1.similarity }
+            return $0.index < $1.index
+        }
         
         let threshold = viewModel.highQualityThreshold
         let highQuality = sortedResults.filter { $0.similarity >= threshold }.map { $0.result }
@@ -625,7 +644,7 @@ struct ModulesSearchResultsSheet: View {
     }
 
     private var isAutoModeEnabled: Bool {
-        !downloadMode && UserDefaults.standard.bool(forKey: "servicesAutoModeEnabled")
+        UserDefaults.standard.bool(forKey: "servicesAutoModeEnabled")
     }
 
     private var selectedAutoModeSourceIds: Set<String> {
@@ -685,18 +704,14 @@ struct ModulesSearchResultsSheet: View {
         guard let results = viewModel.moduleResults[service.id], !results.isEmpty else { return nil }
         let threshold = viewModel.highQualityThreshold
 
-        let ranked = results.map { result in
+        let ranked = results.enumerated().map { index, result in
             let similarity = resultSimilarity(result)
-            let tieBreak = resultTieBreakScore(result)
-            let lengthDelta = abs(result.title.count - displayTitle.count)
-            return (result: result, similarity: similarity, tieBreak: tieBreak, lengthDelta: lengthDelta)
+            return (index: index, result: result, similarity: similarity)
         }
         .filter { $0.similarity >= threshold }
         .sorted { lhs, rhs in
             if lhs.similarity != rhs.similarity { return lhs.similarity > rhs.similarity }
-            if lhs.tieBreak != rhs.tieBreak { return lhs.tieBreak > rhs.tieBreak }
-            if lhs.lengthDelta != rhs.lengthDelta { return lhs.lengthDelta < rhs.lengthDelta }
-            return lhs.result.title.localizedCaseInsensitiveCompare(rhs.result.title) == .orderedAscending
+            return lhs.index < rhs.index
         }
 
         return ranked.first?.result
@@ -724,14 +739,14 @@ struct ModulesSearchResultsSheet: View {
 
     private func bestStremioStream(from streams: [StremioStream]) -> StremioStream? {
         guard !streams.isEmpty else { return nil }
-        guard let candidate = streams.max(by: { lhs, rhs in
-            let lhsScore = stremioStreamScore(lhs)
-            let rhsScore = stremioStreamScore(rhs)
+        guard let candidate = streams.enumerated().max(by: { lhs, rhs in
+            let lhsScore = stremioStreamScore(lhs.element)
+            let rhsScore = stremioStreamScore(rhs.element)
             if lhsScore == rhsScore {
-                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedDescending
+                return lhs.offset > rhs.offset
             }
             return lhsScore < rhsScore
-        }) else {
+        })?.element else {
             return nil
         }
 
@@ -740,7 +755,8 @@ struct ModulesSearchResultsSheet: View {
 
     @MainActor
     private func maybeRunAutoModeSelection() {
-        guard isAutoModeEnabled,
+        guard !autoModeOnly,
+              isAutoModeEnabled,
               !autoModeDidRun,
               !viewModel.isSearching,
               !viewModel.isSearchingStremio else { return }
@@ -753,8 +769,7 @@ struct ModulesSearchResultsSheet: View {
 
     @MainActor
     private func runAutoModeSelection() async {
-        let configuredIds = selectedAutoModeSourceIds
-        let orderedSelections = sortedResultItems.filter { configuredIds.contains(autoModeSourceId(for: $0)) }
+        let orderedSelections = activeAutoModeItems
 
         guard !orderedSelections.isEmpty else {
             viewModel.streamError = "Auto Mode is enabled, but no active service/addon is selected. Please select at least one source in Services settings."
@@ -780,21 +795,255 @@ struct ModulesSearchResultsSheet: View {
         viewModel.streamError = "Auto Mode could not find a match above your quality threshold in the selected sources. Try lowering the quality threshold or selecting more services/addons."
         viewModel.showingStreamError = true
     }
+
+    private var requestToken: String {
+        [
+            downloadMode ? "download" : "play",
+            isMovie ? "movie" : "show",
+            "\(tmdbId)",
+            "\(selectedEpisode?.seasonNumber ?? 0)",
+            "\(selectedEpisode?.episodeNumber ?? 0)"
+        ].joined(separator: ":")
+    }
+
+    @ViewBuilder
+    private var autoModeProgressView: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(1.35)
+
+                VStack(spacing: 8) {
+                    Text(downloadMode ? "Auto Download" : "Auto Mode")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+
+                    Text(displayTitle)
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+
+                    if !viewModel.currentFetchingTitle.isEmpty {
+                        Text(viewModel.currentFetchingTitle)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white.opacity(0.8))
+                            .lineLimit(1)
+                    }
+
+                    Text(viewModel.streamFetchProgress.isEmpty ? "Preparing..." : viewModel.streamFetchProgress)
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                }
+
+                Button(role: .cancel) {
+                    autoModeCancelled = true
+                    autoModeDidRun = true
+                    presentationMode.wrappedValue.dismiss()
+                } label: {
+                    Text(downloadMode ? "Stop" : "Cancel")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
+            .padding(28)
+            .frame(maxWidth: 360)
+            .applyLiquidGlassBackground(cornerRadius: 16)
+            .padding(.horizontal, 28)
+        }
+    }
+
+    @MainActor
+    private func startAutoModeIfNeeded() {
+        guard isAutoModeEnabled, !showManualPicker else { return }
+        guard autoModeRunToken != requestToken else { return }
+
+        autoModeRunToken = requestToken
+        autoModeDidRun = true
+        autoModeCancelled = false
+        viewModel.moduleResults.removeAll()
+        viewModel.stremioResults.removeAll()
+        viewModel.searchedServices.removeAll()
+        viewModel.stremioSearchedAddons.removeAll()
+        viewModel.failedServices.removeAll()
+        viewModel.streamError = nil
+        viewModel.showingStreamError = false
+        viewModel.isSearching = false
+        viewModel.isSearchingStremio = false
+        viewModel.currentFetchingTitle = ""
+        viewModel.streamFetchProgress = "Checking selected sources..."
+
+        Task { @MainActor in
+            await runOrderedAutoModeSelection()
+        }
+    }
+
+    private var autoModeSearchQueries: [String] {
+        let primary: String
+        if let ep = selectedEpisode {
+            if animeSeasonTitle != nil {
+                primary = "\(animeEffectiveTitle) E\(ep.episodeNumber)"
+            } else {
+                primary = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
+            }
+        } else {
+            primary = effectiveTitle
+        }
+
+        var queries = [primary]
+        if primary.caseInsensitiveCompare(effectiveTitle) != .orderedSame {
+            queries.append(effectiveTitle)
+        }
+        if let originalTitle, !originalTitle.isEmpty && originalTitle.lowercased() != effectiveTitle.lowercased() {
+            queries.append(originalTitle)
+        }
+        return queries
+    }
+
+    @MainActor
+    private func runOrderedAutoModeSelection() async {
+        let orderedItems = activeAutoModeItems
+        guard !orderedItems.isEmpty else {
+            showAutoModeFailure("Auto Mode is enabled, but no active service/addon is selected. Please select at least one source in Services settings.")
+            return
+        }
+
+        for item in orderedItems {
+            guard !autoModeCancelled else { return }
+            switch item {
+            case .service(let service):
+                viewModel.currentFetchingTitle = service.metadata.sourceName
+                viewModel.streamFetchProgress = "Searching \(service.metadata.sourceName)..."
+                if let result = await findAutoModeServiceResult(service) {
+                    guard !autoModeCancelled else { return }
+                    viewModel.currentFetchingTitle = result.title
+                    viewModel.streamFetchProgress = "Found match in \(service.metadata.sourceName). Fetching stream..."
+                    await playContent(result)
+                    return
+                }
+            case .stremio(let addon):
+                viewModel.currentFetchingTitle = addon.manifest.name
+                viewModel.streamFetchProgress = "Checking \(addon.manifest.name)..."
+                if let stream = await findAutoModeStremioStream(addon) {
+                    guard !autoModeCancelled else { return }
+                    viewModel.currentFetchingTitle = stream.displayName
+                    viewModel.streamFetchProgress = "Found stream in \(addon.manifest.name)."
+                    playStremioStream(stream, addon: addon)
+                    return
+                }
+            }
+        }
+
+        showAutoModeFailure("Auto Mode could not find a match above your quality threshold in the selected sources.")
+    }
+
+    @MainActor
+    private func findAutoModeServiceResult(_ service: Service) async -> SearchItem? {
+        var combined: [SearchItem] = []
+        var seenHrefs = Set<String>()
+
+        for query in autoModeSearchQueries {
+            guard !autoModeCancelled else { return nil }
+            viewModel.streamFetchProgress = "Searching \(service.metadata.sourceName) for \(query)..."
+            let results = await serviceManager.searchSingleActiveService(service: service, query: query)
+            guard !autoModeCancelled else { return nil }
+            let newResults = results.filter { seenHrefs.insert($0.href).inserted }
+            combined.append(contentsOf: newResults)
+            viewModel.moduleResults[service.id] = combined
+            viewModel.searchedServices.insert(service.id)
+
+            if let best = bestServiceResult(for: service) {
+                return best
+            }
+        }
+
+        return nil
+    }
+
+    @MainActor
+    private func findAutoModeStremioStream(_ addon: StremioAddon) async -> StremioStream? {
+        let client = StremioClient.shared
+        let type = isMovie ? "movie" : "series"
+        let season = originalTMDBSeasonNumber ?? selectedEpisode?.seasonNumber
+        let episode = originalTMDBEpisodeNumber ?? selectedEpisode?.episodeNumber
+
+        guard let contentId = client.buildContentId(
+            tmdbId: tmdbId,
+            imdbId: imdbId,
+            type: type,
+            season: season,
+            episode: episode,
+            addon: addon
+        ) else {
+            viewModel.stremioResults[addon.id] = []
+            viewModel.stremioSearchedAddons.insert(addon.id)
+            return nil
+        }
+
+        do {
+            let streams = try await client.fetchStreams(baseURL: addon.configuredURL, type: type, id: contentId)
+            viewModel.stremioResults[addon.id] = streams
+            viewModel.stremioSearchedAddons.insert(addon.id)
+            return bestStremioStream(from: streams)
+        } catch {
+            viewModel.stremioResults[addon.id] = []
+            viewModel.stremioSearchedAddons.insert(addon.id)
+            Logger.shared.log("Auto Mode Stremio failed for \(addon.manifest.name): \(error.localizedDescription)", type: "Stremio")
+            return nil
+        }
+    }
+
+    @MainActor
+    private func showAutoModeFailure(_ message: String) {
+        viewModel.isFetchingStreams = false
+        viewModel.streamError = message
+        viewModel.showingStreamError = true
+    }
+
+    @MainActor
+    private func switchToManualPicker() {
+        autoModeCancelled = true
+        showManualPicker = true
+        viewModel.moduleResults.removeAll()
+        viewModel.stremioResults.removeAll()
+        viewModel.searchedServices.removeAll()
+        viewModel.stremioSearchedAddons.removeAll()
+        viewModel.failedServices.removeAll()
+        viewModel.streamError = nil
+        viewModel.showingStreamError = false
+        startProgressiveSearch()
+        startStremioSearch()
+    }
     
     var body: some View {
         NavigationView {
-            List {
-                searchInfoSection
-                    .background(LunaScrollTracker())
-                
-                if serviceManager.activeServices.isEmpty && stremioManager.activeAddons.isEmpty {
-                    noActiveServicesSection
+            Group {
+                if autoModeOnly && !showManualPicker {
+                    autoModeProgressView
                 } else {
-                    unifiedResultsSections
+                    List {
+                        searchInfoSection
+                            .background(LunaScrollTracker())
+
+                        if serviceManager.activeServices.isEmpty && stremioManager.activeAddons.isEmpty {
+                            noActiveServicesSection
+                        } else {
+                            unifiedResultsSections
+                        }
+                    }
+                    .lunaSettingsStyle()
                 }
             }
-            .lunaSettingsStyle()
-            .navigationTitle(downloadMode ? "Download Source" : "Services Result")
+            .navigationTitle(autoModeOnly && !showManualPicker ? (downloadMode ? "Auto Download" : "Auto Mode") : (downloadMode ? "Download Source" : "Services Result"))
 #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif
@@ -859,8 +1108,12 @@ struct ModulesSearchResultsSheet: View {
         .overlay(streamFetchingOverlay)
         .onAppear {
             autoModeDidRun = false
-            startProgressiveSearch()
-            startStremioSearch()
+            if autoModeOnly && !showManualPicker {
+                startAutoModeIfNeeded()
+            } else {
+                startProgressiveSearch()
+                startStremioSearch()
+            }
         }
         .onChangeComp(of: viewModel.isSearching) { _, _ in
             maybeRunAutoModeSelection()
@@ -894,8 +1147,27 @@ struct ModulesSearchResultsSheet: View {
             subtitlePickerDialogMessage
         }
         .alert("Stream Error", isPresented: $viewModel.showingStreamError) {
-            Button("OK", role: .cancel) {
-                viewModel.streamError = nil
+            if autoModeOnly && !showManualPicker {
+                if downloadMode && onSkipRequested != nil {
+                    Button("Skip Episode") {
+                        autoModeCancelled = true
+                        viewModel.streamError = nil
+                        onSkipRequested?()
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+                Button("Manual Select") {
+                    switchToManualPicker()
+                }
+                Button(downloadMode && onSkipRequested != nil ? "Stop Downloads" : "Cancel", role: .cancel) {
+                    autoModeCancelled = true
+                    viewModel.streamError = nil
+                    presentationMode.wrappedValue.dismiss()
+                }
+            } else {
+                Button("OK", role: .cancel) {
+                    viewModel.streamError = nil
+                }
             }
         } message: {
             if let error = viewModel.streamError {

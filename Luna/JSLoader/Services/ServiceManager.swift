@@ -293,6 +293,13 @@ class ServiceManager: ObservableObject {
         await MainActor.run { onComplete() }
     }
 
+    func searchSingleActiveService(service: Service, query: String) async -> [SearchItem] {
+        let timeoutSeconds: UInt64 = 20_000_000_000 // 20sec
+        return await withTimeout(nanoseconds: timeoutSeconds) {
+            await self.searchInService(service: service, query: query)
+        } ?? []
+    }
+
     func getServiceSettings(_ service: Service) -> [ServiceSetting] {
         return parseSettingsFromJS(service.jsScript)
      }

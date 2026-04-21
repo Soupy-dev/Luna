@@ -22,6 +22,7 @@ struct ServicesView: View {
     @State private var showStremioError = false
     @State private var servicesAutoModeEnabled: Bool = UserDefaults.standard.bool(forKey: "servicesAutoModeEnabled")
     @State private var selectedAutoModeSourceIds: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "servicesAutoModeSourceIds") ?? [])
+    @State private var autoModeSourceOrderIds: [String] = UserDefaults.standard.stringArray(forKey: "servicesAutoModeSourceOrderIds") ?? []
     
     var body: some View {
         ZStack {
@@ -142,6 +143,15 @@ struct ServicesView: View {
         return (services + addons).sorted { $0.sortIndex < $1.sortIndex }
     }
 
+    private var orderedAutoModeItems: [UnifiedItem] {
+        let selectedActive = unifiedItems.filter { $0.isActive && selectedAutoModeSourceIds.contains($0.autoModeSourceId) }
+        let byId = Dictionary(uniqueKeysWithValues: selectedActive.map { ($0.autoModeSourceId, $0) })
+        var ordered = autoModeSourceOrderIds.compactMap { byId[$0] }
+        let existing = Set(ordered.map(\.autoModeSourceId))
+        ordered.append(contentsOf: selectedActive.filter { !existing.contains($0.autoModeSourceId) })
+        return ordered
+    }
+
     @ViewBuilder
     private var servicesList: some View {
         List {
@@ -174,8 +184,12 @@ struct ServicesView: View {
                                 set: { isSelected in
                                     if isSelected {
                                         selectedAutoModeSourceIds.insert(item.autoModeSourceId)
+                                        if !autoModeSourceOrderIds.contains(item.autoModeSourceId) {
+                                            autoModeSourceOrderIds.append(item.autoModeSourceId)
+                                        }
                                     } else {
                                         selectedAutoModeSourceIds.remove(item.autoModeSourceId)
+                                        autoModeSourceOrderIds.removeAll { $0 == item.autoModeSourceId }
                                     }
                                     persistAutoModeSelection()
                                 }
@@ -185,6 +199,42 @@ struct ServicesView: View {
                 }
             } footer: {
                 Text("Auto Mode checks selected active services/addons from top to bottom and auto-picks the best match above your quality threshold.")
+            }
+
+            if servicesAutoModeEnabled && !orderedAutoModeItems.isEmpty {
+                Section {
+                    ForEach(orderedAutoModeItems.indices, id: \.self) { index in
+                        let item = orderedAutoModeItems[index]
+                        HStack {
+                            Image(systemName: "line.3.horizontal")
+                                .foregroundColor(.secondary)
+                            Text(item.displayName)
+                            Spacer()
+#if os(tvOS)
+                            Button {
+                                moveAutoModeSource(from: index, direction: -1)
+                            } label: {
+                                Image(systemName: "chevron.up")
+                            }
+                            .disabled(index == 0)
+
+                            Button {
+                                moveAutoModeSource(from: index, direction: 1)
+                            } label: {
+                                Image(systemName: "chevron.down")
+                            }
+                            .disabled(index >= orderedAutoModeItems.count - 1)
+#endif
+                        }
+                    }
+#if !os(tvOS)
+                    .onMove(perform: moveAutoModeSources)
+#endif
+                } header: {
+                    Text("Auto Mode Order")
+                } footer: {
+                    Text("This order is separate from your main Services & Addons order.")
+                }
             }
 
             Section(header: unifiedSectionHeader) {
@@ -288,19 +338,37 @@ struct ServicesView: View {
     }
 
     private func persistAutoModeSelection() {
-        let ordered = unifiedItems
-            .map(\.autoModeSourceId)
-            .filter { selectedAutoModeSourceIds.contains($0) }
-        UserDefaults.standard.set(ordered, forKey: "servicesAutoModeSourceIds")
+        let orderedSelected = orderedAutoModeItems.map(\.autoModeSourceId)
+        UserDefaults.standard.set(Array(selectedAutoModeSourceIds), forKey: "servicesAutoModeSourceIds")
+        autoModeSourceOrderIds = orderedSelected
+        UserDefaults.standard.set(orderedSelected, forKey: "servicesAutoModeSourceOrderIds")
     }
 
     private func syncAutoModeSelectionWithInstalledSources() {
         let validIds = Set(unifiedItems.map(\.autoModeSourceId))
         let previous = selectedAutoModeSourceIds
         selectedAutoModeSourceIds = selectedAutoModeSourceIds.intersection(validIds)
-        if selectedAutoModeSourceIds != previous {
+        let ordered = orderedAutoModeItems.map(\.autoModeSourceId)
+        if selectedAutoModeSourceIds != previous || ordered != autoModeSourceOrderIds {
+            autoModeSourceOrderIds = ordered
             persistAutoModeSelection()
         }
+    }
+
+    private func moveAutoModeSources(fromOffsets: IndexSet, toOffset: Int) {
+        var ids = orderedAutoModeItems.map(\.autoModeSourceId)
+        ids.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        autoModeSourceOrderIds = ids
+        UserDefaults.standard.set(ids, forKey: "servicesAutoModeSourceOrderIds")
+    }
+
+    private func moveAutoModeSource(from index: Int, direction: Int) {
+        let target = index + direction
+        var ids = orderedAutoModeItems.map(\.autoModeSourceId)
+        guard ids.indices.contains(index), ids.indices.contains(target) else { return }
+        ids.swapAt(index, target)
+        autoModeSourceOrderIds = ids
+        UserDefaults.standard.set(ids, forKey: "servicesAutoModeSourceOrderIds")
     }
     
     private func downloadServiceFromURL() {

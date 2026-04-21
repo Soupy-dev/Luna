@@ -24,6 +24,9 @@ private actor AniListRateLimiter {
     }
 }
 
+private let continuationRelationTypes: Set<String> = ["SEQUEL", "PREQUEL", "SEASON"]
+private let relatedAnimeFetchLimit = 12
+
 final class AniListService {
     static let shared = AniListService()
 
@@ -430,6 +433,17 @@ final class AniListService {
         }()
 
         var anime = pickBestAniListMatch(from: candidates, tmdbShow: tvShowDetail)
+        var initialRelatedAniListId: Int?
+        var forcedRelatedCandidates: [AniListAnime] = []
+
+        if isRelatedOnlyFormat(anime.format),
+           let parentAnime = bestParentAnime(for: anime),
+           (parentAnime.episodes ?? 0) >= max(1, anime.episodes ?? 0) {
+            initialRelatedAniListId = anime.id
+            forcedRelatedCandidates.append(anime)
+            Logger.shared.log("AniListService: Selected match is related-only format=\(anime.format ?? "unknown"); pivoting to parent id=\(parentAnime.id) and auto-selecting related id=\(anime.id)", type: "CrashProbe")
+            anime = parentAnime
+        }
 
         // If the best match looks suspicious (e.g. OVA with 2 eps when TMDB has 86),
         // check its relation edges for the parent/main TV series. OVAs/Specials always
@@ -450,6 +464,8 @@ final class AniListService {
                     .max(by: { ($0.node.episodes ?? 0) < ($1.node.episodes ?? 0) })
 
                 if let better = betterNode, (better.node.episodes ?? 0) > selectedEps {
+                    initialRelatedAniListId = initialRelatedAniListId ?? anime.id
+                    forcedRelatedCandidates.append(anime)
                     let betterAnime = better.node.asAnime()
                     Logger.shared.log("AniListService: Found better match via relations: '\(AniListTitlePicker.title(from: betterAnime.title, preferredLanguageCode: preferredLanguageCode))' with \(betterAnime.episodes ?? 0) eps", type: "AniList")
                     anime = betterAnime
@@ -478,7 +494,7 @@ final class AniListService {
         Logger.shared.log("AniListService: Starting sequel detection for \(AniListTitlePicker.title(from: anime.title, preferredLanguageCode: preferredLanguageCode)) (ID: \(anime.id), episodes: \(anime.episodes ?? 0), relations: \(anime.relations?.edges.count ?? 0))", type: "AniList")
 
         // Allowed relation types we treat as season/continuation
-        let allowedRelationTypes: Set<String> = ["SEQUEL", "PREQUEL", "SEASON"]
+        let allowedRelationTypes = continuationRelationTypes
 
         // BFS over sequels/prequels/seasons, batch-fetching nodes that need deeper relations per level
         var queue: [AniListAnime] = [anime]
@@ -862,13 +878,20 @@ final class AniListService {
         for season in seasons {
             Logger.shared.log("  Season \(season.seasonNumber): \(season.episodes.count) episodes, poster: \(season.posterUrl ?? "none")", type: "AniList")
         }
+        let relatedEntries = buildRelatedAnimeEntries(
+            from: allAnimeToProcess.map { $0.anime },
+            forcedCandidates: forcedRelatedCandidates,
+            excludedIds: Set(allAnimeToProcess.map { $0.anime.id })
+        )
         
         let animeWithSeasons = AniListAnimeWithSeasons(
             id: anime.id,
             title: title,
             seasons: seasons,
             totalEpisodes: totalEpisodes,
-            status: anime.status ?? "UNKNOWN"
+            status: anime.status ?? "UNKNOWN",
+            relatedEntries: relatedEntries,
+            initialRelatedAniListId: initialRelatedAniListId
         )
         
         // Cache the result for fast back-navigation
@@ -937,6 +960,144 @@ final class AniListService {
         }
 
         return chosen ?? candidates.first!
+    }
+
+    private func isRelatedOnlyFormat(_ format: String?) -> Bool {
+        guard let format else { return false }
+        return ["OVA", "SPECIAL", "MOVIE"].contains(format)
+    }
+
+    private func bestParentAnime(for anime: AniListAnime) -> AniListAnime? {
+        let parentRelationTypes: Set<String> = ["PARENT", "SOURCE", "PREQUEL"]
+        let tvFormats: Set<String> = ["TV", "TV_SHORT", "ONA"]
+        return anime.relations?.edges
+            .filter { parentRelationTypes.contains($0.relationType) && $0.node.type == "ANIME" }
+            .filter { edge in
+                guard let format = edge.node.format else { return true }
+                return tvFormats.contains(format)
+            }
+            .sorted { lhs, rhs in
+                let lhsEpisodes = lhs.node.episodes ?? 0
+                let rhsEpisodes = rhs.node.episodes ?? 0
+                if lhsEpisodes != rhsEpisodes { return lhsEpisodes > rhsEpisodes }
+                return lhs.node.id < rhs.node.id
+            }
+            .first?
+            .node
+            .asAnime()
+    }
+
+    private struct RelatedCandidate {
+        let id: Int
+        let title: AniListAnime.AniListTitle
+        let episodes: Int?
+        let relationType: String
+        let format: String?
+        let posterUrl: String?
+    }
+
+    private func buildRelatedAnimeEntries(
+        from animeList: [AniListAnime],
+        forcedCandidates: [AniListAnime],
+        excludedIds: Set<Int>
+    ) -> [AniListRelatedAnimeEntry] {
+        var candidates: [RelatedCandidate] = []
+        var skippedContinuation = 0
+        var skippedExcluded = 0
+        var skippedDuplicate = 0
+        var seenIds = Set<Int>()
+        var seenTitleFormats = Set<String>()
+
+        for anime in animeList {
+            for edge in anime.relations?.edges ?? [] {
+                guard edge.node.type == "ANIME" else { continue }
+                guard !continuationRelationTypes.contains(edge.relationType) else {
+                    skippedContinuation += 1
+                    continue
+                }
+                candidates.append(RelatedCandidate(
+                    id: edge.node.id,
+                    title: edge.node.title,
+                    episodes: edge.node.episodes,
+                    relationType: edge.relationType,
+                    format: edge.node.format,
+                    posterUrl: edge.node.coverImage?.large ?? edge.node.coverImage?.medium
+                ))
+            }
+        }
+
+        for anime in forcedCandidates {
+            candidates.append(RelatedCandidate(
+                id: anime.id,
+                title: anime.title,
+                episodes: anime.episodes,
+                relationType: "SPECIAL",
+                format: anime.format,
+                posterUrl: anime.coverImage?.large ?? anime.coverImage?.medium
+            ))
+        }
+
+        let sortedCandidates = candidates.sorted { lhs, rhs in
+            let relationOrder = ["SIDE_STORY": 0, "SPIN_OFF": 1, "OTHER": 2, "SUMMARY": 3, "SPECIAL": 4, "ALTERNATIVE": 5]
+            if lhs.relationType != rhs.relationType {
+                return (relationOrder[lhs.relationType] ?? Int.max) < (relationOrder[rhs.relationType] ?? Int.max)
+            }
+            let lhsTitle = AniListTitlePicker.title(from: lhs.title, preferredLanguageCode: preferredLanguageCode)
+            let rhsTitle = AniListTitlePicker.title(from: rhs.title, preferredLanguageCode: preferredLanguageCode)
+            return lhsTitle.localizedCaseInsensitiveCompare(rhsTitle) == .orderedAscending
+        }
+
+        var output: [AniListRelatedAnimeEntry] = []
+        for candidate in sortedCandidates {
+            guard !excludedIds.contains(candidate.id) else {
+                skippedExcluded += 1
+                continue
+            }
+
+            let title = AniListTitlePicker.title(from: candidate.title, preferredLanguageCode: preferredLanguageCode)
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedKey = "\(trimmedTitle.lowercased())-\((candidate.format ?? "unknown").lowercased())"
+            guard seenIds.insert(candidate.id).inserted else {
+                skippedDuplicate += 1
+                continue
+            }
+            guard seenTitleFormats.insert(normalizedKey).inserted else {
+                skippedDuplicate += 1
+                continue
+            }
+            guard !trimmedTitle.isEmpty else { continue }
+
+            let episodeCount = max(1, candidate.episodes ?? 1)
+            let virtualSeasonNumber = -candidate.id
+            let episodes = (1...episodeCount).map { number in
+                AniListEpisode(
+                    number: number,
+                    title: episodeCount == 1 ? trimmedTitle : "Episode \(number)",
+                    description: nil,
+                    seasonNumber: virtualSeasonNumber,
+                    stillPath: nil,
+                    airDate: nil,
+                    runtime: nil,
+                    tmdbSeasonNumber: nil,
+                    tmdbEpisodeNumber: nil
+                )
+            }
+
+            output.append(AniListRelatedAnimeEntry(
+                id: candidate.id,
+                title: trimmedTitle,
+                relationType: candidate.relationType,
+                format: candidate.format,
+                posterUrl: candidate.posterUrl,
+                episodeCount: episodeCount,
+                episodes: episodes
+            ))
+
+            if output.count >= relatedAnimeFetchLimit { break }
+        }
+
+        Logger.shared.log("AniListService: related entries built kept=\(output.count) raw=\(candidates.count) skippedContinuation=\(skippedContinuation) skippedExcluded=\(skippedExcluded) skippedDuplicate=\(skippedDuplicate)", type: "CrashProbe")
+        return output
     }
     
     // MARK: - Update Watch Progress
@@ -1656,6 +1817,18 @@ struct AniListAnimeWithSeasons {
     let seasons: [AniListSeasonWithPoster]
     let totalEpisodes: Int
     let status: String
+    let relatedEntries: [AniListRelatedAnimeEntry]
+    let initialRelatedAniListId: Int?
+}
+
+struct AniListRelatedAnimeEntry: Identifiable {
+    let id: Int
+    let title: String
+    let relationType: String
+    let format: String?
+    let posterUrl: String?
+    let episodeCount: Int
+    let episodes: [AniListEpisode]
 }
 
 // MARK: - AniList Codable Models

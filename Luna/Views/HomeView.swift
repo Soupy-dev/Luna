@@ -819,7 +819,8 @@ struct ContinueWatchingCard: View {
                 tmdbId: item.tmdbId,
                 animeSeasonTitle: isAnimeContent ? "anime" : nil,
                 posterPath: item.posterURL,
-                imdbId: imdbId
+                imdbId: imdbId,
+                autoModeOnly: UserDefaults.standard.bool(forKey: "servicesAutoModeEnabled")
             )
         }
         .contextMenu {
