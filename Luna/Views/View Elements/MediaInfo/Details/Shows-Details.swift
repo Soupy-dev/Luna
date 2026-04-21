@@ -348,7 +348,7 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
-                        ForEach(relatedMedia, id: \.id) { media in
+                        ForEach(relatedMedia, id: \.stableIdentity) { media in
                             NavigationLink(destination: MediaDetailView(searchResult: media)) {
                                 VStack(spacing: 6) {
                                     if let posterURL = media.fullPosterURL, let url = URL(string: posterURL) {

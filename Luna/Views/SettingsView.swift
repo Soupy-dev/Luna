@@ -226,11 +226,7 @@ struct SettingsView: View {
                         GlassDivider()
 
                         Button {
-                            Task {
-                                isCheckingGitHubRelease = true
-                                await GitHubReleaseChecker.checkForUpdates(force: true)
-                                isCheckingGitHubRelease = false
-                            }
+                            performManualGitHubReleaseCheck()
                         } label: {
                             GlassSettingsRow(icon: "arrow.clockwise", iconColor: .cyan, title: "Check for Updates") {
                                 if isCheckingGitHubRelease {
@@ -244,6 +240,7 @@ struct SettingsView: View {
                                 }
                             }
                         }
+                        .disabled(isCheckingGitHubRelease)
                         .buttonStyle(.plain)
 
                         if githubReleaseUpdateAvailable {
@@ -348,11 +345,7 @@ struct SettingsView: View {
             Toggle("Auto-check GitHub Releases", isOn: $autoCheckGitHubReleases)
 
             Button(isCheckingGitHubRelease ? "Checking..." : "Check for Updates") {
-                Task {
-                    isCheckingGitHubRelease = true
-                    await GitHubReleaseChecker.checkForUpdates(force: true)
-                    isCheckingGitHubRelease = false
-                }
+                performManualGitHubReleaseCheck()
             }
             .disabled(isCheckingGitHubRelease)
 
@@ -370,6 +363,19 @@ struct SettingsView: View {
                 .onTapGesture { showKanzen = true }
         } header: {
             Text("Others")
+        }
+    }
+
+    private func performManualGitHubReleaseCheck() {
+        guard !isCheckingGitHubRelease else { return }
+        Task {
+            await MainActor.run {
+                isCheckingGitHubRelease = true
+            }
+            await GitHubReleaseChecker.checkForUpdates(force: true)
+            await MainActor.run {
+                isCheckingGitHubRelease = false
+            }
         }
     }
 }

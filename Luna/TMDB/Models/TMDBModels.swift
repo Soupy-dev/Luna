@@ -74,6 +74,10 @@ struct TMDBSearchResult: Codable, Identifiable {
         guard let backdropPath = backdropPath else { return nil }
         return "\(TMDBService.tmdbImageBaseURL)\(backdropPath)"
     }
+
+    var stableIdentity: String {
+        "\(mediaType)-\(id)"
+    }
 }
 
 // MARK: - Movie Search Response
@@ -652,4 +656,3 @@ struct TMDBCastMember: Codable, Identifiable {
         return "\(TMDBService.tmdbImageBaseURL)\(profilePath)"
     }
 }
-
