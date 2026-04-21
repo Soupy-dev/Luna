@@ -346,7 +346,7 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
-                        ForEach(Array(relatedMedia.enumerated()), id: \.offset) { _, media in
+                        ForEach(relatedMedia, id: \.id) { media in
                             NavigationLink(destination: MediaDetailView(searchResult: media)) {
                                 VStack(spacing: 6) {
                                     KFImage(URL(string: media.fullPosterURL ?? ""))
