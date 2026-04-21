@@ -59,7 +59,7 @@ class Settings: ObservableObject {
     var playerChoice: PlayerChoice {
         get {
             // Read from inAppPlayer setting used in PlayerSettingsView
-            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
+            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "VLC"
             switch inAppRaw {
             case "VLC":
                 return .vlc

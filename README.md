@@ -1,25 +1,31 @@
 My fork of Luna. Has no affiliation with the parent repo. And user is responsible for what they do with the app. Does not come with services or addons. Use GitHub Issues for feature requests and bug reports
 
-Features added:
+## Overview
 
-1: "Mark as watched" and related buttons now work
-2: Anilist and trakt sync (works for manga)
-3: TMDB and Anilist hybrid system for anime only. Fixes issue of improper anime handling by pure tmdb. Update, fixed known edge cases, its now even more robust and accurate than before.
-4: Catalogs provided by tmdb and anilist with control over them
-5: Anime schedule provided by anilist
-6: Auto clear cache
-7: Backup and restore
-8: Auto subtitles, auto anime language, Next episode button, AniSkip, and TheIntroDB for VLC only
-9: Minor but episodes now have their full descriptions in the services result sheet
-10: VLC player (Requires proxy setting enabled to work with every service, otherwise only works with some)
-11: Made Continue Watching respect the TMDB+AniList system
-12: Downloads support, ui needed minor revision to add this tab. Settings is now in the top right. HLS downloads are slower and nonbackgroundable due to needing proper playback support from mpv and VLC
-13: VLC does have subtitle editing. But I just removed pip. I went through many implementations and spent a bunch of time. But VLC just isn't ready for pip, waiting for VLC v4 for better stability and native pip is the best call. I've pretty much pushed VLC as far as it can go.
-14: Manga mode completed (ugly ui lowkey tho, works but I didn't care much for this mode. I just didn't want to leave it abandoned and be dead code.)
-15: Stremio addon support (only ones that return streams, dw they work with downloads and act mostly like regular services)
-16: LN support
-17: Major overhaul of UI
+This fork extends Luna with a broader feature set for anime, manga, light novels, downloads, and playback controls.
 
+## Main changes
+
+1. Mark as watched actions are implemented.
+2. AniList and Trakt sync are available, including manga support.
+3. Anime handling uses a TMDB and AniList hybrid flow with fixes for known edge cases.
+4. Catalogs from TMDB and AniList are available with user control.
+5. Anime schedule data is integrated through AniList.
+6. Automatic cache clearing is supported.
+7. Backup and restore are included.
+8. VLC playback includes subtitle and language defaults, next episode actions, AniSkip, and TheIntroDB support.
+9. Episode descriptions are shown in service result sheets.
+10. Continue Watching is aligned with the TMDB and AniList hybrid logic.
+11. Downloads are supported, including an HLS pipeline.
+12. Stremio stream addons are supported and work with downloads.
+13. Manga mode is available.
+14. Light novel support is available.
+15. The app UI has been overhauled.
+
+## Notes
+
+- VLC is the preferred in-app player in this fork.
+- Picture in Picture is not enabled for VLC due to current VLC limitations.
 
 
 

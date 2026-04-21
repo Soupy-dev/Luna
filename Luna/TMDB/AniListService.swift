@@ -24,6 +24,8 @@ private actor AniListRateLimiter {
     }
 }
 
+private let excludedRelatedMediaRelations: Set<String> = ["SEQUEL", "PREQUEL", "SEASON"]
+
 final class AniListService {
     static let shared = AniListService()
 
@@ -868,13 +870,54 @@ final class AniListService {
             title: title,
             seasons: seasons,
             totalEpisodes: totalEpisodes,
-            status: anime.status ?? "UNKNOWN"
+            status: anime.status ?? "UNKNOWN",
+            relatedEntries: buildRelatedEntries(from: anime)
         )
         
         // Cache the result for fast back-navigation
         animeDetailsCache.setObject(AniListAnimeWithSeasonsWrapper(animeWithSeasons), forKey: NSNumber(value: tmdbShowId))
         
         return animeWithSeasons
+    }
+
+    private func buildRelatedEntries(from anime: AniListAnime) -> [AniListRelatedEntry] {
+        // Exclude direct continuation relations (SEQUEL, PREQUEL, SEASON in excludedRelatedMediaRelations)
+        // because they already power the main season flow.
+        var seen = Set<Int>()
+        var output: [AniListRelatedEntry] = []
+
+        for edge in anime.relations?.edges ?? [] {
+            guard edge.node.type == "ANIME" else { continue }
+            guard edge.node.id != anime.id else { continue }
+            guard !excludedRelatedMediaRelations.contains(edge.relationType) else { continue }
+            guard seen.insert(edge.node.id).inserted else { continue }
+
+            let relatedTitle = AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode)
+            guard !relatedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+
+            output.append(AniListRelatedEntry(
+                id: edge.node.id,
+                title: relatedTitle,
+                relationType: edge.relationType,
+                format: edge.node.format
+            ))
+        }
+
+        return output.sorted {
+            let relationOrder: [String: Int] = [
+                "SIDE_STORY": 0,
+                "SPIN_OFF": 1,
+                "PARENT": 2,
+                "SOURCE": 3,
+                "ALTERNATIVE": 4,
+                "SUMMARY": 5,
+                "OTHER": 6
+            ]
+            if $0.relationType != $1.relationType {
+                return (relationOrder[$0.relationType] ?? Int.max) < (relationOrder[$1.relationType] ?? Int.max)
+            }
+            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
     }
 
     private func pickBestAniListMatch(from candidates: [AniListAnime], tmdbShow: TMDBTVShowWithSeasons?) -> AniListAnime {
@@ -1656,6 +1699,14 @@ struct AniListAnimeWithSeasons {
     let seasons: [AniListSeasonWithPoster]
     let totalEpisodes: Int
     let status: String
+    let relatedEntries: [AniListRelatedEntry]
+}
+
+struct AniListRelatedEntry {
+    let id: Int
+    let title: String
+    let relationType: String
+    let format: String?
 }
 
 // MARK: - AniList Codable Models

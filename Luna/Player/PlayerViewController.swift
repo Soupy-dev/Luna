@@ -2206,8 +2206,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard let originalURL = initialURL, originalURL.host != "127.0.0.1" else { return false }
         guard let headers = initialHeaders, !headers.isEmpty else { return false }
 
-        let proxyEnabled = UserDefaults.standard.object(forKey: "vlcHeaderProxyEnabled") as? Bool ?? true
-        guard proxyEnabled else { return false }
         guard let preset = initialPreset else { return false }
 
         let proxyHeaders = buildProxyHeaders(for: originalURL, baseHeaders: headers)

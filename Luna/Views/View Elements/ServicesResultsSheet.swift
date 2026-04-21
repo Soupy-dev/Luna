@@ -1455,7 +1455,7 @@ struct ModulesSearchResultsSheet: View {
 
             Logger.shared.log("Stremio: Final headers: \(finalHeaders)", type: "Stream")
 
-            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
+            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "VLC"
             let inAppPlayer = inAppRaw
 
             var playerMediaInfo: MediaInfo? = nil
@@ -2041,7 +2041,7 @@ struct ModulesSearchResultsSheet: View {
             
             Logger.shared.log("Final headers: \(finalHeaders)", type: "Stream")
             
-            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
+            let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "VLC"
             let inAppPlayer = inAppRaw
             
             // Record service usage (async to avoid blocking player launch)
