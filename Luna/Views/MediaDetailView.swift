@@ -24,7 +24,6 @@ private final class MediaDetailCacheStore {
         let anilistEpisodes: [AniListEpisode]?
         let animeSeasonTitles: [Int: String]?
         let castMembers: [TMDBCastMember]
-        let relatedMedia: [TMDBSearchResult]
         let timestamp: Date
     }
     
@@ -79,8 +78,6 @@ struct MediaDetailView: View {
     @State private var animeSeasonTitles: [Int: String]? = nil
     
     @State private var castMembers: [TMDBCastMember] = []
-    @State private var relatedMedia: [TMDBSearchResult] = []
-    
     @State private var hasLoadedContent = false
     @State private var detailLoadTask: Task<Void, Never>?
     
@@ -725,7 +722,6 @@ struct MediaDetailView: View {
                 self.anilistEpisodes = cached.anilistEpisodes
                 self.animeSeasonTitles = cached.animeSeasonTitles
                 self.castMembers = cached.castMembers
-                self.relatedMedia = cached.relatedMedia
                 self.isLoading = false
                 self.hasLoadedContent = true
             }
@@ -765,10 +761,7 @@ struct MediaDetailView: View {
                     let credits = try? await tmdbService.getMovieCredits(id: searchResult.id)
                     Logger.shared.log("Movie detail step: getMovieCredits done id=\(searchResult.id) cast=\(credits?.cast.count ?? 0)", type: "CrashProbe")
 
-                    Logger.shared.log("Movie detail step: getMovieRecommendations start id=\(searchResult.id)", type: "CrashProbe")
-                    let recommendations = try? await tmdbService.getMovieRecommendations(id: searchResult.id)
-                    Logger.shared.log("Movie detail step: getMovieRecommendations done id=\(searchResult.id) recs=\(recommendations?.count ?? 0)", type: "CrashProbe")
-                    Logger.shared.log("Movie detail fetch complete: tmdbId=\(searchResult.id) cast=\(credits?.cast.count ?? 0) recs=\(recommendations?.count ?? 0)", type: "CrashProbe")
+                    Logger.shared.log("Movie detail fetch complete: tmdbId=\(searchResult.id) cast=\(credits?.cast.count ?? 0)", type: "CrashProbe")
                     
                     if Task.isCancelled { return }
                     await MainActor.run {
@@ -780,7 +773,6 @@ struct MediaDetailView: View {
                             self.logoURL = logo.fullURL
                         }
                         self.castMembers = credits?.cast ?? []
-                        self.relatedMedia = recommendations?.map { $0.asSearchResult } ?? []
                         self.isLoading = false
                         self.hasLoadedContent = true
                         
@@ -796,7 +788,6 @@ struct MediaDetailView: View {
                             anilistEpisodes: nil,
                             animeSeasonTitles: nil,
                             castMembers: self.castMembers,
-                            relatedMedia: self.relatedMedia,
                             timestamp: Date()
                         ))
                     }
@@ -806,12 +797,10 @@ struct MediaDetailView: View {
                     Logger.shared.log("TV detail step: queue getTVShowImages id=\(searchResult.id)", type: "CrashProbe")
                     Logger.shared.log("TV detail step: queue getRomajiTitle id=\(searchResult.id)", type: "CrashProbe")
                     Logger.shared.log("TV detail step: queue getTVCredits id=\(searchResult.id)", type: "CrashProbe")
-                    Logger.shared.log("TV detail step: queue getTVRecommendations id=\(searchResult.id)", type: "CrashProbe")
                     async let detailTask = tmdbService.getTVShowWithSeasons(id: searchResult.id)
                     async let imagesTask = tmdbService.getTVShowImages(id: searchResult.id, preferredLanguage: selectedLanguage)
                     async let romajiTask = tmdbService.getRomajiTitle(for: "tv", id: searchResult.id)
                     async let creditsTask = tmdbService.getTVCredits(id: searchResult.id)
-                    async let recommendationsTask = tmdbService.getTVRecommendations(id: searchResult.id)
 
                     let detail = try await detailTask
                     Logger.shared.log("TV detail step: getTVShowWithSeasons done id=\(searchResult.id) seasons=\(detail.seasons.count)", type: "CrashProbe")
@@ -837,15 +826,6 @@ struct MediaDetailView: View {
                         Logger.shared.log("TV detail step: getTVCredits failed id=\(searchResult.id) error=\(error.localizedDescription)", type: "CrashProbe")
                     }
 
-                    let recommendations: [TMDBTVShow]?
-                    do {
-                        recommendations = try await recommendationsTask
-                        Logger.shared.log("TV detail step: getTVRecommendations done id=\(searchResult.id) recs=\(recommendations?.count ?? 0)", type: "CrashProbe")
-                    } catch {
-                        recommendations = nil
-                        Logger.shared.log("TV detail step: getTVRecommendations failed id=\(searchResult.id) error=\(error.localizedDescription)", type: "CrashProbe")
-                    }
-                    let recommendationMedia = recommendations?.map { $0.asSearchResult } ?? []
                     
                     // Detect anime/donghua for tracking/catalog — includes JP, CN, KR, TW animation
                     let asianAnimationCountries: Set<String> = ["JP", "CN", "KR", "TW"]
@@ -888,7 +868,6 @@ struct MediaDetailView: View {
                         self.romajiTitle = romaji
                         self.isAnimeShow = detectedAsAnime
                         self.castMembers = credits?.cast ?? []
-                        self.relatedMedia = recommendationMedia
                         
                         if let animeData = animeData {
                             Logger.shared.log("MediaDetailView: Using AniList structure — \(animeData.seasons.count) seasons", type: "AniList")
@@ -989,7 +968,6 @@ struct MediaDetailView: View {
                             anilistEpisodes: self.anilistEpisodes,
                             animeSeasonTitles: self.animeSeasonTitles,
                             castMembers: self.castMembers,
-                            relatedMedia: self.relatedMedia,
                             timestamp: Date()
                         ))
                     }

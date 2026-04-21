@@ -40,6 +40,22 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
     private var useSeasonMenu: Bool {
         return UserDefaults.standard.bool(forKey: "seasonMenu")
     }
+
+    private struct EpisodeRenderItem: Identifiable {
+        let id: String
+        let index: Int
+        let episode: TMDBEpisode
+    }
+
+    private func episodeRenderItems(for detail: TMDBSeasonDetail) -> [EpisodeRenderItem] {
+        detail.episodes.enumerated().map { index, episode in
+            EpisodeRenderItem(
+                id: "\(detail.seasonNumber)-\(episode.seasonNumber)-\(episode.episodeNumber)-\(episode.id)-\(index)",
+                index: index,
+                episode: episode
+            )
+        }
+    }
     
     private func getSearchTitle() -> String {
         if isAnime, let seasonName = selectedSeason?.name, !seasonName.isEmpty {
@@ -333,20 +349,27 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
     private var episodeListSection: some View {
         Group {
             if let seasonDetail = seasonDetail {
+                let episodeItems = episodeRenderItems(for: seasonDetail)
                 if horizontalEpisodeList {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(alignment: .top, spacing: 15) {
-                            ForEach(Array(seasonDetail.episodes.enumerated()), id: \.element.id) { index, episode in
-                                createEpisodeCell(episode: episode, index: index)
+                            ForEach(episodeItems) { item in
+                                createEpisodeCell(episode: item.episode, index: item.index)
                             }
+                        }
+                        .onAppear {
+                            Logger.shared.log("TVShowSeasonsSection episode list appeared: showId=\(tvShow?.id ?? 0) season=\(seasonDetail.seasonNumber) count=\(episodeItems.count) layout=horizontal", type: "CrashProbe")
                         }
                     }
                     .padding(.horizontal)
                 } else {
                     LazyVStack(spacing: 15) {
-                        ForEach(Array(seasonDetail.episodes.enumerated()), id: \.element.id) { index, episode in
-                            createEpisodeCell(episode: episode, index: index)
+                        ForEach(episodeItems) { item in
+                            createEpisodeCell(episode: item.episode, index: item.index)
                         }
+                    }
+                    .onAppear {
+                        Logger.shared.log("TVShowSeasonsSection episode list appeared: showId=\(tvShow?.id ?? 0) season=\(seasonDetail.seasonNumber) count=\(episodeItems.count) layout=vertical", type: "CrashProbe")
                     }
                     .padding(.horizontal)
                 }
@@ -445,6 +468,7 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
     }
     
     private func loadSeasonDetails(tvShowId: Int, season: TMDBSeason) {
+        Logger.shared.log("TVShowSeasonsSection loadSeasonDetails start: showId=\(tvShowId) season=\(season.seasonNumber) isAnime=\(isAnime)", type: "CrashProbe")
         isLoadingSeason = true
         seasonDetail = nil
         selectedEpisodeForSearch = nil
@@ -486,6 +510,7 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
                         if let firstEpisode = detail.episodes.first {
                             self.selectedEpisodeForSearch = firstEpisode
                         }
+                        Logger.shared.log("TVShowSeasonsSection loadSeasonDetails anime done: showId=\(tvShowId) season=\(season.seasonNumber) episodes=\(detail.episodes.count)", type: "CrashProbe")
                     }
                 } else {
                     // For regular TV shows, fetch from TMDB
@@ -496,11 +521,13 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
                         if let firstEpisode = detail.episodes.first {
                             self.selectedEpisodeForSearch = firstEpisode
                         }
+                        Logger.shared.log("TVShowSeasonsSection loadSeasonDetails tmdb done: showId=\(tvShowId) season=\(season.seasonNumber) episodes=\(detail.episodes.count)", type: "CrashProbe")
                     }
                 }
             } catch {
                 await MainActor.run {
                     self.isLoadingSeason = false
+                    Logger.shared.log("TVShowSeasonsSection loadSeasonDetails failed: showId=\(tvShowId) season=\(season.seasonNumber) error=\(error.localizedDescription)", type: "CrashProbe")
                 }
             }
         }

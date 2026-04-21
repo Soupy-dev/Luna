@@ -24,8 +24,6 @@ private actor AniListRateLimiter {
     }
 }
 
-private let excludedRelatedMediaRelations: Set<String> = ["SEQUEL", "PREQUEL", "SEASON"]
-
 final class AniListService {
     static let shared = AniListService()
 
@@ -870,87 +868,13 @@ final class AniListService {
             title: title,
             seasons: seasons,
             totalEpisodes: totalEpisodes,
-            status: anime.status ?? "UNKNOWN",
-            relatedEntries: buildRelatedEntries(from: anime)
+            status: anime.status ?? "UNKNOWN"
         )
         
         // Cache the result for fast back-navigation
         animeDetailsCache.setObject(AniListAnimeWithSeasonsWrapper(animeWithSeasons), forKey: NSNumber(value: tmdbShowId))
         
         return animeWithSeasons
-    }
-
-    private func buildRelatedEntries(from anime: AniListAnime) -> [AniListRelatedEntry] {
-        // Exclude direct continuation relations (SEQUEL, PREQUEL, SEASON in excludedRelatedMediaRelations)
-        // because they already power the main season flow.
-        let rawEdges = anime.relations?.edges ?? []
-        var seen = Set<Int>()
-        var output: [AniListRelatedEntry] = []
-        var skippedNonAnime = 0
-        var skippedSelf = 0
-        var skippedContinuation = 0
-        var skippedDuplicate = 0
-        var skippedEmptyTitle = 0
-
-        Logger.shared.log(
-            "AniListService: buildRelatedEntries start animeId=\(anime.id) rawEdges=\(rawEdges.count)",
-            type: "CrashProbe"
-        )
-
-        for edge in rawEdges {
-            guard edge.node.type == "ANIME" else {
-                skippedNonAnime += 1
-                continue
-            }
-            guard edge.node.id != anime.id else {
-                skippedSelf += 1
-                continue
-            }
-            guard !excludedRelatedMediaRelations.contains(edge.relationType) else {
-                skippedContinuation += 1
-                continue
-            }
-            guard seen.insert(edge.node.id).inserted else {
-                skippedDuplicate += 1
-                continue
-            }
-
-            let relatedTitle = AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode)
-            guard !relatedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                skippedEmptyTitle += 1
-                continue
-            }
-
-            output.append(AniListRelatedEntry(
-                id: edge.node.id,
-                title: relatedTitle,
-                relationType: edge.relationType,
-                format: edge.node.format
-            ))
-        }
-
-        let sorted = output.sorted {
-            let relationOrder: [String: Int] = [
-                "SIDE_STORY": 0,
-                "SPIN_OFF": 1,
-                "PARENT": 2,
-                "SOURCE": 3,
-                "ALTERNATIVE": 4,
-                "SUMMARY": 5,
-                "OTHER": 6
-            ]
-            if $0.relationType != $1.relationType {
-                return (relationOrder[$0.relationType] ?? Int.max) < (relationOrder[$1.relationType] ?? Int.max)
-            }
-            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-        }
-
-        Logger.shared.log(
-            "AniListService: buildRelatedEntries done animeId=\(anime.id) kept=\(sorted.count) skippedNonAnime=\(skippedNonAnime) skippedSelf=\(skippedSelf) skippedContinuation=\(skippedContinuation) skippedDuplicate=\(skippedDuplicate) skippedEmptyTitle=\(skippedEmptyTitle)",
-            type: "CrashProbe"
-        )
-
-        return sorted
     }
 
     private func pickBestAniListMatch(from candidates: [AniListAnime], tmdbShow: TMDBTVShowWithSeasons?) -> AniListAnime {
@@ -1732,14 +1656,6 @@ struct AniListAnimeWithSeasons {
     let seasons: [AniListSeasonWithPoster]
     let totalEpisodes: Int
     let status: String
-    let relatedEntries: [AniListRelatedEntry]
-}
-
-struct AniListRelatedEntry {
-    let id: Int
-    let title: String
-    let relationType: String
-    let format: String?
 }
 
 // MARK: - AniList Codable Models
