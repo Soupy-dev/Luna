@@ -16,6 +16,7 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
     @Binding var selectedEpisodeForSearch: TMDBEpisode?
     var animeEpisodes: [AniListEpisode]? = nil
     var animeSeasonTitles: [Int: String]? = nil
+    let relatedMedia: [TMDBSearchResult]
     let tmdbService: TMDBService
     @ViewBuilder let insertedContent: () -> InsertedContent
     
@@ -112,6 +113,7 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
                         .padding(.top)
                         
                         seasonSelectorStyled
+                        relatedMediaSection
                         
                         HStack {
                             Text("Episodes")
@@ -134,6 +136,7 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
                         .padding(.top)
                     } else {
                         episodesSectionHeader
+                        relatedMediaSection
                     }
                     
                     episodeListSection
@@ -328,6 +331,50 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
                     .padding(.horizontal)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var relatedMediaSection: some View {
+        if !relatedMedia.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Related media")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(Array(relatedMedia.enumerated()), id: \.offset) { _, media in
+                            NavigationLink(destination: MediaDetailView(searchResult: media)) {
+                                VStack(spacing: 6) {
+                                    KFImage(URL(string: media.fullPosterURL ?? ""))
+                                        .placeholder {
+                                            Rectangle()
+                                                .fill(Color.gray.opacity(0.3))
+                                                .frame(width: 86, height: 128)
+                                        }
+                                        .resizable()
+                                        .aspectRatio(2/3, contentMode: .fill)
+                                        .frame(width: 86, height: 128)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                                    Text(media.displayTitle)
+                                        .font(.caption2)
+                                        .foregroundColor(.white)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.center)
+                                        .frame(width: 86)
+                                }
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+            .padding(.top, 4)
         }
     }
     

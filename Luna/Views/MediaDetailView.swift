@@ -529,6 +529,7 @@ struct MediaDetailView: View {
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
                 animeEpisodes: anilistEpisodes,
                 animeSeasonTitles: animeSeasonTitles,
+                relatedMedia: relatedMedia,
                 tmdbService: tmdbService
             ) {
                 if !castMembers.isEmpty {
@@ -787,6 +788,7 @@ struct MediaDetailView: View {
                     let (detail, images, romaji) = try await (detailTask, imagesTask, romajiTask)
                     let credits = try? await creditsTask
                     let recommendations = try? await recommendationsTask
+                    let recommendationMedia = recommendations?.map { $0.asSearchResult } ?? []
                     
                     // Detect anime/donghua for tracking/catalog — includes JP, CN, KR, TW animation
                     let asianAnimationCountries: Set<String> = ["JP", "CN", "KR", "TW"]
@@ -821,12 +823,19 @@ struct MediaDetailView: View {
                         Logger.shared.log("MediaDetailView: Skipping AniList fetch — not detected as anime", type: "AniList")
                     }
                     
+                    let anilistRelatedMedia: [TMDBSearchResult]
+                    if let animeData = animeData {
+                        anilistRelatedMedia = await resolveAniListRelatedMedia(from: animeData.relatedEntries)
+                    } else {
+                        anilistRelatedMedia = []
+                    }
+
                     await MainActor.run {
                         self.synopsis = detail.overview ?? ""
                         self.romajiTitle = romaji
                         self.isAnimeShow = detectedAsAnime
                         self.castMembers = credits?.cast ?? []
-                        self.relatedMedia = recommendations?.map { $0.asSearchResult } ?? []
+                        self.relatedMedia = mergeRelatedMedia(primary: anilistRelatedMedia, fallback: recommendationMedia)
                         
                         if let animeData = animeData {
                             Logger.shared.log("MediaDetailView: Using AniList structure — \(animeData.seasons.count) seasons", type: "AniList")
@@ -941,5 +950,58 @@ struct MediaDetailView: View {
                 }
             }
         }
+    }
+
+    private func resolveAniListRelatedMedia(from entries: [AniListRelatedEntry]) async -> [TMDBSearchResult] {
+        guard !entries.isEmpty else { return [] }
+
+        return await withTaskGroup(of: TMDBSearchResult?.self, returning: [TMDBSearchResult].self) { group in
+            for entry in entries {
+                group.addTask {
+                    let query = entry.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !query.isEmpty else { return nil }
+
+                    if entry.format == "MOVIE" {
+                        if let movie = try? await self.tmdbService.searchMovies(query: query).first {
+                            return movie.asSearchResult
+                        }
+                        if let tv = try? await self.tmdbService.searchTVShows(query: query).first {
+                            return tv.asSearchResult
+                        }
+                    } else {
+                        if let tv = try? await self.tmdbService.searchTVShows(query: query).first {
+                            return tv.asSearchResult
+                        }
+                        if let movie = try? await self.tmdbService.searchMovies(query: query).first {
+                            return movie.asSearchResult
+                        }
+                    }
+
+                    return nil
+                }
+            }
+
+            var output: [TMDBSearchResult] = []
+            for await item in group {
+                if let item {
+                    output.append(item)
+                }
+            }
+            return output
+        }
+    }
+
+    private func mergeRelatedMedia(primary: [TMDBSearchResult], fallback: [TMDBSearchResult]) -> [TMDBSearchResult] {
+        var seen = Set<String>()
+        var merged: [TMDBSearchResult] = []
+
+        for item in (primary + fallback) {
+            let key = "\(item.mediaType)-\(item.id)"
+            guard key != "\(searchResult.mediaType)-\(searchResult.id)" else { continue }
+            guard seen.insert(key).inserted else { continue }
+            merged.append(item)
+        }
+
+        return merged
     }
 }

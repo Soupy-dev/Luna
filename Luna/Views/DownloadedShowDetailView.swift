@@ -318,7 +318,7 @@ struct DownloadedShowDetailView: View {
             return
         }
         
-        let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "Normal"
+        let inAppRaw = UserDefaults.standard.string(forKey: "inAppPlayer") ?? "VLC"
         let subtitleArray: [String]? = downloadManager.localSubtitleURL(for: item).map { [$0.absoluteString] }
         
         if inAppRaw == "mpv" || inAppRaw == "VLC" {

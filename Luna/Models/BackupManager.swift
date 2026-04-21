@@ -128,7 +128,7 @@ struct BackupData: Codable {
         // Support both new "inAppPlayer" key and legacy "playerChoice" key
         inAppPlayer = try container.decodeIfPresent(String.self, forKey: .inAppPlayer)
             ?? container.decodeIfPresent(String.self, forKey: .playerChoice)
-            ?? "Normal"
+            ?? "VLC"
         showScheduleTab = try container.decodeIfPresent(Bool.self, forKey: .showScheduleTab) ?? true
         showLocalScheduleTime = try container.decodeIfPresent(Bool.self, forKey: .showLocalScheduleTime) ?? true
 
@@ -500,7 +500,7 @@ class BackupManager {
         let enableVLCSubtitleEditMenu = userDefaults.bool(forKey: "enableVLCSubtitleEditMenu")
 
         let preferredAnimeAudioLanguage = userDefaults.string(forKey: "preferredAnimeAudioLanguage") ?? "jpn"
-        let inAppPlayer = userDefaults.string(forKey: "inAppPlayer") ?? "Normal"
+        let inAppPlayer = userDefaults.string(forKey: "inAppPlayer") ?? "VLC"
         let tmdbLanguage = userDefaults.string(forKey: "tmdbLanguage") ?? "en-US"
         let showScheduleTab = userDefaults.bool(forKey: "showScheduleTab")
         let showLocalScheduleTime = userDefaults.bool(forKey: "showLocalScheduleTime")
@@ -740,7 +740,7 @@ class BackupManager {
         let defaultSubtitleLanguage = json["defaultSubtitleLanguage"] as? String ?? "eng"
         let enableVLCSubtitleEditMenu = json["enableVLCSubtitleEditMenu"] as? Bool ?? false
         let preferredAnimeAudioLanguage = json["preferredAnimeAudioLanguage"] as? String ?? "jpn"
-        let inAppPlayer = json["inAppPlayer"] as? String ?? json["playerChoice"] as? String ?? "Normal"
+        let inAppPlayer = json["inAppPlayer"] as? String ?? json["playerChoice"] as? String ?? "VLC"
         let showScheduleTab = json["showScheduleTab"] as? Bool ?? true
         let showLocalScheduleTime = json["showLocalScheduleTime"] as? Bool ?? true
 
@@ -978,7 +978,7 @@ class BackupManager {
         userDefaults.set(backup.selectedAppearance, forKey: "selectedAppearance")
         userDefaults.set(backup.enableSubtitlesByDefault, forKey: "enableSubtitlesByDefault")
         userDefaults.set(backup.defaultSubtitleLanguage, forKey: "defaultSubtitleLanguage")
-        userDefaults.set(backup.enableVLCSubtitleEditMenu, forKey: "enableVLCSubtitleEditMenu")
+        userDefaults.set(true, forKey: "enableVLCSubtitleEditMenu")
 
         userDefaults.set(backup.preferredAnimeAudioLanguage, forKey: "preferredAnimeAudioLanguage")
         userDefaults.set(backup.inAppPlayer, forKey: "inAppPlayer")
@@ -993,7 +993,7 @@ class BackupManager {
         userDefaults.set(backup.skip85sEnabled, forKey: "skip85sEnabled")
         userDefaults.set(backup.showNextEpisodeButton, forKey: "showNextEpisodeButton")
         userDefaults.set(backup.nextEpisodeThreshold, forKey: "nextEpisodeThreshold")
-        userDefaults.set(backup.vlcHeaderProxyEnabled, forKey: "vlcHeaderProxyEnabled")
+        userDefaults.set(true, forKey: "vlcHeaderProxyEnabled")
 
         // Subtitle styling
         if let fgColor = backup.subtitleForegroundColor {
