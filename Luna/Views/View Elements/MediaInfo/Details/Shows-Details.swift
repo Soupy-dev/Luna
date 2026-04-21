@@ -338,7 +338,7 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
     private var relatedMediaSection: some View {
         if !relatedMedia.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Related media")
+                Text("Related Media")
                     .font(.title3)
                     .fontWeight(.bold)
                     .foregroundColor(.white)

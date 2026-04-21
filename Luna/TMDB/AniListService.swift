@@ -879,14 +879,14 @@ final class AniListService {
     }
 
     private func buildRelatedEntries(from anime: AniListAnime) -> [AniListRelatedEntry] {
-        let excludedRelationTypes: Set<String> = ["SEQUEL", "PREQUEL", "SEASON"]
+        let excludedRelations: Set<String> = ["SEQUEL", "PREQUEL", "SEASON"]
         var seen = Set<Int>()
         var output: [AniListRelatedEntry] = []
 
         for edge in anime.relations?.edges ?? [] {
             guard edge.node.type == "ANIME" else { continue }
             guard edge.node.id != anime.id else { continue }
-            guard !excludedRelationTypes.contains(edge.relationType) else { continue }
+            guard !excludedRelations.contains(edge.relationType) else { continue }
             guard seen.insert(edge.node.id).inserted else { continue }
 
             let relatedTitle = AniListTitlePicker.title(from: edge.node.title, preferredLanguageCode: preferredLanguageCode)
