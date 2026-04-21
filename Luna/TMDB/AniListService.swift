@@ -904,8 +904,17 @@ final class AniListService {
         }
 
         return output.sorted {
+            let relationOrder: [String: Int] = [
+                "SIDE_STORY": 0,
+                "SPIN_OFF": 1,
+                "PARENT": 2,
+                "SOURCE": 3,
+                "ALTERNATIVE": 4,
+                "SUMMARY": 5,
+                "OTHER": 6
+            ]
             if $0.relationType != $1.relationType {
-                return $0.relationType < $1.relationType
+                return (relationOrder[$0.relationType] ?? Int.max) < (relationOrder[$1.relationType] ?? Int.max)
             }
             return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
         }

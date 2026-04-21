@@ -978,7 +978,7 @@ class BackupManager {
         userDefaults.set(backup.selectedAppearance, forKey: "selectedAppearance")
         userDefaults.set(backup.enableSubtitlesByDefault, forKey: "enableSubtitlesByDefault")
         userDefaults.set(backup.defaultSubtitleLanguage, forKey: "defaultSubtitleLanguage")
-        // Forced on by app policy: VLC subtitle edit menu must remain enabled.
+        // Forced on by app policy: backup value is intentionally ignored here and this flag remains enabled.
         userDefaults.set(true, forKey: "enableVLCSubtitleEditMenu")
 
         userDefaults.set(backup.preferredAnimeAudioLanguage, forKey: "preferredAnimeAudioLanguage")
@@ -994,7 +994,7 @@ class BackupManager {
         userDefaults.set(backup.skip85sEnabled, forKey: "skip85sEnabled")
         userDefaults.set(backup.showNextEpisodeButton, forKey: "showNextEpisodeButton")
         userDefaults.set(backup.nextEpisodeThreshold, forKey: "nextEpisodeThreshold")
-        // Forced on by app policy: VLC header proxy must remain enabled.
+        // Forced on by app policy: backup value is intentionally ignored here and this flag remains enabled.
         userDefaults.set(true, forKey: "vlcHeaderProxyEnabled")
 
         // Subtitle styling

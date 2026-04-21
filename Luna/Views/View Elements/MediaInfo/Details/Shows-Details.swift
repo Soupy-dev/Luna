@@ -351,16 +351,23 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
                         ForEach(relatedMedia, id: \.id) { media in
                             NavigationLink(destination: MediaDetailView(searchResult: media)) {
                                 VStack(spacing: 6) {
-                                    KFImage(URL(string: media.fullPosterURL ?? ""))
-                                        .placeholder {
-                                            Rectangle()
-                                                .fill(Color.gray.opacity(0.3))
-                                                .frame(width: relatedPosterWidth, height: relatedPosterHeight)
-                                        }
-                                        .resizable()
-                                        .aspectRatio(2/3, contentMode: .fill)
-                                        .frame(width: relatedPosterWidth, height: relatedPosterHeight)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    if let posterURL = media.fullPosterURL, let url = URL(string: posterURL) {
+                                        KFImage(url)
+                                            .placeholder {
+                                                Rectangle()
+                                                    .fill(Color.gray.opacity(0.3))
+                                                    .frame(width: relatedPosterWidth, height: relatedPosterHeight)
+                                            }
+                                            .resizable()
+                                            .aspectRatio(2/3, contentMode: .fill)
+                                            .frame(width: relatedPosterWidth, height: relatedPosterHeight)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    } else {
+                                        Rectangle()
+                                            .fill(Color.gray.opacity(0.3))
+                                            .frame(width: relatedPosterWidth, height: relatedPosterHeight)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    }
 
                                     Text(media.displayTitle)
                                         .font(.caption2)
