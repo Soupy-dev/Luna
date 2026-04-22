@@ -110,6 +110,8 @@ struct ModulesSearchResultsSheet: View {
     /// Original TMDB season/episode numbers for anime (before AniList restructuring), used by TheIntroDB.
     var originalTMDBSeasonNumber: Int? = nil
     var originalTMDBEpisodeNumber: Int? = nil
+    /// One-episode specials should search by their exact title, without adding E1.
+    var specialTitleOnlySearch: Bool = false
     /// When true, selecting a stream downloads instead of playing
     var downloadMode: Bool = false
     /// When true, show only the compact Auto Mode runner instead of the full results picker.
@@ -139,7 +141,11 @@ struct ModulesSearchResultsSheet: View {
     }
 
     private var displayTitle: String {
-        if let episode = selectedEpisode {
+        if selectedEpisode != nil {
+            if specialTitleOnlySearch {
+                return animeSeasonTitle != nil ? animeEffectiveTitle : effectiveTitle
+            }
+            guard let episode = selectedEpisode else { return effectiveTitle }
             if isAnimeContent || animeSeasonTitle != nil {
                 return "\(animeEffectiveTitle) E\(episode.episodeNumber)"
             }
@@ -150,6 +156,9 @@ struct ModulesSearchResultsSheet: View {
     
     private var episodeSeasonInfo: String {
         guard let episode = selectedEpisode else { return "" }
+        if specialTitleOnlySearch {
+            return "Special"
+        }
         if isAnimeContent || animeSeasonTitle != nil {
             return "E\(episode.episodeNumber)"
         }
@@ -890,7 +899,9 @@ struct ModulesSearchResultsSheet: View {
     private var autoModeSearchQueries: [String] {
         let primary: String
         if let ep = selectedEpisode {
-            if animeSeasonTitle != nil {
+            if specialTitleOnlySearch {
+                primary = animeSeasonTitle != nil ? animeEffectiveTitle : effectiveTitle
+            } else if animeSeasonTitle != nil {
                 primary = "\(animeEffectiveTitle) E\(ep.episodeNumber)"
             } else {
                 primary = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
@@ -973,8 +984,8 @@ struct ModulesSearchResultsSheet: View {
     private func findAutoModeStremioStream(_ addon: StremioAddon) async -> StremioStream? {
         let client = StremioClient.shared
         let type = isMovie ? "movie" : "series"
-        let season = originalTMDBSeasonNumber ?? selectedEpisode?.seasonNumber
-        let episode = originalTMDBEpisodeNumber ?? selectedEpisode?.episodeNumber
+        let season = originalTMDBSeasonNumber ?? (specialTitleOnlySearch ? nil : selectedEpisode?.seasonNumber)
+        let episode = originalTMDBEpisodeNumber ?? (specialTitleOnlySearch ? nil : selectedEpisode?.episodeNumber)
 
         guard let contentId = client.buildContentId(
             tmdbId: tmdbId,
@@ -1213,7 +1224,9 @@ struct ModulesSearchResultsSheet: View {
         // Build search query
         let searchQuery: String
         if let ep = selectedEpisode {
-            if animeSeasonTitle != nil {
+            if specialTitleOnlySearch {
+                searchQuery = animeSeasonTitle != nil ? animeEffectiveTitle : effectiveTitle
+            } else if animeSeasonTitle != nil {
                 searchQuery = "\(animeEffectiveTitle) E\(ep.episodeNumber)"
             } else {
                 searchQuery = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
@@ -1339,8 +1352,8 @@ struct ModulesSearchResultsSheet: View {
         let type = isMovie ? "movie" : "series"
         // For anime, AniList restructuring remaps season/episode numbers.
         // Stremio addons index by the original TMDB numbering, so prefer those.
-        let season = originalTMDBSeasonNumber ?? selectedEpisode?.seasonNumber
-        let episode = originalTMDBEpisodeNumber ?? selectedEpisode?.episodeNumber
+        let season = originalTMDBSeasonNumber ?? (specialTitleOnlySearch ? nil : selectedEpisode?.seasonNumber)
+        let episode = originalTMDBEpisodeNumber ?? (specialTitleOnlySearch ? nil : selectedEpisode?.episodeNumber)
 
         Task {
             await stremioManager.fetchStreamsFromAddons(
@@ -1827,7 +1840,9 @@ struct ModulesSearchResultsSheet: View {
         if isMovie {
             displayTitle = mediaTitle
         } else if let ep = selectedEpisode {
-            if isAnimeContent || animeSeasonTitle != nil {
+            if specialTitleOnlySearch {
+                displayTitle = animeSeasonTitle != nil ? animeEffectiveTitle : effectiveTitle
+            } else if isAnimeContent || animeSeasonTitle != nil {
                 displayTitle = "\(animeEffectiveTitle) E\(ep.episodeNumber)"
             } else {
                 displayTitle = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"
@@ -2496,7 +2511,9 @@ struct ModulesSearchResultsSheet: View {
         if isMovie {
             displayTitle = mediaTitle
         } else if let ep = selectedEpisode {
-            if isAnimeContent || animeSeasonTitle != nil {
+            if specialTitleOnlySearch {
+                displayTitle = animeSeasonTitle != nil ? animeEffectiveTitle : effectiveTitle
+            } else if isAnimeContent || animeSeasonTitle != nil {
                 displayTitle = "\(animeEffectiveTitle) E\(ep.episodeNumber)"
             } else {
                 displayTitle = "\(effectiveTitle) S\(ep.seasonNumber)E\(ep.episodeNumber)"

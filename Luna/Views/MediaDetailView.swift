@@ -23,6 +23,7 @@ private final class MediaDetailCacheStore {
         let isAnimeShow: Bool
         let anilistEpisodes: [AniListEpisode]?
         let animeSeasonTitles: [Int: String]?
+        let animeSpecialEntries: [AniListSpecialEntry]
         let castMembers: [TMDBCastMember]
         let timestamp: Date
     }
@@ -76,6 +77,7 @@ struct MediaDetailView: View {
     @State private var isAnimeShow = false
     @State private var anilistEpisodes: [AniListEpisode]? = nil
     @State private var animeSeasonTitles: [Int: String]? = nil
+    @State private var animeSpecialEntries: [AniListSpecialEntry] = []
     
     @State private var castMembers: [TMDBCastMember] = []
     @State private var hasLoadedContent = false
@@ -584,6 +586,8 @@ struct MediaDetailView: View {
                 selectedEpisodeForSearch: $selectedEpisodeForSearch,
                 animeEpisodes: anilistEpisodes,
                 animeSeasonTitles: animeSeasonTitles,
+                specialEntries: animeSpecialEntries,
+                initialSpecialAniListId: searchResult.sourceAniListId,
                 tmdbService: tmdbService
             ) {
                 if !castMembers.isEmpty {
@@ -788,6 +792,7 @@ struct MediaDetailView: View {
                 self.isAnimeShow = cached.isAnimeShow
                 self.anilistEpisodes = cached.anilistEpisodes
                 self.animeSeasonTitles = cached.animeSeasonTitles
+                self.animeSpecialEntries = cached.animeSpecialEntries
                 self.castMembers = cached.castMembers
                 self.isLoading = false
                 self.hasLoadedContent = true
@@ -856,6 +861,7 @@ struct MediaDetailView: View {
                             isAnimeShow: false,
                             anilistEpisodes: nil,
                             animeSeasonTitles: nil,
+                            animeSpecialEntries: [],
                             castMembers: self.castMembers,
                             timestamp: Date()
                         ))
@@ -1010,8 +1016,42 @@ struct MediaDetailView: View {
                             }
                             Logger.shared.log("MediaDetailView: AniList season conversion complete tmdbId=\(detail.id) aniSeasons=\(aniSeasons.count) summary=\(aniSeasons.prefix(8).map { "s\($0.seasonNumber):id\($0.id):eps\($0.episodeCount)" }.joined(separator: "|"))", type: "CrashProbe")
                             Logger.shared.log("MediaDetailView: anime state preassign tmdbId=\(detail.id) aniSeasons=\(aniSeasons.count) allEpisodes=\(allEpisodes.count) seasonTitles=\(seasonTitles.count)", type: "CrashProbe")
+                            var specialEntries = animeData.specialEntries
+                            if let sourceId = searchResult.sourceAniListId,
+                               !specialEntries.contains(where: { $0.id == sourceId }),
+                               let sourceTitle = searchResult.sourceAniListTitle {
+                                let episodeCount = max(1, searchResult.sourceAniListEpisodeCount ?? 1)
+                                let originalSeason = searchResult.sourceAniMapTMDBSeason ?? searchResult.sourceAniMapTVDBSeason
+                                let episodeOffset = searchResult.sourceAniMapEpisodeOffset ?? 0
+                                let episodes = (1...episodeCount).map { number in
+                                    AniListEpisode(
+                                        number: number,
+                                        title: episodeCount == 1 ? sourceTitle : "Episode \(number)",
+                                        description: nil,
+                                        seasonNumber: 0,
+                                        stillPath: nil,
+                                        airDate: nil,
+                                        runtime: nil,
+                                        tmdbSeasonNumber: originalSeason,
+                                        tmdbEpisodeNumber: originalSeason == nil ? nil : episodeOffset + number
+                                    )
+                                }
+                                specialEntries.append(AniListSpecialEntry(
+                                    id: sourceId,
+                                    title: sourceTitle,
+                                    format: searchResult.sourceAniListFormat,
+                                    episodeCount: episodeCount,
+                                    posterUrl: searchResult.fullPosterURL ?? detail.fullPosterURL,
+                                    episodes: episodes,
+                                    tmdbSeasonNumber: searchResult.sourceAniMapTMDBSeason,
+                                    tvdbSeasonNumber: searchResult.sourceAniMapTVDBSeason,
+                                    episodeOffset: searchResult.sourceAniMapEpisodeOffset,
+                                    imdbId: detail.externalIds?.imdbId
+                                ))
+                            }
                             self.animeSeasonTitles = seasonTitles
                             self.anilistEpisodes = allEpisodes
+                            self.animeSpecialEntries = specialEntries
                             
                             if let firstSeason = aniSeasons.first {
                                 self.selectedSeason = firstSeason
@@ -1024,6 +1064,9 @@ struct MediaDetailView: View {
                             // Fallback to TMDB seasons
                             Logger.shared.log("MediaDetailView: animeData is nil — falling back to pure TMDB seasons (\(detail.seasons.count) seasons)", type: "AniList")
                             self.tvShowDetail = detail
+                            self.anilistEpisodes = nil
+                            self.animeSeasonTitles = nil
+                            self.animeSpecialEntries = []
                             if let firstSeason = detail.seasons.first(where: { $0.seasonNumber > 0 }) {
                                 self.selectedSeason = firstSeason
                                 Logger.shared.log("MediaDetailView: selected first TMDB season tmdbId=\(detail.id) season=\(firstSeason.seasonNumber) episodeCount=\(firstSeason.episodeCount)", type: "CrashProbe")
@@ -1055,6 +1098,7 @@ struct MediaDetailView: View {
                             isAnimeShow: self.isAnimeShow,
                             anilistEpisodes: self.anilistEpisodes,
                             animeSeasonTitles: self.animeSeasonTitles,
+                            animeSpecialEntries: self.animeSpecialEntries,
                             castMembers: self.castMembers,
                             timestamp: Date()
                         ))
