@@ -1,6 +1,6 @@
 # Eclipse Android Port
 
-This directory is the Android foundation for the Luna/Eclipse port. It lives beside the existing Apple app and does not change the current iOS/tvOS targets.
+This directory is the Android foundation for the Luna/Eclipse port. It lives beside the existing Apple app and does not change the current iOS target.
 
 The Android namespace now uses `dev.soupy.eclipse.android` rather than the earlier `cranci`-based placeholder naming.
 

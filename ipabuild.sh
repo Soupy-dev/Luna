@@ -10,29 +10,17 @@ APPLICATION_NAME="Eclipse"
 
 PLATFORM=${1:-ios}
 
-case "$PLATFORM" in
-    ios|iOS)
-        PLATFORM="ios"
-        SDK="iphoneos"
-        XCODE_DESTINATION="generic/platform=iOS"
-        PLATFORM_DIR="Release-iphoneos"
-        OUTPUT_SUFFIX=""
-        ;;
-    tvos|tvOS)
-        PLATFORM="tvos"
-        SDK="appletvos"
-        XCODE_DESTINATION="generic/platform=tvOS"
-        PLATFORM_DIR="Release-appletvos"
-        OUTPUT_SUFFIX="-tvOS"
-        ;;
-    *)
-        echo "Error: Invalid platform '$PLATFORM'"
-        echo "Usage: $0 [ios|tvos]"
-        echo "  ios  - Build for iOS (default)"
-        echo "  tvos - Build for tvOS"
-        exit 1
-        ;;
-esac
+if [ "$PLATFORM" != "ios" ] && [ "$PLATFORM" != "iOS" ]; then
+    echo "Error: Invalid platform '$PLATFORM'"
+    echo "Usage: $0 [ios]"
+    echo "  ios - Build for iOS (default)"
+    exit 1
+fi
+
+PLATFORM="ios"
+SDK="iphoneos"
+XCODE_DESTINATION="generic/platform=iOS"
+OUTPUT_SUFFIX=""
 
 if [ ! -d "build" ]; then
     mkdir build
