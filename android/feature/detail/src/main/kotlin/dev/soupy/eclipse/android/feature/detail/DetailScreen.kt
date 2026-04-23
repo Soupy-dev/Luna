@@ -25,8 +25,10 @@ import dev.soupy.eclipse.android.core.design.LoadingPanel
 import dev.soupy.eclipse.android.core.design.MetadataChips
 import dev.soupy.eclipse.android.core.design.PosterImage
 import dev.soupy.eclipse.android.core.design.SectionHeading
+import dev.soupy.eclipse.android.core.model.InAppPlayer
 import dev.soupy.eclipse.android.core.model.PlayerSource
 import dev.soupy.eclipse.android.core.player.EclipsePlayerSurface
+import dev.soupy.eclipse.android.core.player.PlaybackProgressSnapshot
 
 data class DetailEpisodeRow(
     val id: String,
@@ -34,6 +36,15 @@ data class DetailEpisodeRow(
     val subtitle: String? = null,
     val imageUrl: String? = null,
     val overview: String? = null,
+)
+
+data class DetailStreamRow(
+    val id: String,
+    val title: String,
+    val subtitle: String? = null,
+    val supportingText: String? = null,
+    val playable: Boolean = false,
+    val playerSource: PlayerSource? = null,
 )
 
 data class DetailScreenState(
@@ -48,6 +59,9 @@ data class DetailScreenState(
     val metadataChips: List<String> = emptyList(),
     val episodesTitle: String? = null,
     val episodes: List<DetailEpisodeRow> = emptyList(),
+    val isResolvingStreams: Boolean = false,
+    val streamStatusMessage: String? = null,
+    val streamCandidates: List<DetailStreamRow> = emptyList(),
     val playerSource: PlayerSource? = null,
 )
 
@@ -57,6 +71,11 @@ fun DetailRoute(
     onRetry: () -> Unit,
     onSaveToLibrary: () -> Unit,
     onQueueResume: () -> Unit,
+    onQueueDownload: () -> Unit,
+    onResolveStreams: () -> Unit,
+    onPlayStream: (String) -> Unit,
+    onPlaybackProgress: (PlaybackProgressSnapshot) -> Unit,
+    preferredPlayer: InAppPlayer = InAppPlayer.NORMAL,
 ) {
     if (!state.hasSelection && !state.isLoading) {
         ErrorPanel(
@@ -124,7 +143,7 @@ fun DetailRoute(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
-                            text = "Save this title to the Android library or queue a manual resume entry while playback-driven tracking is still landing.",
+                            text = "Save this title to the Android library. Direct in-app playback now updates Continue Watching automatically, and the manual resume button is still here as a fallback.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                         )
@@ -136,13 +155,85 @@ fun DetailRoute(
                                 Text("Queue Resume")
                             }
                         }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedButton(onClick = onQueueDownload) {
+                                Text("Queue Download")
+                            }
+                            Button(onClick = onResolveStreams) {
+                                Text(if (state.isResolvingStreams) "Resolving..." else "Resolve Streams")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (state.streamStatusMessage != null || state.streamCandidates.isNotEmpty()) {
+            item {
+                SectionHeading(
+                    title = "Streams",
+                    subtitle = state.streamStatusMessage ?: "Resolved Stremio addon candidates for this Android detail page.",
+                )
+            }
+        }
+
+        if (state.streamStatusMessage != null && state.streamCandidates.isEmpty()) {
+            item {
+                GlassPanel {
+                    Text(
+                        text = state.streamStatusMessage,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        }
+
+        if (state.streamCandidates.isNotEmpty()) {
+            items(state.streamCandidates, key = { it.id }) { stream ->
+                GlassPanel {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = stream.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        stream.subtitle?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.tertiary,
+                            )
+                        }
+                        stream.supportingText?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.76f),
+                            )
+                        }
+                        if (stream.playable) {
+                            Button(onClick = { onPlayStream(stream.id) }) {
+                                Text("Play Stream")
+                            }
+                        } else {
+                            Text(
+                                text = "Playback for this source type is still pending Android torrent or alternate-player support.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                            )
+                        }
                     }
                 }
             }
         }
 
         item {
-            EclipsePlayerSurface(source = state.playerSource)
+            EclipsePlayerSurface(
+                source = state.playerSource,
+                preferredPlayer = preferredPlayer,
+                onProgress = onPlaybackProgress,
+            )
         }
 
         if (!state.overview.isNullOrBlank()) {

@@ -52,8 +52,12 @@ class AndroidLibraryViewModel(
     }
 
     fun recordContinueWatching(draft: ContinueWatchingDraft) {
+        syncContinueWatching(draft)
+    }
+
+    fun syncContinueWatching(draft: ContinueWatchingDraft) {
         viewModelScope.launch {
-            repository.recordContinueWatching(draft)
+            repository.syncContinueWatching(draft)
                 .onSuccess { snapshot -> _state.value = snapshot.toUiState() }
         }
     }
@@ -83,7 +87,7 @@ private fun LibrarySnapshot.toUiState(): LibraryScreenState {
         ?: savedItems.firstOrNull()?.imageUrl
     val heroSupportingText = when {
         continueWatching.isNotEmpty() ->
-            "Resume entries are now persisted on Android. They are still manually queued until player callbacks are connected."
+            "Direct Android playback now updates resume state automatically for supported streams, and completed sessions fall back out of Continue Watching."
         savedItems.isNotEmpty() ->
             "Saved titles now survive app restarts and are ready to become part of full backup parity."
         else ->
@@ -109,7 +113,7 @@ private fun LibrarySnapshot.toUiState(): LibraryScreenState {
             LibraryMetric(
                 label = "Resume",
                 value = continueWatching.size.toString(),
-                supportingText = "Queued watch progress until playback callbacks land.",
+                supportingText = "Playback callbacks now keep supported sessions in sync automatically.",
             ),
         ),
         continueWatching = continueWatching.map { record ->

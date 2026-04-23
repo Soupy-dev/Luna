@@ -1,5 +1,9 @@
 package dev.soupy.eclipse.android.feature.settings
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
+import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,6 +26,8 @@ import dev.soupy.eclipse.android.core.design.GlassPanel
 import dev.soupy.eclipse.android.core.design.HeroBackdrop
 import dev.soupy.eclipse.android.core.design.SectionHeading
 import dev.soupy.eclipse.android.core.model.InAppPlayer
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 data class SettingsScreenState(
     val accentColor: String = "#6D8CFF",
@@ -30,6 +36,10 @@ data class SettingsScreenState(
     val showNextEpisodeButton: Boolean = true,
     val nextEpisodeThreshold: Int = 90,
     val inAppPlayer: InAppPlayer = InAppPlayer.NORMAL,
+    val isBackupBusy: Boolean = false,
+    val hasLocalBackup: Boolean = false,
+    val backupStatusHeadline: String = "No local backup yet",
+    val backupStatusMessage: String = "Export a JSON archive from Android Settings or import an existing Luna backup to stage one here.",
 )
 
 @Composable
@@ -39,7 +49,16 @@ fun SettingsRoute(
     onShowNextEpisodeChanged: (Boolean) -> Unit,
     onNextEpisodeThresholdChanged: (Int) -> Unit,
     onPlayerSelected: (InAppPlayer) -> Unit,
+    onExportBackup: (Uri) -> Unit,
+    onImportBackup: (Uri) -> Unit,
 ) {
+    val exportLauncher = rememberLauncherForActivityResult(CreateDocument("application/json")) { uri ->
+        uri?.let(onExportBackup)
+    }
+    val importLauncher = rememberLauncherForActivityResult(OpenDocument()) { uri ->
+        uri?.let(onImportBackup)
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -174,6 +193,25 @@ fun SettingsRoute(
                 }
             }
         }
+
+        item {
+            SectionHeading(
+                title = "Backup",
+                subtitle = "Export and restore Luna-compatible JSON archives. Android restores the settings and source state it owns today while preserving the rest for later parity.",
+            )
+        }
+
+        item {
+            BackupCard(
+                state = state,
+                onExportClicked = {
+                    exportLauncher.launch(defaultBackupFileName())
+                },
+                onImportClicked = {
+                    importLauncher.launch(arrayOf("application/json", "text/plain"))
+                },
+            )
+        }
     }
 }
 
@@ -288,4 +326,60 @@ private fun PlayerChoiceButton(
             Text(label)
         }
     }
+}
+
+@Composable
+private fun BackupCard(
+    state: SettingsScreenState,
+    onExportClicked: () -> Unit,
+    onImportClicked: () -> Unit,
+) {
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                text = state.backupStatusHeadline,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = state.backupStatusMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.76f),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Button(
+                    onClick = onExportClicked,
+                    enabled = !state.isBackupBusy,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(if (state.isBackupBusy) "Working..." else "Export Backup")
+                }
+                OutlinedButton(
+                    onClick = onImportClicked,
+                    enabled = !state.isBackupBusy,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Import Backup")
+                }
+            }
+            Text(
+                text = if (state.hasLocalBackup) {
+                    "Android also keeps a staged local copy of the archive so later exports can preserve sections that still don't have full UI/runtime parity."
+                } else {
+                    "Once you export or import here, Android will keep a staged local copy so unsupported backup sections survive later re-exports."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+        }
+    }
+}
+
+private fun defaultBackupFileName(): String = buildString {
+    append("eclipse-backup-")
+    append(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")))
+    append(".json")
 }

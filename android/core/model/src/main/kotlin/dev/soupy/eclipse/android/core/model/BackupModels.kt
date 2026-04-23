@@ -41,8 +41,12 @@ data class ServiceBackup(
     val id: String,
     val name: String,
     val manifestUrl: String? = null,
+    val scriptUrl: String? = null,
+    val transportUrl: String? = null,
     val enabled: Boolean = true,
     val sortIndex: Int = 0,
+    val sourceKind: String? = null,
+    val configurationJson: String? = null,
 )
 
 @Serializable

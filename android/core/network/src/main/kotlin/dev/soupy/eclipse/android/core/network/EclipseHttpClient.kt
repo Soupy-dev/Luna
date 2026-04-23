@@ -37,9 +37,9 @@ class EclipseHttpClient(
     private suspend fun execute(request: Request): NetworkResult<String> = withContext(Dispatchers.IO) {
         try {
             client.newCall(request).execute().use { response ->
-                val body = response.body?.string()
+                val body = response.body.string()
                 if (response.isSuccessful) {
-                    NetworkResult.Success(body.orEmpty())
+                    NetworkResult.Success(body)
                 } else {
                     NetworkResult.Failure.Http(response.code, body)
                 }

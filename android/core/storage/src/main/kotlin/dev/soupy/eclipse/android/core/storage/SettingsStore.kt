@@ -6,10 +6,12 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import dev.soupy.eclipse.android.core.model.BackupData
+import dev.soupy.eclipse.android.core.model.InAppPlayer
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import dev.soupy.eclipse.android.core.model.InAppPlayer
 
 private const val SettingsFileName = "eclipse_settings"
 
@@ -20,6 +22,7 @@ data class AppSettings(
     val tmdbLanguage: String = "en-US",
     val inAppPlayer: InAppPlayer = InAppPlayer.NORMAL,
     val autoModeEnabled: Boolean = true,
+    val autoModeSourceIds: Set<String> = emptySet(),
     val showNextEpisodeButton: Boolean = true,
     val nextEpisodeThreshold: Int = 90,
 )
@@ -57,6 +60,41 @@ class SettingsStore(
         }
     }
 
+    suspend fun setAutoModeSourceEnabled(sourceId: String, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[Keys.autoModeSourceIds] ?: emptySet()
+            prefs[Keys.autoModeSourceIds] = if (enabled) {
+                current + sourceId
+            } else {
+                current - sourceId
+            }
+        }
+    }
+
+    suspend fun removeAutoModeSource(sourceId: String) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[Keys.autoModeSourceIds] ?: emptySet()
+            prefs[Keys.autoModeSourceIds] = current - sourceId
+        }
+    }
+
+    suspend fun retainAutoModeSources(allowedSourceIds: Set<String>) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[Keys.autoModeSourceIds] ?: emptySet()
+            prefs[Keys.autoModeSourceIds] = current.intersect(allowedSourceIds)
+        }
+    }
+
+    suspend fun restoreFromBackup(payload: BackupData) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.accentColor] = payload.accentColor ?: "#6D8CFF"
+            prefs[Keys.tmdbLanguage] = payload.tmdbLanguage ?: "en-US"
+            prefs[Keys.inAppPlayer] = payload.inAppPlayer.name
+            prefs[Keys.showNextEpisodeButton] = payload.showNextEpisodeButton
+            prefs[Keys.nextEpisodeThreshold] = payload.nextEpisodeThreshold.coerceIn(70, 98)
+        }
+    }
+
     private fun toAppSettings(preferences: Preferences): AppSettings = AppSettings(
         accentColor = preferences[Keys.accentColor] ?: "#6D8CFF",
         tmdbLanguage = preferences[Keys.tmdbLanguage] ?: "en-US",
@@ -65,6 +103,7 @@ class SettingsStore(
             ?.getOrNull()
             ?: InAppPlayer.NORMAL,
         autoModeEnabled = preferences[Keys.autoModeEnabled] ?: true,
+        autoModeSourceIds = preferences[Keys.autoModeSourceIds] ?: emptySet(),
         showNextEpisodeButton = preferences[Keys.showNextEpisodeButton] ?: true,
         nextEpisodeThreshold = preferences[Keys.nextEpisodeThreshold] ?: 90,
     )
@@ -74,6 +113,7 @@ class SettingsStore(
         val tmdbLanguage = stringPreferencesKey("tmdb_language")
         val inAppPlayer = stringPreferencesKey("in_app_player")
         val autoModeEnabled = booleanPreferencesKey("auto_mode_enabled")
+        val autoModeSourceIds = stringSetPreferencesKey("auto_mode_source_ids")
         val showNextEpisodeButton = booleanPreferencesKey("show_next_episode_button")
         val nextEpisodeThreshold = intPreferencesKey("next_episode_threshold")
     }

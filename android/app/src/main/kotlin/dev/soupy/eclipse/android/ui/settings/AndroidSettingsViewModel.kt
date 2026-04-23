@@ -1,19 +1,22 @@
 package dev.soupy.eclipse.android.ui.settings
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.soupy.eclipse.android.core.model.InAppPlayer
+import dev.soupy.eclipse.android.core.storage.SettingsStore
+import dev.soupy.eclipse.android.data.BackupRepository
+import dev.soupy.eclipse.android.data.BackupStatusSnapshot
+import dev.soupy.eclipse.android.feature.settings.SettingsScreenState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import dev.soupy.eclipse.android.core.storage.AppSettings
-import dev.soupy.eclipse.android.core.storage.SettingsStore
-import dev.soupy.eclipse.android.core.model.InAppPlayer
-import dev.soupy.eclipse.android.feature.settings.SettingsScreenState
 
 class AndroidSettingsViewModel(
     private val settingsStore: SettingsStore,
+    private val backupRepository: BackupRepository,
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsScreenState())
     val state: StateFlow<SettingsScreenState> = _state.asStateFlow()
@@ -21,9 +24,17 @@ class AndroidSettingsViewModel(
     init {
         viewModelScope.launch {
             settingsStore.settings.collect { settings ->
-                _state.value = settings.toUiState()
+                _state.value = _state.value.copy(
+                    accentColor = settings.accentColor,
+                    tmdbLanguage = settings.tmdbLanguage,
+                    autoModeEnabled = settings.autoModeEnabled,
+                    showNextEpisodeButton = settings.showNextEpisodeButton,
+                    nextEpisodeThreshold = settings.nextEpisodeThreshold,
+                    inAppPlayer = settings.inAppPlayer,
+                )
             }
         }
+        refreshBackupStatus()
     }
 
     fun setAutoModeEnabled(enabled: Boolean) {
@@ -64,13 +75,54 @@ class AndroidSettingsViewModel(
             )
         }
     }
-}
 
-private fun AppSettings.toUiState(): SettingsScreenState = SettingsScreenState(
-    accentColor = accentColor,
-    tmdbLanguage = tmdbLanguage,
-    autoModeEnabled = autoModeEnabled,
-    showNextEpisodeButton = showNextEpisodeButton,
-    nextEpisodeThreshold = nextEpisodeThreshold,
-    inAppPlayer = inAppPlayer,
-)
+    fun exportBackup(uri: Uri) = runBackupMutation {
+        backupRepository.exportToUri(uri)
+    }
+
+    fun importBackup(uri: Uri) = runBackupMutation {
+        backupRepository.importFromUri(uri)
+    }
+
+    private fun refreshBackupStatus() {
+        viewModelScope.launch {
+            backupRepository.loadStatus()
+                .onSuccess(::applyBackupStatus)
+                .onFailure { error ->
+                    _state.value = _state.value.copy(
+                        hasLocalBackup = false,
+                        backupStatusHeadline = "Backup status unavailable",
+                        backupStatusMessage = error.message ?: "Android couldn't inspect the staged backup yet.",
+                    )
+                }
+        }
+    }
+
+    private fun runBackupMutation(
+        action: suspend () -> Result<BackupStatusSnapshot>,
+    ) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isBackupBusy = true)
+            action()
+                .onSuccess { status ->
+                    _state.value = _state.value.copy(isBackupBusy = false)
+                    applyBackupStatus(status)
+                }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(
+                        isBackupBusy = false,
+                        backupStatusHeadline = "Backup failed",
+                        backupStatusMessage = error.message ?: "Android couldn't finish the backup operation.",
+                    )
+                }
+        }
+    }
+
+    private fun applyBackupStatus(status: BackupStatusSnapshot) {
+        _state.value = _state.value.copy(
+            hasLocalBackup = status.hasLocalBackup,
+            backupStatusHeadline = status.headline,
+            backupStatusMessage = status.supportingText,
+        )
+    }
+}

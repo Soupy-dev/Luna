@@ -46,11 +46,19 @@ class LibraryRepository(
         writeSnapshot(snapshot.copy(savedItems = updatedSaved))
     }
 
-    suspend fun recordContinueWatching(draft: ContinueWatchingDraft): Result<LibrarySnapshot> = runCatching {
+    suspend fun recordContinueWatching(draft: ContinueWatchingDraft): Result<LibrarySnapshot> =
+        syncContinueWatching(draft)
+
+    suspend fun syncContinueWatching(draft: ContinueWatchingDraft): Result<LibrarySnapshot> = runCatching {
         val snapshot = libraryStore.read()
         val key = draft.detailTarget.storageKey()
-        val updatedContinueWatching = listOf(draft.toRecord(key)) +
+        val normalizedDraft = draft.copy(progressPercent = draft.progressPercent.coerceIn(0f, 1f))
+        val updatedContinueWatching = if (normalizedDraft.progressPercent >= ContinueWatchingCompletionThreshold) {
             snapshot.continueWatching.filterNot { it.id == key }
+        } else {
+            listOf(normalizedDraft.toRecord(key)) +
+                snapshot.continueWatching.filterNot { it.id == key }
+        }
 
         writeSnapshot(
             snapshot.copy(
@@ -79,6 +87,8 @@ class LibraryRepository(
         return normalized
     }
 }
+
+private const val ContinueWatchingCompletionThreshold = 0.97f
 
 private fun LibrarySnapshot.normalized(): LibrarySnapshot = copy(
     savedItems = savedItems.sortedByDescending { it.updatedAt },

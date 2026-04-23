@@ -1408,7 +1408,7 @@ struct SpecialEpisodeListContext: Identifiable {
             let resolvedEpisodeTitle: String
             if count == 1 {
                 resolvedEpisodeTitle = title
-            } else if let sourceTitle = sourceEpisode?.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+            } else if let sourceTitle = sourceEpisode?.title.trimmingCharacters(in: .whitespacesAndNewlines),
                       !sourceTitle.isEmpty {
                 resolvedEpisodeTitle = sourceTitle
             } else {

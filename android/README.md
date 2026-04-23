@@ -32,8 +32,10 @@ The Android namespace now uses `dev.soupy.eclipse.android` rather than the earli
 - A working Media3 normal-player boundary
 - JS runtime and WebView helper interfaces for the future sideload-first provider ecosystem
 - Live TMDB/AniList-backed browse, search, detail, and airing schedule flows
-- Persisted Android-side library and continue-watching state
+- Persisted Android-side library and continue-watching state, with direct-player progress now syncing resume entries automatically
 - A DataStore-backed settings screen with player selection, next-episode controls, and the auto-mode warning
+- Settings backup import/export that preserves unsupported Luna backup sections for later parity work
+- First-pass Stremio addon stream resolution on TMDB movie and series detail pages, with direct URLs playable in the Android normal player
 
 ## Version choices
 
@@ -41,16 +43,32 @@ The Android dependency versions in `gradle/libs.versions.toml` were chosen from 
 
 ## Current limitations
 
-- The full feature set from the Apple app is not finished yet. Milestone 1 is meaningfully underway, and Milestone 2 has started with library/progress/settings foundations.
-- A Gradle wrapper was not generated in this environment because `gradle` is not installed locally here.
-- Services, downloads, trackers, Stremio configuration, manga, novels, and alternate player backends are still earlier-stage or placeholder-only on Android.
+- The full feature set from the Apple app is not finished yet. Android now has a real shell, persistence, backup flow, and first-pass Stremio resolution, but it is still well short of full parity.
+- Anime-specific source resolution is not wired into the Android stream resolver yet. The first supported path is TMDB movie and series detail.
+- Torrent-style Stremio results are surfaced in the UI, but they are not playable yet because Android still needs its torrent engine or alternate-player handoff work.
+- Services, downloads, trackers, manga, novels, and alternate player backends are still earlier-stage compared with the Apple app.
+
+## Running on Windows
+
+1. Open Android Studio and choose `Open`, then select the `android/` directory in this repo.
+2. Let Gradle sync. The repo already includes `gradlew.bat`, so Android Studio can use the checked-in wrapper.
+3. Create an emulator in `Device Manager`.
+   Recommended starter target: a Pixel-class phone running a recent Google Play image.
+4. Start the emulator.
+5. In Android Studio, choose the `app` run configuration and click `Run`.
+
+You can also build from a terminal:
+
+`cd android`
+
+`.\gradlew.bat :app:assembleDebug`
+
+The debug APK will land under `android/app/build/outputs/apk/debug/`.
 
 ## Next recommended steps
 
-1. Generate the Gradle wrapper from this directory once Gradle is available:
-   `gradle wrapper --gradle-version 9.3.1`
-2. Open `android/` in Android Studio and run an initial sync.
-3. Do the first real compile/sync pass and fix any dependency or Compose API issues that show up in Android Studio.
-4. Replace the remaining placeholder feature routes, starting with Services and Downloads.
-5. Connect real playback progress callbacks so continue watching becomes automatic instead of manually queued from Detail.
-6. Expand trackers, Stremio, JS runtime, downloads, and backup parity iteratively by milestone.
+1. Expand the resolver beyond TMDB movies and shows into the anime-specific AniList/TMDB hybrid flow.
+2. Add real downloader execution behind the existing downloads queue and metadata state.
+3. Broaden Stremio support with torrent or alternate-player handling, not just direct URL streams.
+4. Feed the same playback progress layer into next-episode orchestration instead of only continue-watching sync.
+5. Expand trackers, JS runtime, manga, and novel parity iteratively by milestone.

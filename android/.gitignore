@@ -1,7 +1,9 @@
 .gradle/
+.gradle-user-home/
+.android-user-home/
+.kotlin/
 build/
 local.properties
 captures/
 *.iml
 .idea/
-

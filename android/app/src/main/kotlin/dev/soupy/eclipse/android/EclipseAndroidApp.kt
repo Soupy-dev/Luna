@@ -1,12 +1,12 @@
 package dev.soupy.eclipse.android
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesomeMotion
 import androidx.compose.material.icons.rounded.DownloadForOffline
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.ImportContacts
-import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
@@ -46,11 +46,13 @@ import dev.soupy.eclipse.android.feature.search.SearchRoute
 import dev.soupy.eclipse.android.feature.services.ServicesRoute
 import dev.soupy.eclipse.android.feature.settings.SettingsRoute
 import dev.soupy.eclipse.android.ui.detail.AndroidDetailViewModel
+import dev.soupy.eclipse.android.ui.downloads.AndroidDownloadsViewModel
 import dev.soupy.eclipse.android.ui.home.AndroidHomeViewModel
 import dev.soupy.eclipse.android.ui.library.AndroidLibraryViewModel
 import dev.soupy.eclipse.android.ui.rememberFeatureViewModel
 import dev.soupy.eclipse.android.ui.schedule.AndroidScheduleViewModel
 import dev.soupy.eclipse.android.ui.search.AndroidSearchViewModel
+import dev.soupy.eclipse.android.ui.services.AndroidServicesViewModel
 import dev.soupy.eclipse.android.ui.settings.AndroidSettingsViewModel
 
 private data class AppDestination(
@@ -68,7 +70,7 @@ private val destinations = listOf(
     AppDestination("library", "Library", Icons.Rounded.VideoLibrary),
     AppDestination("downloads", "Downloads", Icons.Rounded.DownloadForOffline),
     AppDestination("settings", "Settings", Icons.Rounded.Settings),
-    AppDestination("manga", "Manga", Icons.Rounded.MenuBook),
+    AppDestination("manga", "Manga", Icons.AutoMirrored.Rounded.MenuBook),
     AppDestination("novel", "Novel", Icons.Rounded.ImportContacts),
 )
 
@@ -82,7 +84,10 @@ fun EclipseAndroidApp() {
         AndroidSearchViewModel(appContainer.searchRepository)
     }
     val detailViewModel = rememberFeatureViewModel("detail") {
-        AndroidDetailViewModel(appContainer.detailRepository)
+        AndroidDetailViewModel(
+            repository = appContainer.detailRepository,
+            streamResolutionRepository = appContainer.streamResolutionRepository,
+        )
     }
     val scheduleViewModel = rememberFeatureViewModel("schedule") {
         AndroidScheduleViewModel(appContainer.scheduleRepository)
@@ -90,8 +95,20 @@ fun EclipseAndroidApp() {
     val libraryViewModel = rememberFeatureViewModel("library") {
         AndroidLibraryViewModel(appContainer.libraryRepository)
     }
+    val servicesViewModel = rememberFeatureViewModel("services") {
+        AndroidServicesViewModel(
+            repository = appContainer.servicesRepository,
+            settingsStore = appContainer.settingsStore,
+        )
+    }
+    val downloadsViewModel = rememberFeatureViewModel("downloads") {
+        AndroidDownloadsViewModel(appContainer.downloadsRepository)
+    }
     val settingsViewModel = rememberFeatureViewModel("settings") {
-        AndroidSettingsViewModel(appContainer.settingsStore)
+        AndroidSettingsViewModel(
+            settingsStore = appContainer.settingsStore,
+            backupRepository = appContainer.backupRepository,
+        )
     }
 
     val homeState by homeViewModel.state.collectAsState()
@@ -99,6 +116,8 @@ fun EclipseAndroidApp() {
     val detailState by detailViewModel.state.collectAsState()
     val scheduleState by scheduleViewModel.state.collectAsState()
     val libraryState by libraryViewModel.state.collectAsState()
+    val servicesState by servicesViewModel.state.collectAsState()
+    val downloadsState by downloadsViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
 
     var selectedDetailTarget by remember { mutableStateOf<DetailTarget?>(null) }
@@ -183,6 +202,20 @@ fun EclipseAndroidApp() {
                                 detailViewModel.currentContinueWatchingDraft()
                                     ?.let(libraryViewModel::recordContinueWatching)
                             },
+                            onQueueDownload = {
+                                detailViewModel.currentDownloadDraft()
+                                    ?.let(downloadsViewModel::queueDownload)
+                            },
+                            onResolveStreams = detailViewModel::resolveStreams,
+                            onPlayStream = detailViewModel::playResolvedStream,
+                            onPlaybackProgress = { progress ->
+                                detailViewModel.currentPlaybackProgressDraft(
+                                    positionMs = progress.positionMs,
+                                    durationMs = progress.durationMs,
+                                    isFinished = progress.isFinished,
+                                )?.let(libraryViewModel::syncContinueWatching)
+                            },
+                            preferredPlayer = settingsState.inAppPlayer,
                         )
                     }
                     composable("schedule") {
@@ -195,7 +228,23 @@ fun EclipseAndroidApp() {
                             },
                         )
                     }
-                    composable("services") { ServicesRoute() }
+                    composable("services") {
+                        ServicesRoute(
+                            state = servicesState,
+                            onAutoModeChanged = servicesViewModel::setAutoModeEnabled,
+                            onAutoModeSourceChanged = servicesViewModel::setAutoModeSourceEnabled,
+                            onAddService = servicesViewModel::addService,
+                            onImportAddon = servicesViewModel::importAddon,
+                            onToggleServiceEnabled = servicesViewModel::setServiceEnabled,
+                            onToggleAddonEnabled = servicesViewModel::setAddonEnabled,
+                            onMoveServiceUp = servicesViewModel::moveServiceUp,
+                            onMoveServiceDown = servicesViewModel::moveServiceDown,
+                            onMoveAddonUp = servicesViewModel::moveAddonUp,
+                            onMoveAddonDown = servicesViewModel::moveAddonDown,
+                            onRemoveService = servicesViewModel::removeService,
+                            onRemoveAddon = servicesViewModel::removeAddon,
+                        )
+                    }
                     composable("library") {
                         LibraryRoute(
                             state = libraryState,
@@ -208,7 +257,21 @@ fun EclipseAndroidApp() {
                             onRemoveContinueWatching = libraryViewModel::removeContinueWatching,
                         )
                     }
-                    composable("downloads") { DownloadsRoute() }
+                    composable("downloads") {
+                        DownloadsRoute(
+                            state = downloadsState,
+                            onRefresh = downloadsViewModel::refresh,
+                            onSelect = { target ->
+                                selectedDetailTarget = target
+                                navController.navigate("detail")
+                            },
+                            onPause = downloadsViewModel::pause,
+                            onResume = downloadsViewModel::resume,
+                            onMarkComplete = downloadsViewModel::markComplete,
+                            onRemove = downloadsViewModel::remove,
+                            onClearCompleted = downloadsViewModel::clearCompleted,
+                        )
+                    }
                     composable("settings") {
                         SettingsRoute(
                             state = settingsState,
@@ -216,6 +279,8 @@ fun EclipseAndroidApp() {
                             onShowNextEpisodeChanged = settingsViewModel::setShowNextEpisodeButton,
                             onNextEpisodeThresholdChanged = settingsViewModel::setNextEpisodeThreshold,
                             onPlayerSelected = settingsViewModel::setInAppPlayer,
+                            onExportBackup = settingsViewModel::exportBackup,
+                            onImportBackup = settingsViewModel::importBackup,
                         )
                     }
                     composable("manga") { MangaRoute() }
