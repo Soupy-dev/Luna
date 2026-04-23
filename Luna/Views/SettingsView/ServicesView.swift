@@ -198,7 +198,7 @@ struct ServicesView: View {
                     }
                 }
             } footer: {
-                Text("Auto Mode checks selected active services/addons from top to bottom and auto-picks the best match above your quality threshold.")
+                Text("Auto Mode checks selected active services/addons from top to bottom and auto-picks the best match above your quality threshold. It may not always be accurate.")
             }
 
             if servicesAutoModeEnabled && !orderedAutoModeItems.isEmpty {

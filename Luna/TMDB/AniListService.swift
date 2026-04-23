@@ -982,12 +982,14 @@ final class AniListService {
         guard !uniqueMappings.isEmpty else { return [] }
 
         let nodesById = await batchFetchAniListNodes(ids: Array(uniqueMappings.keys))
-        let mappedTMDBSeasons = Set(uniqueMappings.values.compactMap(\.tmdbSeason))
+        // Some AniMap specials only expose a fallback season number for metadata.
+        // Keep playback/search tied to tmdbSeason so specials stay isolated from the main anime flow.
+        let metadataSeasonNumbers = Set(uniqueMappings.values.compactMap { $0.tmdbSeason ?? $0.tvdbSeason })
         var seasonDetailsByNumber: [Int: TMDBSeasonDetail] = [:]
 
-        if !mappedTMDBSeasons.isEmpty {
+        if !metadataSeasonNumbers.isEmpty {
             await withTaskGroup(of: (Int, TMDBSeasonDetail?).self) { group in
-                for seasonNumber in mappedTMDBSeasons {
+                for seasonNumber in metadataSeasonNumbers {
                     group.addTask {
                         do {
                             let detail = try await tmdbService.getSeasonDetails(
@@ -1038,11 +1040,13 @@ final class AniListService {
 
             let episodeCount = max(1, node?.episodes ?? 1)
             let mappedSeason = mapping.tmdbSeason
+            let metadataSeason = mapping.tmdbSeason ?? mapping.tvdbSeason
             let episodeOffset = mapping.tvdbEpisodeOffset ?? 0
-            let tmdbSeasonDetail = mappedSeason.flatMap { seasonDetailsByNumber[$0] }
+            let tmdbSeasonDetail = metadataSeason.flatMap { seasonDetailsByNumber[$0] }
             let episodes = (1...episodeCount).map { number in
                 let mappedEpisodeNumber = mappedSeason.map { _ in episodeOffset + number }
-                let tmdbEpisode = mappedEpisodeNumber.flatMap { episodeNumber in
+                let metadataEpisodeNumber = metadataSeason.map { _ in episodeOffset + number }
+                let tmdbEpisode = metadataEpisodeNumber.flatMap { episodeNumber in
                     tmdbSeasonDetail?.episodes.first(where: { $0.episodeNumber == episodeNumber })
                 }
 
