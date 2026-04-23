@@ -1,4 +1,4 @@
-Eclipse is my fork of Luna. Has no affiliation with the parent repo. And user is responsible for what they do with the app. Does not come with services or addons. Use GitHub Issues for feature requests and bug reports
+Eclipse is my fork of Luna. Has no affiliation with the parent repo. And user is responsible for what they do with the app. Does not come with services or addons. Use GitHub Issues for feature requests and bug reports.
 
 ## Overview
 
@@ -10,7 +10,6 @@ AltStore and SideStore users can add this source:
 
 `https://raw.githubusercontent.com/Soupy-dev/Luna/main/altsource.json`
 
-Releases are distributed as GitHub Release IPA assets. Before publishing a new source update, make sure `altsource.json` points to the uploaded `.ipa` and that the version, build, date, and `size` fields match the release asset.
 
 ## Main changes
 
