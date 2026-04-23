@@ -968,7 +968,11 @@ final class AniListService {
         return animeWithSeasons
     }
 
-    func fetchSpecialSearchEntries(tmdbShowId: Int, fallbackPosterURL: String?) async -> [AniListSpecialSearchEntry] {
+    func fetchSpecialSearchEntries(
+        tmdbShowId: Int,
+        fallbackPosterURL: String?,
+        tmdbService: TMDBService
+    ) async -> [AniListSpecialSearchEntry] {
         let mappings = await AniMapSpecialsService.shared.specialMappings(forTMDBShowId: tmdbShowId)
         let uniqueMappings = mappings.reduce(into: [Int: AniMapMapping]()) { result, mapping in
             guard let anilistId = mapping.anilistId, result[anilistId] == nil else { return }
@@ -978,6 +982,36 @@ final class AniListService {
         guard !uniqueMappings.isEmpty else { return [] }
 
         let nodesById = await batchFetchAniListNodes(ids: Array(uniqueMappings.keys))
+        let mappedTMDBSeasons = Set(uniqueMappings.values.compactMap(\.tmdbSeason))
+        var seasonDetailsByNumber: [Int: TMDBSeasonDetail] = [:]
+
+        if !mappedTMDBSeasons.isEmpty {
+            await withTaskGroup(of: (Int, TMDBSeasonDetail?).self) { group in
+                for seasonNumber in mappedTMDBSeasons {
+                    group.addTask {
+                        do {
+                            let detail = try await tmdbService.getSeasonDetails(
+                                tvShowId: tmdbShowId,
+                                seasonNumber: seasonNumber
+                            )
+                            return (seasonNumber, detail)
+                        } catch {
+                            Logger.shared.log(
+                                "AniListService: Failed to fetch TMDB metadata for special season \(seasonNumber) on show \(tmdbShowId): \(error.localizedDescription)",
+                                type: "AniList"
+                            )
+                            return (seasonNumber, nil)
+                        }
+                    }
+                }
+
+                for await (seasonNumber, detail) in group {
+                    if let detail {
+                        seasonDetailsByNumber[seasonNumber] = detail
+                    }
+                }
+            }
+        }
 
         let entries = uniqueMappings.compactMap { element -> AniListSpecialSearchEntry? in
             let anilistId = element.key
@@ -1005,17 +1039,23 @@ final class AniListService {
             let episodeCount = max(1, node?.episodes ?? 1)
             let mappedSeason = mapping.tmdbSeason
             let episodeOffset = mapping.tvdbEpisodeOffset ?? 0
+            let tmdbSeasonDetail = mappedSeason.flatMap { seasonDetailsByNumber[$0] }
             let episodes = (1...episodeCount).map { number in
+                let mappedEpisodeNumber = mappedSeason.map { _ in episodeOffset + number }
+                let tmdbEpisode = mappedEpisodeNumber.flatMap { episodeNumber in
+                    tmdbSeasonDetail?.episodes.first(where: { $0.episodeNumber == episodeNumber })
+                }
+
                 AniListEpisode(
                     number: number,
-                    title: episodeCount == 1 ? cleanTitle : "Episode \(number)",
-                    description: nil,
+                    title: tmdbEpisode?.name ?? (episodeCount == 1 ? cleanTitle : "Episode \(number)"),
+                    description: tmdbEpisode?.overview,
                     seasonNumber: mappedSeason ?? 0,
-                    stillPath: nil,
-                    airDate: nil,
-                    runtime: nil,
+                    stillPath: tmdbEpisode?.stillPath,
+                    airDate: tmdbEpisode?.airDate,
+                    runtime: tmdbEpisode?.runtime,
                     tmdbSeasonNumber: mappedSeason,
-                    tmdbEpisodeNumber: mappedSeason == nil ? nil : episodeOffset + number
+                    tmdbEpisodeNumber: mappedEpisodeNumber
                 )
             }
 
@@ -1027,7 +1067,10 @@ final class AniListService {
                 nativeTitle: nativeTitle,
                 format: mapping.mediaType?.uppercased() ?? node?.format,
                 episodeCount: episodeCount,
-                posterUrl: node?.coverImage?.large ?? node?.coverImage?.medium ?? fallbackPosterURL,
+                posterUrl: node?.coverImage?.large
+                    ?? node?.coverImage?.medium
+                    ?? tmdbSeasonDetail?.fullPosterURL
+                    ?? fallbackPosterURL,
                 tmdbSeasonNumber: mapping.tmdbSeason,
                 tvdbSeasonNumber: mapping.tvdbSeason,
                 episodeOffset: mapping.tvdbEpisodeOffset,

@@ -133,12 +133,30 @@ struct ModulesSearchResultsSheet: View {
     @State private var showManualPicker = false
 
     private var effectiveTitle: String { seasonTitleOverride ?? mediaTitle }
-    private var animeEffectiveTitle: String {
-        guard animeSeasonTitle != nil else { return effectiveTitle }
+    private var animeEffectiveTitle: String { effectiveTitle }
+    private var strippedAnimeFallbackTitle: String? {
+        guard isAnimeContent || animeSeasonTitle != nil else { return nil }
         let stripped = effectiveTitle
             .replacingOccurrences(of: "(?i)season\\s+\\d+", with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return stripped.isEmpty ? effectiveTitle : stripped
+        guard !stripped.isEmpty,
+              stripped.caseInsensitiveCompare(effectiveTitle) != .orderedSame else {
+            return nil
+        }
+        return stripped
+    }
+    private var fallbackAnimeSearchQuery: String? {
+        guard let strippedAnimeFallbackTitle else { return nil }
+        if let episode = selectedEpisode {
+            if specialTitleOnlySearch {
+                return strippedAnimeFallbackTitle
+            }
+            if isAnimeContent || animeSeasonTitle != nil {
+                return "\(strippedAnimeFallbackTitle) E\(episode.episodeNumber)"
+            }
+            return "\(strippedAnimeFallbackTitle) S\(episode.seasonNumber)E\(episode.episodeNumber)"
+        }
+        return strippedAnimeFallbackTitle
     }
 
     private var displayTitle: String {
@@ -944,6 +962,10 @@ struct ModulesSearchResultsSheet: View {
         }
 
         var queries = [primary]
+        if let fallbackAnimeSearchQuery,
+           fallbackAnimeSearchQuery.caseInsensitiveCompare(primary) != .orderedSame {
+            queries.append(fallbackAnimeSearchQuery)
+        }
         if primary.caseInsensitiveCompare(effectiveTitle) != .orderedSame {
             queries.append(effectiveTitle)
         }
@@ -1275,7 +1297,8 @@ struct ModulesSearchResultsSheet: View {
             searchQuery = effectiveTitle
         }
         
-        let baseTitleQuery = searchQuery.caseInsensitiveCompare(effectiveTitle) == .orderedSame ? nil : effectiveTitle
+        let baseTitleQuery = fallbackAnimeSearchQuery
+            ?? (searchQuery.caseInsensitiveCompare(effectiveTitle) == .orderedSame ? nil : effectiveTitle)
         let hasAlternativeTitle = originalTitle.map { !$0.isEmpty && $0.lowercased() != effectiveTitle.lowercased() } ?? false
         
         Task {

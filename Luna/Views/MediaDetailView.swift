@@ -820,7 +820,8 @@ struct MediaDetailView: View {
         specialsLoadTask = Task {
             let entries = await AniListService.shared.fetchSpecialSearchEntries(
                 tmdbShowId: tmdbShowId,
-                fallbackPosterURL: fallbackPosterURL
+                fallbackPosterURL: fallbackPosterURL,
+                tmdbService: tmdbService
             )
 
             await MainActor.run {
