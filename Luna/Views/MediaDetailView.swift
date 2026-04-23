@@ -80,6 +80,7 @@ struct MediaDetailView: View {
     @State private var isLoadingAnimeSpecials = false
     @State private var selectedSpecialEpisodeContext: SpecialEpisodeListContext?
     @State private var specialSearchRequest: AnimeSpecialSearchRequest?
+    @State private var nextEpisodePresentationToken = 0
     
     @State private var castMembers: [TMDBCastMember] = []
     @State private var hasLoadedContent = false
@@ -206,7 +207,7 @@ struct MediaDetailView: View {
                let nextSpecialEpisode = specialContext.episodes.first(where: { $0.seasonNumber == seasonNumber && $0.episodeNumber == episodeNumber }) {
                 Logger.shared.log("MediaDetailView nextEpisode matched special: id=\(searchResult.id) S\(seasonNumber)E\(episodeNumber) delay=\(nextEpisodeSheetPresentationDelay)", type: "CrashProbe")
                 selectedEpisodeForSearch = nextSpecialEpisode
-                DispatchQueue.main.asyncAfter(deadline: .now() + nextEpisodeSheetPresentationDelay) {
+                scheduleNextEpisodePresentation {
                     beginSpecialSearch(context: specialContext, episode: nextSpecialEpisode)
                 }
                 return
@@ -218,8 +219,7 @@ struct MediaDetailView: View {
                 Logger.shared.log("MediaDetailView nextEpisode matched: id=\(searchResult.id) S\(seasonNumber)E\(episodeNumber) delay=\(nextEpisodeSheetPresentationDelay)", type: "CrashProbe")
                 selectedEpisodeForSearch = nextEp
                 showingSearchResults = false
-                // Delay to ensure the player is fully dismissed before presenting the sheet
-                DispatchQueue.main.asyncAfter(deadline: .now() + nextEpisodeSheetPresentationDelay) {
+                scheduleNextEpisodePresentation {
                     Logger.shared.log("MediaDetailView nextEpisode presenting search sheet: id=\(searchResult.id) S\(seasonNumber)E\(episodeNumber)", type: "CrashProbe")
                     showingSearchResults = true
                 }
@@ -251,6 +251,9 @@ struct MediaDetailView: View {
         }
         .onChangeComp(of: showingDownloadSheet) { _, newValue in
             Logger.shared.log("MediaDetailView showingDownloadSheet changed: id=\(searchResult.id) visible=\(newValue) episode=\(selectedEpisodeForSearch.map { "S\($0.seasonNumber)E\($0.episodeNumber)" } ?? "nil")", type: "CrashProbe")
+        }
+        .onDisappear {
+            invalidatePendingNextEpisodePresentation()
         }
         .sheet(isPresented: $showingSearchResults) {
             let _ = Logger.shared.log("MediaDetailView constructing play sheet: id=\(searchResult.id) isAnime=\(isAnimeShow) selectedEpisode=\(selectedEpisodeForSearch.map { "S\($0.seasonNumber)E\($0.episodeNumber)" } ?? "nil") autoMode=\(UserDefaults.standard.bool(forKey: "servicesAutoModeEnabled"))", type: "CrashProbe")
@@ -865,6 +868,20 @@ struct MediaDetailView: View {
             titleOnly: playbackContext?.titleOnlySearch ?? true,
             playbackContext: playbackContext
         )
+    }
+
+    private func scheduleNextEpisodePresentation(action: @escaping () -> Void) {
+        nextEpisodePresentationToken += 1
+        let token = nextEpisodePresentationToken
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + nextEpisodeSheetPresentationDelay) {
+            guard token == nextEpisodePresentationToken else { return }
+            action()
+        }
+    }
+
+    private func invalidatePendingNextEpisodePresentation() {
+        nextEpisodePresentationToken += 1
     }
     
     private func updateBookmarkStatus() {

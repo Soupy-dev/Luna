@@ -362,6 +362,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var skipDataFetched = false
     private var autoSkippedSegments: Set<String> = []
     private var currentActiveSkipSegment: SkipSegment?
+    private var pendingNextEpisodeRequest: (seasonNumber: Int, episodeNumber: Int)?
+    private var didDispatchNextEpisodeRequest = false
     private var nextEpisodeButtonShown = false
 #if !os(tvOS)
     private var skip85sButtonShown = false
@@ -2043,9 +2045,23 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
     @objc private func nextEpisodeButtonTapped() {
         guard case .episode(_, let seasonNumber, let episodeNumber, _, _, _) = mediaInfo else { return }
-        Logger.shared.log("NextEpisode: User requested S\(seasonNumber)E\(episodeNumber + 1)", type: "Player")
-        onRequestNextEpisode?(seasonNumber, episodeNumber + 1)
+        guard pendingNextEpisodeRequest == nil else { return }
+
+        let nextEpisodeNumber = episodeNumber + 1
+        Logger.shared.log("NextEpisode: User requested S\(seasonNumber)E\(nextEpisodeNumber)", type: "Player")
+        pendingNextEpisodeRequest = (seasonNumber, nextEpisodeNumber)
+        nextEpisodeButton.isEnabled = false
+        hideNextEpisodeButton()
         closeTapped()
+    }
+
+    private func dispatchPendingNextEpisodeRequestIfNeeded() {
+        guard !didDispatchNextEpisodeRequest,
+              let request = pendingNextEpisodeRequest else { return }
+
+        didDispatchNextEpisodeRequest = true
+        pendingNextEpisodeRequest = nil
+        onRequestNextEpisode?(request.seasonNumber, request.episodeNumber)
     }
 
     private func showSkipButton() {
@@ -3137,15 +3153,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         if let presenter = presentingViewController {
             presenter.dismiss(animated: true) {
                 teardownAndStop()
+                self.dispatchPendingNextEpisodeRequestIfNeeded()
             }
         } else {
             dismiss(animated: true) {
                 teardownAndStop()
+                self.dispatchPendingNextEpisodeRequestIfNeeded()
             }
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             teardownAndStop()
+            self.dispatchPendingNextEpisodeRequestIfNeeded()
         }
     }
     
