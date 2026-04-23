@@ -1894,6 +1894,57 @@ struct AniListSpecialSearchEntry: Identifiable {
     var sortSeason: Int {
         displaySeasonNumber
     }
+
+    var titleCandidates: [String] {
+        var seen = Set<String>()
+        let ordered = [title, englishTitle, romajiTitle, nativeTitle].compactMap { raw in
+            raw?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return ordered.compactMap { value in
+            guard !value.isEmpty else { return nil }
+            let key = value.lowercased()
+            guard seen.insert(key).inserted else { return nil }
+            return value
+        }
+    }
+
+    var preferredTitle: String {
+        titleCandidates.first(where: { !Self.isGenericSpecialTitle($0) }) ?? titleCandidates.first ?? title
+    }
+
+    var alternateSearchTitle: String? {
+        let primary = preferredTitle
+        return titleCandidates.first {
+            $0.caseInsensitiveCompare(primary) != .orderedSame && !Self.isGenericSpecialTitle($0)
+        } ?? titleCandidates.first {
+            $0.caseInsensitiveCompare(primary) != .orderedSame
+        }
+    }
+
+    private static func isGenericSpecialTitle(_ title: String) -> Bool {
+        let normalized = title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        guard !normalized.isEmpty else { return true }
+
+        if ["special", "specials", "ova", "oad", "ona"].contains(normalized) {
+            return true
+        }
+
+        let genericPatterns = [
+            #"^special\s+\d+$"#,
+            #"^ova\s+\d+$"#,
+            #"^oad\s+\d+$"#,
+            #"^ona\s+\d+$"#,
+            #"^episode\s*\d+$"#
+        ]
+
+        return genericPatterns.contains {
+            normalized.range(of: $0, options: .regularExpression) != nil
+        }
+    }
 }
 
 struct AniListAnimeWithSeasons {

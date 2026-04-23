@@ -131,6 +131,7 @@ struct ModulesSearchResultsSheet: View {
     @State private var autoModeRunToken: String?
     @State private var autoModeCancelled = false
     @State private var showManualPicker = false
+    @State private var sheetHostController: UIViewController?
 
     private var effectiveTitle: String { seasonTitleOverride ?? mediaTitle }
     private var animeEffectiveTitle: String { effectiveTitle }
@@ -779,38 +780,52 @@ struct ModulesSearchResultsSheet: View {
 
     private func stremioStreamScore(_ stream: StremioStream) -> Double {
         let shortDescription = stream.description.map { String($0.prefix(120)) }
-        let title = [stream.name, stream.title, shortDescription].compactMap { $0 }.joined(separator: " ")
-        let baseSimilarity = algorithmManager.calculateSimilarity(original: displayTitle, result: title)
-        let lower = title.lowercased()
+        let label = [stream.displayName, shortDescription, stream.behaviorHints?.filename]
+            .compactMap { $0 }
+            .joined(separator: " ")
+        let lower = label.lowercased()
 
-        let qualityBonus: Double
-        if lower.contains("2160") || lower.contains("4k") {
-            qualityBonus = 0.08
-        } else if lower.contains("1080") {
-            qualityBonus = 0.06
-        } else if lower.contains("720") {
-            qualityBonus = 0.04
-        } else {
-            qualityBonus = 0.0
+        // Stremio addon lookups are already ID-based, so Auto Mode should rank
+        // streams by quality/usefulness instead of title similarity.
+        var score = 1.0
+
+        if lower.contains("cached") || lower.contains("cache") {
+            score += 0.12
         }
 
-        return baseSimilarity + qualityBonus
+        if lower.contains("2160") || lower.contains("4k") {
+            score += 0.08
+        } else if lower.contains("1080") {
+            score += 0.06
+        } else if lower.contains("720") {
+            score += 0.04
+        }
+
+        if lower.contains("hdr") {
+            score += 0.02
+        }
+
+        if lower.contains("remux") {
+            score += 0.02
+        }
+
+        if stream.isDirectHTTP {
+            score += 0.01
+        }
+
+        return score
     }
 
     private func bestStremioStream(from streams: [StremioStream]) -> StremioStream? {
         guard !streams.isEmpty else { return nil }
-        guard let candidate = streams.enumerated().max(by: { lhs, rhs in
+        return streams.enumerated().max(by: { lhs, rhs in
             let lhsScore = stremioStreamScore(lhs.element)
             let rhsScore = stremioStreamScore(rhs.element)
             if lhsScore == rhsScore {
                 return lhs.offset > rhs.offset
             }
             return lhsScore < rhsScore
-        })?.element else {
-            return nil
-        }
-
-        return stremioStreamScore(candidate) >= viewModel.highQualityThreshold ? candidate : nil
+        })?.element
     }
 
     @MainActor
@@ -864,6 +879,58 @@ struct ModulesSearchResultsSheet: View {
             "\(selectedEpisode?.seasonNumber ?? 0)",
             "\(selectedEpisode?.episodeNumber ?? 0)"
         ].joined(separator: ":")
+    }
+
+    private var shouldDismissAutoModeSheetBeforePlayback: Bool {
+        autoModeOnly && !showManualPicker
+    }
+
+    @MainActor
+    private func captureSheetHostControllerIfNeeded() {
+        guard sheetHostController == nil,
+              let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let rootVC = windowScene.windows.first?.rootViewController else {
+            return
+        }
+
+        sheetHostController = rootVC.topmostViewController()
+    }
+
+    @MainActor
+    private func currentTopmostViewController() -> UIViewController? {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let rootVC = windowScene.windows.first?.rootViewController else {
+            return nil
+        }
+
+        return rootVC.topmostViewController()
+    }
+
+    @MainActor
+    private func dismissAutoModeSheetBeforePlaybackIfNeeded(_ completion: @escaping (UIViewController?) -> Void) {
+        guard shouldDismissAutoModeSheetBeforePlayback else {
+            completion(currentTopmostViewController())
+            return
+        }
+
+        if let hostController = sheetHostController,
+           hostController.presentingViewController != nil {
+            hostController.dismiss(animated: true) {
+                Task { @MainActor in
+                    self.sheetHostController = nil
+                    completion(self.currentTopmostViewController())
+                }
+            }
+            return
+        }
+
+        presentationMode.wrappedValue.dismiss()
+        sheetHostController = nil
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                completion(self.currentTopmostViewController())
+            }
+        }
     }
 
     @ViewBuilder
@@ -1180,6 +1247,7 @@ struct ModulesSearchResultsSheet: View {
         }
         .overlay(streamFetchingOverlay)
         .onAppear {
+            captureSheetHostControllerIfNeeded()
             autoModeDidRun = false
             if autoModeOnly && !showManualPicker {
                 startAutoModeIfNeeded()
@@ -1796,8 +1864,10 @@ struct ModulesSearchResultsSheet: View {
             let schemeUrl = external.schemeURL(for: url)
 
             if let scheme = schemeUrl, UIApplication.shared.canOpenURL(scheme) {
-                UIApplication.shared.open(scheme, options: [:], completionHandler: nil)
-                Logger.shared.log("Stremio: Opening external player with scheme: \(scheme)", type: "General")
+                dismissAutoModeSheetBeforePlaybackIfNeeded { _ in
+                    UIApplication.shared.open(scheme, options: [:], completionHandler: nil)
+                    Logger.shared.log("Stremio: Opening external player with scheme: \(scheme)", type: "General")
+                }
                 return
             }
 
@@ -1856,12 +1926,12 @@ struct ModulesSearchResultsSheet: View {
                 Logger.shared.log("Stremio: presenting \(inAppPlayer) player", type: "Stream")
                 pvc.modalPresentationStyle = .fullScreen
 
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController,
-                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
-                    topmostVC.present(pvc, animated: true, completion: nil)
-                } else {
-                    Logger.shared.log("Failed to find root view controller to present player", type: "Error")
+                dismissAutoModeSheetBeforePlaybackIfNeeded { topmostVC in
+                    if let topmostVC {
+                        topmostVC.present(pvc, animated: true, completion: nil)
+                    } else {
+                        Logger.shared.log("Failed to find root view controller to present player", type: "Error")
+                    }
                 }
                 return
             }
@@ -1879,11 +1949,13 @@ struct ModulesSearchResultsSheet: View {
             playerVC.episodePlaybackContext = effectivePlaybackContext
             playerVC.modalPresentationStyle = .fullScreen
 
-            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-               let rootVC = windowScene.windows.first?.rootViewController,
-               let topmostVC = rootVC.topmostViewController() as UIViewController? {
-                topmostVC.present(playerVC, animated: true) {
-                    playerVC.player?.play()
+            dismissAutoModeSheetBeforePlaybackIfNeeded { topmostVC in
+                if let topmostVC {
+                    topmostVC.present(playerVC, animated: true) {
+                        playerVC.player?.play()
+                    }
+                } else {
+                    Logger.shared.log("Failed to find root view controller to present player", type: "Error")
                 }
             }
         }
@@ -2379,8 +2451,10 @@ struct ModulesSearchResultsSheet: View {
             let schemeUrl = external.schemeURL(for: url)
             
             if let scheme = schemeUrl, UIApplication.shared.canOpenURL(scheme) {
-                UIApplication.shared.open(scheme, options: [:], completionHandler: nil)
-                Logger.shared.log("Opening external player with scheme: \(scheme)", type: "General")
+                dismissAutoModeSheetBeforePlaybackIfNeeded { _ in
+                    UIApplication.shared.open(scheme, options: [:], completionHandler: nil)
+                    Logger.shared.log("Opening external player with scheme: \(scheme)", type: "General")
+                }
                 return
             }
             
@@ -2470,12 +2544,12 @@ struct ModulesSearchResultsSheet: View {
                 Logger.shared.log("ServicesResultsSheet: presenting MPV isAnimeHint=\(isAnimeHint) isAnimeContent=\(isAnimeContent) mediaInfo=\(mediaInfoLabel)", type: "Stream")
                 pvc.modalPresentationStyle = .fullScreen
                 
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController,
-                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
-                    topmostVC.present(pvc, animated: true, completion: nil)
-                } else {
-                    Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
+                dismissAutoModeSheetBeforePlaybackIfNeeded { topmostVC in
+                    if let topmostVC {
+                        topmostVC.present(pvc, animated: true, completion: nil)
+                    } else {
+                        Logger.shared.log("Failed to find root view controller to present MPV player", type: "Error")
+                    }
                 }
                 return
             } else if inAppPlayer == "VLC" {
@@ -2527,12 +2601,12 @@ struct ModulesSearchResultsSheet: View {
                 Logger.shared.log("ServicesResultsSheet: presenting VLC isAnimeHint=\(isAnimeHint) isAnimeContent=\(isAnimeContent) mediaInfo=\(mediaInfoLabel)", type: "Stream")
                 pvc.modalPresentationStyle = .fullScreen
                 
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController,
-                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
-                    topmostVC.present(pvc, animated: true, completion: nil)
-                } else {
-                    Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
+                dismissAutoModeSheetBeforePlaybackIfNeeded { topmostVC in
+                    if let topmostVC {
+                        topmostVC.present(pvc, animated: true, completion: nil)
+                    } else {
+                        Logger.shared.log("Failed to find root view controller to present VLC player", type: "Error")
+                    }
                 }
                 return
             } else {
@@ -2550,16 +2624,16 @@ struct ModulesSearchResultsSheet: View {
                 playerVC.episodePlaybackContext = effectivePlaybackContext
                 playerVC.modalPresentationStyle = .fullScreen
                 
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController,
-                   let topmostVC = rootVC.topmostViewController() as UIViewController? {
-                    topmostVC.present(playerVC, animated: true) {
-                        playerVC.player?.play()
+                dismissAutoModeSheetBeforePlaybackIfNeeded { topmostVC in
+                    if let topmostVC {
+                        topmostVC.present(playerVC, animated: true) {
+                            playerVC.player?.play()
+                        }
+                    } else {
+                        Logger.shared.log("Failed to find root view controller to present player", type: "Error")
+                        self.viewModel.streamError = "Failed to open player. Please try again."
+                        self.viewModel.showingStreamError = true
                     }
-                } else {
-                    Logger.shared.log("Failed to find root view controller to present player", type: "Error")
-                    viewModel.streamError = "Failed to open player. Please try again."
-                    viewModel.showingStreamError = true
                 }
             }
         }

@@ -35,6 +35,8 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
     @State private var showingNoServicesAlert = false
     @State private var romajiTitle: String?
     @State private var currentSeasonTitle: String?
+    @State private var seasonLoadTask: Task<Void, Never>?
+    @State private var seasonLoadGeneration = 0
     
     @StateObject private var serviceManager = ServiceManager.shared
     @StateObject private var stremioManager = StremioAddonManager.shared
@@ -224,6 +226,11 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
             } else {
                 Logger.shared.log("TVShowSeasonsSection appear missing required state: hasTVShow=\(tvShow != nil) hasSelectedSeason=\(selectedSeason != nil)", type: "CrashProbe")
             }
+        }
+        .onDisappear {
+            seasonLoadGeneration += 1
+            seasonLoadTask?.cancel()
+            seasonLoadTask = nil
         }
         .onChangeComp(of: selectedSeason?.seasonNumber) { _, newValue in
             Logger.shared.log("TVShowSeasonsSection selectedSeason changed: showId=\(tvShow?.id ?? 0) season=\(newValue?.description ?? "nil")", type: "CrashProbe")
@@ -628,6 +635,9 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
 
     private func loadSeasonDetails(tvShowId: Int, season: TMDBSeason) {
         Logger.shared.log("TVShowSeasonsSection loadSeasonDetails start: showId=\(tvShowId) season=\(season.seasonNumber) seasonId=\(season.id) isAnime=\(isAnime) animeEpisodes=\(animeEpisodes?.count ?? 0)", type: "CrashProbe")
+        seasonLoadTask?.cancel()
+        seasonLoadGeneration += 1
+        let generation = seasonLoadGeneration
         currentSeasonTitle = isAnime ? (animeSeasonTitles?[season.seasonNumber] ?? season.name) : nil
         isLoadingSeason = true
         seasonDetail = nil
@@ -635,7 +645,7 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
         selectedEpisodePlaybackContext = nil
         downloadEpisodePlaybackContext = nil
         
-        Task {
+        seasonLoadTask = Task {
             Logger.shared.log("TVShowSeasonsSection loadSeasonDetails task entered: showId=\(tvShowId) season=\(season.seasonNumber) isAnime=\(isAnime)", type: "CrashProbe")
             do {
                 // For anime, build season detail from cached AniList episodes with TMDB metadata
@@ -670,10 +680,14 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
                     )
                     
                     await MainActor.run {
+                        guard !Task.isCancelled,
+                              generation == self.seasonLoadGeneration,
+                              self.selectedSeason?.id == season.id else { return }
                         Logger.shared.log("TVShowSeasonsSection loadSeasonDetails anime assign begin: showId=\(tvShowId) season=\(season.seasonNumber)", type: "CrashProbe")
                         self.seasonDetail = detail
                         self.isLoadingSeason = false
-                        if let firstEpisode = detail.episodes.first {
+                        self.seasonLoadTask = nil
+                        if self.specialEpisodeContext == nil, let firstEpisode = detail.episodes.first {
                             self.selectedEpisodeForSearch = firstEpisode
                             Logger.shared.log("TVShowSeasonsSection loadSeasonDetails anime selected first: showId=\(tvShowId) episode=S\(firstEpisode.seasonNumber)E\(firstEpisode.episodeNumber)", type: "CrashProbe")
                         } else {
@@ -686,10 +700,14 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
                     Logger.shared.log("TVShowSeasonsSection loadSeasonDetails tmdb fetch begin: showId=\(tvShowId) season=\(season.seasonNumber) reason=\(isAnime ? "anime-without-episodes" : "regular-tv")", type: "CrashProbe")
                     let detail = try await tmdbService.getSeasonDetails(tvShowId: tvShowId, seasonNumber: season.seasonNumber)
                     await MainActor.run {
+                        guard !Task.isCancelled,
+                              generation == self.seasonLoadGeneration,
+                              self.selectedSeason?.id == season.id else { return }
                         Logger.shared.log("TVShowSeasonsSection loadSeasonDetails tmdb assign begin: showId=\(tvShowId) season=\(season.seasonNumber)", type: "CrashProbe")
                         self.seasonDetail = detail
                         self.isLoadingSeason = false
-                        if let firstEpisode = detail.episodes.first {
+                        self.seasonLoadTask = nil
+                        if self.specialEpisodeContext == nil, let firstEpisode = detail.episodes.first {
                             self.selectedEpisodeForSearch = firstEpisode
                             Logger.shared.log("TVShowSeasonsSection loadSeasonDetails tmdb selected first: showId=\(tvShowId) episode=S\(firstEpisode.seasonNumber)E\(firstEpisode.episodeNumber)", type: "CrashProbe")
                         } else {
@@ -698,8 +716,17 @@ struct TVShowSeasonsSection<InsertedContent: View>: View {
                         Logger.shared.log("TVShowSeasonsSection loadSeasonDetails tmdb done: showId=\(tvShowId) season=\(season.seasonNumber) episodes=\(detail.episodes.count)", type: "CrashProbe")
                     }
                 }
+            } catch is CancellationError {
+                await MainActor.run {
+                    guard generation == self.seasonLoadGeneration else { return }
+                    self.seasonLoadTask = nil
+                    self.isLoadingSeason = false
+                    Logger.shared.log("TVShowSeasonsSection loadSeasonDetails cancelled: showId=\(tvShowId) season=\(season.seasonNumber)", type: "CrashProbe")
+                }
             } catch {
                 await MainActor.run {
+                    guard generation == self.seasonLoadGeneration else { return }
+                    self.seasonLoadTask = nil
                     self.isLoadingSeason = false
                     Logger.shared.log("TVShowSeasonsSection loadSeasonDetails failed: showId=\(tvShowId) season=\(season.seasonNumber) error=\(error.localizedDescription)", type: "CrashProbe")
                 }
