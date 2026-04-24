@@ -38,9 +38,13 @@ The Android namespace now uses `dev.soupy.eclipse.android` rather than the earli
 - Settings backup import/export that restores and re-exports Android-owned backup sections while preserving unsupported/unknown Luna backup data
 - Home now respects the backed catalog order/visibility and includes iOS catalog IDs for Just For You, Because You Watched, networks, genres, companies, featured, ranked rows, TMDB rows, and AniList rows
 - Search now stores recent queries locally and fetches multiple TMDB pages alongside AniList anime results
+- Detail pages now hydrate richer TMDB metadata including content ratings, cast, recommendations, episode stills/runtimes/descriptions, and broader season coverage
+- Detail pages now expose watched/unwatched actions, mark-previous-episodes support, and backed user ratings that feed the recommendation cache/user-ratings backup path
 - First-pass Stremio addon stream resolution on TMDB movie and series detail pages, plus an AniList-to-TMDB anime bridge for resolving mapped anime episodes
 - Episode-aware stream resolution from detail episode rows instead of only resolving the first series episode
-- Backup-backed manga and novel overview surfaces for restored Kanzen library/progress/module data
+- Offline downloads can capture resolved direct HTTP streams, package basic HLS playlists with AES-128 keys, download subtitle files, and persist local file metadata
+- Backup-backed manga and novel overview surfaces for restored Kanzen library/progress/module data, plus live AniList manga/novel browse/search, Android library save/remove actions, resettable reading progress, and Kanzen module URL add/update/toggle/remove controls on the Manga and Novel tabs
+- Kanzen module adds and updates now fetch Luna-compatible manifests, resolve and validate `scriptURL`, preserve real source metadata, and keep the edited module list in the iOS-compatible backup path
 
 ## Version choices
 
@@ -48,10 +52,10 @@ The Android dependency versions in `gradle/libs.versions.toml` were chosen from 
 
 ## Current limitations
 
-- The full feature set from the Apple app is not finished yet. Android now has a real shell, persistence, catalog controls, backup flow, and first-pass Stremio resolution, but it is still short of full parity.
+- The full feature set from the Apple app is not finished yet. Android now has a real shell, persistence, catalog controls, backup flow, richer detail/progress actions, and first-pass Stremio resolution, but it is still short of full parity.
 - Anime-specific source resolution now has an AniList-to-TMDB bridge, but it is still heuristic and not as complete as the Apple app's full AniList/TMDB episode reconstruction.
 - Torrent-style Stremio results are surfaced in the UI, but they are not playable yet because Android still needs its torrent engine or alternate-player handoff work.
-- Services, tracker auth/sync, manga/novel readers, and alternate player backends are still earlier-stage compared with the Apple app.
+- Services, tracker auth/sync, manga/novel readers, full Kanzen JS runtime browsing, and alternate player backends are still earlier-stage compared with the Apple app.
 
 ## Running on Windows
 

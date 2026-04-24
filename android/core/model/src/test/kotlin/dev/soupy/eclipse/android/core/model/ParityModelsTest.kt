@@ -72,6 +72,34 @@ class ParityModelsTest {
     }
 
     @Test
+    fun tmdbRatingsPreferUsCertificationAndContentRating() {
+        val releaseDates = TMDBReleaseDatesResponse(
+            results = listOf(
+                TMDBReleaseDateCountry(
+                    countryCode = "CA",
+                    releaseDates = listOf(TMDBReleaseDateEntry(certification = "14A")),
+                ),
+                TMDBReleaseDateCountry(
+                    countryCode = "US",
+                    releaseDates = listOf(
+                        TMDBReleaseDateEntry(certification = ""),
+                        TMDBReleaseDateEntry(certification = "PG-13"),
+                    ),
+                ),
+            ),
+        )
+        val contentRatings = TMDBContentRatingsResponse(
+            results = listOf(
+                TMDBContentRating(countryCode = "GB", rating = "15"),
+                TMDBContentRating(countryCode = "US", rating = "TV-MA"),
+            ),
+        )
+
+        assertEquals("PG-13", releaseDates.usCertification)
+        assertEquals("TV-MA", contentRatings.usRating)
+    }
+
+    @Test
     fun searchHistoryMovesRepeatedQueriesToFront() {
         val history = SearchHistorySnapshot(listOf("Dune", "Alien"))
             .remember("alien")

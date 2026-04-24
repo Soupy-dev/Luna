@@ -48,6 +48,8 @@ data class AniListMedia(
     val season: String? = null,
     @SerialName("seasonYear") val seasonYear: Int? = null,
     val episodes: Int? = null,
+    val chapters: Int? = null,
+    val volumes: Int? = null,
     val duration: Int? = null,
     val status: String? = null,
     @SerialName("bannerImage") val bannerImage: String? = null,

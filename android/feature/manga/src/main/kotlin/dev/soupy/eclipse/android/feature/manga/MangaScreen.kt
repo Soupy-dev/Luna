@@ -8,14 +8,27 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.ImeAction
 import dev.soupy.eclipse.android.core.design.GlassPanel
 import dev.soupy.eclipse.android.core.design.HeroBackdrop
 import dev.soupy.eclipse.android.core.design.PosterImage
@@ -24,13 +37,37 @@ import dev.soupy.eclipse.android.core.design.SectionHeading
 data class MangaScreenState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
+    val noticeMessage: String? = null,
+    val query: String = "",
+    val isSearching: Boolean = false,
     val savedCount: Int = 0,
     val readChapterCount: Int = 0,
     val novelCount: Int = 0,
     val importedFromBackup: Boolean = false,
+    val searchResults: List<MangaCatalogItemRow> = emptyList(),
+    val savedItems: List<MangaCatalogItemRow> = emptyList(),
+    val catalogs: List<MangaCatalogSectionRow> = emptyList(),
     val collections: List<MangaCollectionRow> = emptyList(),
     val recent: List<MangaProgressRow> = emptyList(),
     val modules: List<MangaModuleRow> = emptyList(),
+)
+
+data class MangaCatalogSectionRow(
+    val id: String,
+    val title: String,
+    val items: List<MangaCatalogItemRow>,
+)
+
+data class MangaCatalogItemRow(
+    val id: String,
+    val aniListId: Int,
+    val title: String,
+    val subtitle: String,
+    val coverUrl: String? = null,
+    val description: String? = null,
+    val format: String? = null,
+    val totalChapters: Int? = null,
+    val isSaved: Boolean = false,
 )
 
 data class MangaCollectionRow(
@@ -57,7 +94,18 @@ data class MangaModuleRow(
 fun MangaRoute(
     state: MangaScreenState,
     onRefresh: () -> Unit,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onSaveItem: (String) -> Unit,
+    onRemoveItem: (Int) -> Unit,
+    onClearProgress: (String) -> Unit,
+    onAddModule: (String) -> Unit,
+    onSetModuleActive: (String, Boolean) -> Unit,
+    onUpdateModule: (String) -> Unit,
+    onRemoveModule: (String) -> Unit,
 ) {
+    var moduleUrl by rememberSaveable { mutableStateOf("") }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -90,6 +138,18 @@ fun MangaRoute(
             }
         }
 
+        state.noticeMessage?.let { notice ->
+            item {
+                GlassPanel {
+                    Text(
+                        text = notice,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+            }
+        }
+
         state.errorMessage?.let { message ->
             item {
                 GlassPanel {
@@ -108,12 +168,121 @@ fun MangaRoute(
         }
 
         item {
+            GlassPanel {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "AniList Manga Search",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    OutlinedTextField(
+                        value = state.query,
+                        onValueChange = onQueryChange,
+                        label = { Text("Title") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                    )
+                    Button(
+                        onClick = onSearch,
+                        enabled = state.query.isNotBlank() && !state.isSearching,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (state.isSearching) "Searching..." else "Search Manga")
+                    }
+                }
+            }
+        }
+
+        item {
+            GlassPanel {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Add Kanzen Module",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    OutlinedTextField(
+                        value = moduleUrl,
+                        onValueChange = { moduleUrl = it },
+                        label = { Text("Module URL") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(
+                        onClick = {
+                            onAddModule(moduleUrl)
+                            moduleUrl = ""
+                        },
+                        enabled = moduleUrl.isNotBlank(),
+                    ) {
+                        Text("Save Module")
+                    }
+                }
+            }
+        }
+
+        item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 StatPanel("Collections", state.collections.size.toString(), Modifier.weight(1f))
                 StatPanel("Modules", state.modules.size.toString(), Modifier.weight(1f))
+            }
+        }
+
+        if (state.searchResults.isNotEmpty()) {
+            item {
+                SectionHeading(
+                    title = "Search Results",
+                    subtitle = "Save AniList manga directly into the Android library.",
+                )
+            }
+            items(state.searchResults, key = { it.id }) { item ->
+                MangaSearchResultCard(
+                    item = item,
+                    onSave = { onSaveItem(item.id) },
+                    onRemove = { onRemoveItem(item.aniListId) },
+                )
+            }
+        }
+
+        if (state.savedItems.isNotEmpty()) {
+            item {
+                SectionHeading(
+                    title = "Saved Manga",
+                    subtitle = "Library items persisted in Android storage and backup export.",
+                )
+            }
+            items(state.savedItems, key = { it.id }) { item ->
+                MangaSearchResultCard(
+                    item = item,
+                    onSave = { onSaveItem(item.id) },
+                    onRemove = { onRemoveItem(item.aniListId) },
+                )
+            }
+        }
+
+        if (state.catalogs.isNotEmpty()) {
+            items(state.catalogs, key = { it.id }) { section ->
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SectionHeading(
+                        title = section.title,
+                        subtitle = "AniList manga browse row.",
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        items(section.items, key = { it.id }) { item ->
+                            MangaCatalogCard(
+                                item = item,
+                                onSave = { onSaveItem(item.id) },
+                                onRemove = { onRemoveItem(item.aniListId) },
+                                modifier = Modifier.width(170.dp),
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -125,7 +294,10 @@ fun MangaRoute(
                 )
             }
             items(state.recent, key = { it.id }) { row ->
-                MangaProgressCard(row)
+                MangaProgressCard(
+                    row = row,
+                    onClearProgress = { onClearProgress(row.id) },
+                )
             }
         }
 
@@ -149,17 +321,16 @@ fun MangaRoute(
                 )
             }
             items(state.modules, key = { it.id }) { row ->
-                TextRowCard(
-                    title = row.name,
-                    subtitle = listOf(
-                        row.subtitle,
-                        if (row.isActive) "Active" else "Inactive",
-                    ).filter(String::isNotBlank).joinToString(" - "),
+                MangaModuleCard(
+                    row = row,
+                    onActiveChanged = { active -> onSetModuleActive(row.id, active) },
+                    onUpdate = { onUpdateModule(row.id) },
+                    onRemove = { onRemoveModule(row.id) },
                 )
             }
         }
 
-        if (!state.isLoading && state.errorMessage == null && state.collections.isEmpty() && state.recent.isEmpty() && state.modules.isEmpty()) {
+        if (!state.isLoading && state.errorMessage == null && state.catalogs.isEmpty() && state.collections.isEmpty() && state.recent.isEmpty() && state.modules.isEmpty()) {
             item {
                 GlassPanel {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -176,6 +347,125 @@ fun MangaRoute(
                         Button(onClick = onRefresh) {
                             Text("Refresh")
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MangaCatalogCard(
+    item: MangaCatalogItemRow,
+    onSave: () -> Unit,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    GlassPanel(modifier = modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PosterImage(
+                imageUrl = item.coverUrl,
+                contentDescription = item.title,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(2f / 3f),
+            )
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (item.subtitle.isNotBlank()) {
+                Text(
+                    text = item.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            item.description?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (item.isSaved) {
+                OutlinedButton(
+                    onClick = onRemove,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Remove")
+                }
+            } else {
+                Button(
+                    onClick = onSave,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Save")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MangaSearchResultCard(
+    item: MangaCatalogItemRow,
+    onSave: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    GlassPanel {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            PosterImage(
+                imageUrl = item.coverUrl,
+                contentDescription = item.title,
+                modifier = Modifier
+                    .width(96.dp)
+                    .aspectRatio(2f / 3f),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (item.subtitle.isNotBlank()) {
+                    Text(
+                        text = item.subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+                item.description?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.74f),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (item.isSaved) {
+                    OutlinedButton(onClick = onRemove) {
+                        Text("Remove from Library")
+                    }
+                } else {
+                    Button(onClick = onSave) {
+                        Text("Save to Library")
                     }
                 }
             }
@@ -206,37 +496,45 @@ private fun StatPanel(
 }
 
 @Composable
-private fun MangaProgressCard(row: MangaProgressRow) {
+private fun MangaProgressCard(
+    row: MangaProgressRow,
+    onClearProgress: () -> Unit,
+) {
     GlassPanel {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            row.coverUrl?.let { cover ->
-                PosterImage(
-                    imageUrl = cover,
-                    contentDescription = row.title,
-                    modifier = Modifier
-                        .weight(0.34f)
-                        .aspectRatio(2f / 3f),
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text(
-                    text = row.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                if (row.subtitle.isNotBlank()) {
-                    Text(
-                        text = row.subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.tertiary,
+                row.coverUrl?.let { cover ->
+                    PosterImage(
+                        imageUrl = cover,
+                        contentDescription = row.title,
+                        modifier = Modifier
+                            .weight(0.34f)
+                            .aspectRatio(2f / 3f),
                     )
                 }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = row.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (row.subtitle.isNotBlank()) {
+                        Text(
+                            text = row.subtitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
+                }
+            }
+            OutlinedButton(onClick = onClearProgress) {
+                Text("Reset Progress")
             }
         }
     }
@@ -260,6 +558,56 @@ private fun TextRowCard(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.tertiary,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MangaModuleCard(
+    row: MangaModuleRow,
+    onActiveChanged: (Boolean) -> Unit,
+    onUpdate: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = row.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = listOf(
+                            row.subtitle,
+                            if (row.isActive) "Active" else "Inactive",
+                        ).filter(String::isNotBlank).joinToString(" - "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+                Switch(
+                    checked = row.isActive,
+                    onCheckedChange = onActiveChanged,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onUpdate) {
+                    Text("Update")
+                }
+                OutlinedButton(onClick = onRemove) {
+                    Text("Remove")
+                }
             }
         }
     }

@@ -91,6 +91,7 @@ fun EclipseAndroidApp() {
             repository = appContainer.detailRepository,
             streamResolutionRepository = appContainer.streamResolutionRepository,
             progressRepository = appContainer.progressRepository,
+            ratingsRepository = appContainer.ratingsRepository,
         )
     }
     val scheduleViewModel = rememberFeatureViewModel("schedule") {
@@ -228,9 +229,20 @@ fun EclipseAndroidApp() {
                                 detailViewModel.currentDownloadDraft()
                                     ?.let(downloadsViewModel::queueDownload)
                             },
+                            onSetRating = detailViewModel::setUserRating,
+                            onClearRating = detailViewModel::clearUserRating,
+                            onMarkWatched = detailViewModel::markCurrentWatched,
+                            onMarkUnwatched = detailViewModel::markCurrentUnwatched,
                             onResolveStreams = detailViewModel::resolveStreams,
                             onResolveEpisodeStreams = detailViewModel::resolveEpisodeStreams,
+                            onMarkEpisodeWatched = detailViewModel::markEpisodeWatched,
+                            onMarkEpisodeUnwatched = detailViewModel::markEpisodeUnwatched,
+                            onMarkPreviousEpisodesWatched = detailViewModel::markPreviousEpisodesWatched,
                             onPlayStream = detailViewModel::playResolvedStream,
+                            onSelectRecommendation = { item ->
+                                selectedDetailTarget = item.detailTarget
+                                navController.navigate("detail")
+                            },
                             onPlaybackProgress = { progress ->
                                 detailViewModel.currentPlaybackProgressDraft(
                                     positionMs = progress.positionMs,
@@ -325,12 +337,30 @@ fun EclipseAndroidApp() {
                         MangaRoute(
                             state = mangaState,
                             onRefresh = mangaViewModel::refresh,
+                            onQueryChange = mangaViewModel::updateQuery,
+                            onSearch = mangaViewModel::search,
+                            onSaveItem = mangaViewModel::saveItem,
+                            onRemoveItem = mangaViewModel::removeItem,
+                            onClearProgress = mangaViewModel::clearReadingProgress,
+                            onAddModule = mangaViewModel::addModule,
+                            onSetModuleActive = mangaViewModel::setModuleActive,
+                            onUpdateModule = mangaViewModel::updateModule,
+                            onRemoveModule = mangaViewModel::removeModule,
                         )
                     }
                     composable("novel") {
                         NovelRoute(
                             state = novelState,
                             onRefresh = novelViewModel::refresh,
+                            onQueryChange = novelViewModel::updateQuery,
+                            onSearch = novelViewModel::search,
+                            onSaveItem = novelViewModel::saveItem,
+                            onRemoveItem = novelViewModel::removeItem,
+                            onClearProgress = novelViewModel::clearReadingProgress,
+                            onAddModule = novelViewModel::addModule,
+                            onSetModuleActive = novelViewModel::setModuleActive,
+                            onUpdateModule = novelViewModel::updateModule,
+                            onRemoveModule = novelViewModel::removeModule,
                         )
                     }
                 }

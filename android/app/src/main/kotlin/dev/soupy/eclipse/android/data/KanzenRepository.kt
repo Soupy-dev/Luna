@@ -19,7 +19,6 @@ class KanzenRepository(
 
     suspend fun exportModules(fallback: List<ModuleBackup>): List<ModuleBackup> {
         val snapshot = kanzenStore.read()
-        return snapshot.modules.takeIf { it.isNotEmpty() } ?: fallback
+        return fallback.takeIf { it.isNotEmpty() } ?: snapshot.modules
     }
 }
-

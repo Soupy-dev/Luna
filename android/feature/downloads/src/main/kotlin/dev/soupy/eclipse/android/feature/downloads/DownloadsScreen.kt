@@ -98,7 +98,7 @@ fun DownloadsRoute(
             item {
                 LoadingPanel(
                     title = "Loading downloads",
-                    message = "Reading the Android offline queue and any metadata-first download drafts.",
+                    message = "Reading the Android offline queue, direct downloads, and packaged HLS entries.",
                 )
             }
         }
@@ -140,7 +140,7 @@ fun DownloadsRoute(
                 ) {
                     SectionHeading(
                         title = "Queue",
-                        subtitle = "Metadata-first today, with the full downloader pipeline next.",
+                        subtitle = "Direct streams can download into app storage; unsupported sources stay visible for retry.",
                     )
                     OutlinedButton(onClick = onClearCompleted) {
                         Text("Clear Completed")
@@ -169,7 +169,7 @@ fun DownloadsRoute(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
-                            text = "Open a detail page and queue a download draft. Android now persists those entries here so the real downloader can slot in later without changing the user-facing flow.",
+                            text = "Open a detail page, resolve a direct source, and queue it for offline storage.",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                         )

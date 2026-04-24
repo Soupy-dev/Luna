@@ -6,10 +6,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -22,9 +24,11 @@ import dev.soupy.eclipse.android.core.design.ErrorPanel
 import dev.soupy.eclipse.android.core.design.GlassPanel
 import dev.soupy.eclipse.android.core.design.HeroBackdrop
 import dev.soupy.eclipse.android.core.design.LoadingPanel
+import dev.soupy.eclipse.android.core.design.MediaPosterCard
 import dev.soupy.eclipse.android.core.design.MetadataChips
 import dev.soupy.eclipse.android.core.design.PosterImage
 import dev.soupy.eclipse.android.core.design.SectionHeading
+import dev.soupy.eclipse.android.core.model.ExploreMediaCard
 import dev.soupy.eclipse.android.core.model.InAppPlayer
 import dev.soupy.eclipse.android.core.model.PlaybackSettingsSnapshot
 import dev.soupy.eclipse.android.core.model.PlayerSource
@@ -39,6 +43,14 @@ data class DetailEpisodeRow(
     val overview: String? = null,
     val seasonNumber: Int? = null,
     val episodeNumber: Int? = null,
+    val runtimeMinutes: Int? = null,
+)
+
+data class DetailCastRow(
+    val id: String,
+    val name: String,
+    val role: String? = null,
+    val imageUrl: String? = null,
 )
 
 data class DetailStreamRow(
@@ -60,6 +72,10 @@ data class DetailScreenState(
     val posterUrl: String? = null,
     val backdropUrl: String? = null,
     val metadataChips: List<String> = emptyList(),
+    val contentRating: String? = null,
+    val userRating: Int? = null,
+    val cast: List<DetailCastRow> = emptyList(),
+    val recommendations: List<ExploreMediaCard> = emptyList(),
     val episodesTitle: String? = null,
     val episodes: List<DetailEpisodeRow> = emptyList(),
     val isResolvingStreams: Boolean = false,
@@ -77,9 +93,17 @@ fun DetailRoute(
     onSaveToLibrary: () -> Unit,
     onQueueResume: () -> Unit,
     onQueueDownload: () -> Unit,
+    onSetRating: (Int) -> Unit,
+    onClearRating: () -> Unit,
+    onMarkWatched: () -> Unit,
+    onMarkUnwatched: () -> Unit,
     onResolveStreams: () -> Unit,
     onResolveEpisodeStreams: (String) -> Unit,
+    onMarkEpisodeWatched: (String) -> Unit,
+    onMarkEpisodeUnwatched: (String) -> Unit,
+    onMarkPreviousEpisodesWatched: (String) -> Unit,
     onPlayStream: (String) -> Unit,
+    onSelectRecommendation: (ExploreMediaCard) -> Unit,
     onPlaybackProgress: (PlaybackProgressSnapshot) -> Unit,
     preferredPlayer: InAppPlayer = InAppPlayer.NORMAL,
     playbackSettings: PlaybackSettingsSnapshot = PlaybackSettingsSnapshot(),
@@ -154,19 +178,37 @@ fun DetailRoute(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(onClick = onSaveToLibrary) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Button(
+                                onClick = onSaveToLibrary,
+                                modifier = Modifier.weight(1f),
+                            ) {
                                 Text("Save to Library")
                             }
-                            OutlinedButton(onClick = onQueueResume) {
+                            OutlinedButton(
+                                onClick = onQueueResume,
+                                modifier = Modifier.weight(1f),
+                            ) {
                                 Text("Queue Resume")
                             }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            OutlinedButton(onClick = onQueueDownload) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = onQueueDownload,
+                                modifier = Modifier.weight(1f),
+                            ) {
                                 Text("Queue Download")
                             }
-                            Button(onClick = onResolveStreams) {
+                            Button(
+                                onClick = onResolveStreams,
+                                modifier = Modifier.weight(1f),
+                            ) {
                                 Text(
                                     when {
                                         state.isResolvingStreams -> "Resolving..."
@@ -174,6 +216,80 @@ fun DetailRoute(
                                         else -> "Resolve Streams"
                                     },
                                 )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = onMarkWatched,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Mark Watched")
+                            }
+                            OutlinedButton(
+                                onClick = onMarkUnwatched,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Mark Unwatched")
+                            }
+                        }
+                        Text(
+                            text = state.userRating?.let { "Your rating: $it/5" } ?: "Your rating",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            (1..3).forEach { rating ->
+                                if (state.userRating == rating) {
+                                    Button(
+                                        onClick = { onSetRating(rating) },
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text(rating.toString())
+                                    }
+                                } else {
+                                    OutlinedButton(
+                                        onClick = { onSetRating(rating) },
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text(rating.toString())
+                                    }
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            (4..5).forEach { rating ->
+                                if (state.userRating == rating) {
+                                    Button(
+                                        onClick = { onSetRating(rating) },
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text(rating.toString())
+                                    }
+                                } else {
+                                    OutlinedButton(
+                                        onClick = { onSetRating(rating) },
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text(rating.toString())
+                                    }
+                                }
+                            }
+                            if (state.userRating != null) {
+                                OutlinedButton(
+                                    onClick = onClearRating,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("Clear")
+                                }
                             }
                         }
                     }
@@ -269,12 +385,50 @@ fun DetailRoute(
             }
         }
 
+        if (state.cast.isNotEmpty()) {
+            item {
+                SectionHeading(
+                    title = "Cast",
+                    subtitle = "Top billed cast from TMDB.",
+                )
+            }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    items(state.cast, key = { it.id }) { cast ->
+                        GlassPanel(modifier = Modifier.width(154.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                PosterImage(
+                                    imageUrl = cast.imageUrl,
+                                    contentDescription = cast.name,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(170.dp),
+                                )
+                                Text(
+                                    text = cast.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                cast.role?.let {
+                                    Text(
+                                        text = it,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         state.episodesTitle?.let { title ->
             if (state.episodes.isNotEmpty()) {
                 item {
                     SectionHeading(
                         title = title,
-                        subtitle = "The first loaded episode group for this Android detail flow.",
+                        subtitle = "TMDB episode stills, runtimes, descriptions, and progress actions.",
                     )
                 }
                 items(state.episodes, key = { it.id }) { episode ->
@@ -309,11 +463,62 @@ fun DetailRoute(
                                 )
                             }
                             if (episode.seasonNumber != null && episode.episodeNumber != null) {
-                                Button(onClick = { onResolveEpisodeStreams(episode.id) }) {
-                                    Text("Resolve Episode")
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Button(
+                                        onClick = { onResolveEpisodeStreams(episode.id) },
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text("Resolve")
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onMarkEpisodeWatched(episode.id) },
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text("Watched")
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { onMarkEpisodeUnwatched(episode.id) },
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text("Unwatched")
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onMarkPreviousEpisodesWatched(episode.id) },
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text("Mark Previous")
+                                    }
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        if (state.recommendations.isNotEmpty()) {
+            item {
+                SectionHeading(
+                    title = "Recommendations",
+                    subtitle = "Related TMDB titles.",
+                )
+            }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    items(state.recommendations, key = { it.id }) { item ->
+                        MediaPosterCard(
+                            item = item,
+                            onClick = onSelectRecommendation,
+                            modifier = Modifier.width(180.dp),
+                        )
                     }
                 }
             }

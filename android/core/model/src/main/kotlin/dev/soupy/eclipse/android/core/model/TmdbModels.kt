@@ -156,6 +156,63 @@ data class TMDBSeasonDetail(
 )
 
 @Serializable
+data class TMDBCreditsResponse(
+    val id: Int = 0,
+    val cast: List<TMDBCastMember> = emptyList(),
+)
+
+@Serializable
+data class TMDBCastMember(
+    val id: Int = 0,
+    val name: String = "",
+    val character: String = "",
+    @SerialName("profile_path") val profilePath: String? = null,
+    val order: Int = 0,
+)
+
+val TMDBCastMember.fullProfileUrl: String?
+    get() = profilePath?.let { "$TmdbImageBaseUrl$it" }
+
+@Serializable
+data class TMDBContentRatingsResponse(
+    val results: List<TMDBContentRating> = emptyList(),
+)
+
+@Serializable
+data class TMDBContentRating(
+    @SerialName("iso_3166_1") val countryCode: String = "",
+    val rating: String = "",
+)
+
+val TMDBContentRatingsResponse.usRating: String?
+    get() = results.firstOrNull { it.countryCode.equals("US", ignoreCase = true) }
+        ?.rating
+        ?.takeIf { it.isNotBlank() }
+
+@Serializable
+data class TMDBReleaseDatesResponse(
+    val results: List<TMDBReleaseDateCountry> = emptyList(),
+)
+
+@Serializable
+data class TMDBReleaseDateCountry(
+    @SerialName("iso_3166_1") val countryCode: String = "",
+    @SerialName("release_dates") val releaseDates: List<TMDBReleaseDateEntry> = emptyList(),
+)
+
+@Serializable
+data class TMDBReleaseDateEntry(
+    val certification: String = "",
+    val type: Int = 0,
+)
+
+val TMDBReleaseDatesResponse.usCertification: String?
+    get() = results.firstOrNull { it.countryCode.equals("US", ignoreCase = true) }
+        ?.releaseDates
+        ?.firstOrNull { it.certification.isNotBlank() }
+        ?.certification
+
+@Serializable
 data class TMDBTVShowWithSeasons(
     val show: TMDBTVShowDetail,
     val seasonDetails: List<TMDBSeasonDetail> = emptyList(),

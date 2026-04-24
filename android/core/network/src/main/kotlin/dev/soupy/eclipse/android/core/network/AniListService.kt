@@ -22,6 +22,13 @@ class AniListService(
         val upcoming: List<AniListMedia> = emptyList(),
     )
 
+    data class MangaCatalogs(
+        val trending: List<AniListMedia> = emptyList(),
+        val popular: List<AniListMedia> = emptyList(),
+        val topRated: List<AniListMedia> = emptyList(),
+        val recentlyUpdated: List<AniListMedia> = emptyList(),
+    )
+
     suspend fun searchAnime(
         query: String,
         page: Int = 1,
@@ -31,6 +38,56 @@ class AniListService(
             AniListRequest.serializer(),
             AniListRequest(
                 query = SEARCH_QUERY,
+                variables = AniListVariables(search = query, page = page, perPage = perPage),
+            ),
+        )
+
+        return when (val result = httpClient.postJson(baseUrl, body)) {
+            is NetworkResult.Success -> try {
+                val response = EclipseJson.decodeFromString(AniListEnvelope.serializer(), result.value)
+                NetworkResult.Success(response.data.page)
+            } catch (error: SerializationException) {
+                NetworkResult.Failure.Serialization(error)
+            }
+
+            is NetworkResult.Failure -> result
+        }
+    }
+
+    suspend fun searchManga(
+        query: String,
+        page: Int = 1,
+        perPage: Int = 20,
+    ): NetworkResult<AniListPageResponse> {
+        val body = EclipseJson.encodeToString(
+            AniListRequest.serializer(),
+            AniListRequest(
+                query = MANGA_SEARCH_QUERY,
+                variables = AniListVariables(search = query, page = page, perPage = perPage),
+            ),
+        )
+
+        return when (val result = httpClient.postJson(baseUrl, body)) {
+            is NetworkResult.Success -> try {
+                val response = EclipseJson.decodeFromString(AniListEnvelope.serializer(), result.value)
+                NetworkResult.Success(response.data.page)
+            } catch (error: SerializationException) {
+                NetworkResult.Failure.Serialization(error)
+            }
+
+            is NetworkResult.Failure -> result
+        }
+    }
+
+    suspend fun searchNovels(
+        query: String,
+        page: Int = 1,
+        perPage: Int = 20,
+    ): NetworkResult<AniListPageResponse> {
+        val body = EclipseJson.encodeToString(
+            AniListRequest.serializer(),
+            AniListRequest(
+                query = NOVEL_SEARCH_QUERY,
                 variables = AniListVariables(search = query, page = page, perPage = perPage),
             ),
         )
@@ -87,6 +144,62 @@ class AniListService(
                         topRated = response.data.topRated.media,
                         airing = response.data.airing.media,
                         upcoming = response.data.upcoming.media,
+                    ),
+                )
+            } catch (error: SerializationException) {
+                NetworkResult.Failure.Serialization(error)
+            }
+
+            is NetworkResult.Failure -> result
+        }
+    }
+
+    suspend fun fetchMangaCatalogs(perPage: Int = 18): NetworkResult<MangaCatalogs> {
+        val body = EclipseJson.encodeToString(
+            AniListRequest.serializer(),
+            AniListRequest(
+                query = MANGA_CATALOGS_QUERY,
+                variables = AniListVariables(perPage = perPage),
+            ),
+        )
+
+        return when (val result = httpClient.postJson(baseUrl, body)) {
+            is NetworkResult.Success -> try {
+                val response = EclipseJson.decodeFromString(MangaCatalogsEnvelope.serializer(), result.value)
+                NetworkResult.Success(
+                    MangaCatalogs(
+                        trending = response.data.trending.media,
+                        popular = response.data.popular.media,
+                        topRated = response.data.topRated.media,
+                        recentlyUpdated = response.data.recentlyUpdated.media,
+                    ),
+                )
+            } catch (error: SerializationException) {
+                NetworkResult.Failure.Serialization(error)
+            }
+
+            is NetworkResult.Failure -> result
+        }
+    }
+
+    suspend fun fetchNovelCatalogs(perPage: Int = 18): NetworkResult<MangaCatalogs> {
+        val body = EclipseJson.encodeToString(
+            AniListRequest.serializer(),
+            AniListRequest(
+                query = NOVEL_CATALOGS_QUERY,
+                variables = AniListVariables(perPage = perPage),
+            ),
+        )
+
+        return when (val result = httpClient.postJson(baseUrl, body)) {
+            is NetworkResult.Success -> try {
+                val response = EclipseJson.decodeFromString(MangaCatalogsEnvelope.serializer(), result.value)
+                NetworkResult.Success(
+                    MangaCatalogs(
+                        trending = response.data.trending.media,
+                        popular = response.data.popular.media,
+                        topRated = response.data.topRated.media,
+                        recentlyUpdated = response.data.recentlyUpdated.media,
                     ),
                 )
             } catch (error: SerializationException) {
@@ -176,6 +289,19 @@ class AniListService(
         val topRated: AniListPageResponse = AniListPageResponse(),
         val airing: AniListPageResponse = AniListPageResponse(),
         val upcoming: AniListPageResponse = AniListPageResponse(),
+    )
+
+    @Serializable
+    private data class MangaCatalogsEnvelope(
+        val data: MangaCatalogsData,
+    )
+
+    @Serializable
+    private data class MangaCatalogsData(
+        val trending: AniListPageResponse = AniListPageResponse(),
+        val popular: AniListPageResponse = AniListPageResponse(),
+        val topRated: AniListPageResponse = AniListPageResponse(),
+        val recentlyUpdated: AniListPageResponse = AniListPageResponse(),
     )
 
     @Serializable
@@ -271,6 +397,82 @@ class AniListService(
                   episode
                   timeUntilAiring
                   airingAt
+                }
+              }
+            }
+        """
+
+        const val MANGA_SEARCH_QUERY = """
+            query SearchManga(${'$'}search: String, ${'$'}page: Int, ${'$'}perPage: Int) {
+              Page(page: ${'$'}page, perPage: ${'$'}perPage) {
+                pageInfo {
+                  currentPage
+                  hasNextPage
+                  perPage
+                  total
+                }
+                media(search: ${'$'}search, type: MANGA) {
+                  id
+                  idMal
+                  description(asHtml: false)
+                  format
+                  chapters
+                  volumes
+                  status
+                  bannerImage
+                  isAdult
+                  synonyms
+                  genres
+                  title {
+                    romaji
+                    english
+                    native
+                    userPreferred
+                  }
+                  coverImage {
+                    extraLarge
+                    large
+                    medium
+                    color
+                  }
+                }
+              }
+            }
+        """
+
+        const val NOVEL_SEARCH_QUERY = """
+            query SearchNovels(${'$'}search: String, ${'$'}page: Int, ${'$'}perPage: Int) {
+              Page(page: ${'$'}page, perPage: ${'$'}perPage) {
+                pageInfo {
+                  currentPage
+                  hasNextPage
+                  perPage
+                  total
+                }
+                media(search: ${'$'}search, type: MANGA, format_in: [NOVEL]) {
+                  id
+                  idMal
+                  description(asHtml: false)
+                  format
+                  chapters
+                  volumes
+                  status
+                  bannerImage
+                  isAdult
+                  synonyms
+                  genres
+                  title {
+                    romaji
+                    english
+                    native
+                    userPreferred
+                  }
+                  coverImage {
+                    extraLarge
+                    large
+                    medium
+                    color
+                  }
                 }
               }
             }
@@ -445,6 +647,232 @@ class AniListService(
                     episode
                     timeUntilAiring
                     airingAt
+                  }
+                }
+              }
+            }
+        """
+
+        const val MANGA_CATALOGS_QUERY = """
+            query MangaCatalogs(${'$'}perPage: Int) {
+              trending: Page(page: 1, perPage: ${'$'}perPage) {
+                media(type: MANGA, sort: TRENDING_DESC) {
+                  id
+                  idMal
+                  description(asHtml: false)
+                  format
+                  chapters
+                  volumes
+                  status
+                  bannerImage
+                  isAdult
+                  synonyms
+                  genres
+                  title {
+                    romaji
+                    english
+                    native
+                    userPreferred
+                  }
+                  coverImage {
+                    extraLarge
+                    large
+                    medium
+                    color
+                  }
+                }
+              }
+              popular: Page(page: 1, perPage: ${'$'}perPage) {
+                media(type: MANGA, sort: POPULARITY_DESC) {
+                  id
+                  idMal
+                  description(asHtml: false)
+                  format
+                  chapters
+                  volumes
+                  status
+                  bannerImage
+                  isAdult
+                  synonyms
+                  genres
+                  title {
+                    romaji
+                    english
+                    native
+                    userPreferred
+                  }
+                  coverImage {
+                    extraLarge
+                    large
+                    medium
+                    color
+                  }
+                }
+              }
+              topRated: Page(page: 1, perPage: ${'$'}perPage) {
+                media(type: MANGA, sort: SCORE_DESC) {
+                  id
+                  idMal
+                  description(asHtml: false)
+                  format
+                  chapters
+                  volumes
+                  status
+                  bannerImage
+                  isAdult
+                  synonyms
+                  genres
+                  title {
+                    romaji
+                    english
+                    native
+                    userPreferred
+                  }
+                  coverImage {
+                    extraLarge
+                    large
+                    medium
+                    color
+                  }
+                }
+              }
+              recentlyUpdated: Page(page: 1, perPage: ${'$'}perPage) {
+                media(type: MANGA, sort: UPDATED_AT_DESC) {
+                  id
+                  idMal
+                  description(asHtml: false)
+                  format
+                  chapters
+                  volumes
+                  status
+                  bannerImage
+                  isAdult
+                  synonyms
+                  genres
+                  title {
+                    romaji
+                    english
+                    native
+                    userPreferred
+                  }
+                  coverImage {
+                    extraLarge
+                    large
+                    medium
+                    color
+                  }
+                }
+              }
+            }
+        """
+
+        const val NOVEL_CATALOGS_QUERY = """
+            query NovelCatalogs(${'$'}perPage: Int) {
+              trending: Page(page: 1, perPage: ${'$'}perPage) {
+                media(type: MANGA, format_in: [NOVEL], sort: TRENDING_DESC) {
+                  id
+                  idMal
+                  description(asHtml: false)
+                  format
+                  chapters
+                  volumes
+                  status
+                  bannerImage
+                  isAdult
+                  synonyms
+                  genres
+                  title {
+                    romaji
+                    english
+                    native
+                    userPreferred
+                  }
+                  coverImage {
+                    extraLarge
+                    large
+                    medium
+                    color
+                  }
+                }
+              }
+              popular: Page(page: 1, perPage: ${'$'}perPage) {
+                media(type: MANGA, format_in: [NOVEL], sort: POPULARITY_DESC) {
+                  id
+                  idMal
+                  description(asHtml: false)
+                  format
+                  chapters
+                  volumes
+                  status
+                  bannerImage
+                  isAdult
+                  synonyms
+                  genres
+                  title {
+                    romaji
+                    english
+                    native
+                    userPreferred
+                  }
+                  coverImage {
+                    extraLarge
+                    large
+                    medium
+                    color
+                  }
+                }
+              }
+              topRated: Page(page: 1, perPage: ${'$'}perPage) {
+                media(type: MANGA, format_in: [NOVEL], sort: SCORE_DESC) {
+                  id
+                  idMal
+                  description(asHtml: false)
+                  format
+                  chapters
+                  volumes
+                  status
+                  bannerImage
+                  isAdult
+                  synonyms
+                  genres
+                  title {
+                    romaji
+                    english
+                    native
+                    userPreferred
+                  }
+                  coverImage {
+                    extraLarge
+                    large
+                    medium
+                    color
+                  }
+                }
+              }
+              recentlyUpdated: Page(page: 1, perPage: ${'$'}perPage) {
+                media(type: MANGA, format_in: [NOVEL], sort: UPDATED_AT_DESC) {
+                  id
+                  idMal
+                  description(asHtml: false)
+                  format
+                  chapters
+                  volumes
+                  status
+                  bannerImage
+                  isAdult
+                  synonyms
+                  genres
+                  title {
+                    romaji
+                    english
+                    native
+                    userPreferred
+                  }
+                  coverImage {
+                    extraLarge
+                    large
+                    medium
+                    color
                   }
                 }
               }

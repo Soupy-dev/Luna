@@ -123,13 +123,13 @@ private fun DownloadSnapshot.toUiState(
         heroImageUrl = first?.backdropUrl ?: first?.imageUrl,
         heroSupportingText = when {
             items.isEmpty() ->
-                "Android now persists download queue metadata so the real downloader can slot into the same user-facing flow."
+                "Android persists offline queue metadata and can save direct streams once a playable source is resolved."
             downloadingCount > 0 ->
-                "Android is saving direct streams into app-private storage. HLS packaging still needs the segment worker."
+                "Android is saving direct streams or packaging HLS segments into app-private storage."
             completedCount > 0 ->
                 "Completed direct downloads now survive app restarts with local file metadata."
             else ->
-                "These entries keep offline flow state real while source resolution and HLS transfer plumbing land."
+                "These entries keep offline flow state real while unsupported source types wait for alternate-player or torrent support."
         },
         metrics = listOf(
             DownloadMetric(
@@ -150,7 +150,7 @@ private fun DownloadSnapshot.toUiState(
             DownloadMetric(
                 label = "Done",
                 value = completedCount.toString(),
-                supportingText = "Marked complete to model the future offline endpoint.",
+                supportingText = "Offline files with local metadata.",
             ),
         ),
         items = items.map { record ->

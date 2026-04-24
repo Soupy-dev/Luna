@@ -170,6 +170,7 @@ class EclipseAppContainer(
     val mangaRepository: MangaRepository = MangaRepository(
         mangaStore = mangaStore,
         backupFileStore = backupFileStore,
+        aniListService = aniListService,
     )
 }
 

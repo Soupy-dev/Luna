@@ -1,7 +1,10 @@
 package dev.soupy.eclipse.android.core.network
 
 import java.net.URLEncoder
+import dev.soupy.eclipse.android.core.model.TMDBContentRatingsResponse
+import dev.soupy.eclipse.android.core.model.TMDBCreditsResponse
 import dev.soupy.eclipse.android.core.model.TMDBMovieDetail
+import dev.soupy.eclipse.android.core.model.TMDBReleaseDatesResponse
 import dev.soupy.eclipse.android.core.model.TMDBSearchResponse
 import dev.soupy.eclipse.android.core.model.TMDBSearchResult
 import dev.soupy.eclipse.android.core.model.TMDBSeasonDetail
@@ -38,6 +41,28 @@ class TmdbService(
 
     suspend fun movieDetail(movieId: Int): NetworkResult<TMDBMovieDetail> = decode {
         httpClient.get("$baseUrl/movie/$movieId?api_key=$apiKey&language=$language&append_to_response=external_ids")
+    }
+
+    suspend fun movieCredits(movieId: Int): NetworkResult<TMDBCreditsResponse> = decode {
+        httpClient.get("$baseUrl/movie/$movieId/credits?api_key=$apiKey&language=$language")
+    }
+
+    suspend fun tvCredits(showId: Int): NetworkResult<TMDBCreditsResponse> = decode {
+        httpClient.get("$baseUrl/tv/$showId/credits?api_key=$apiKey&language=$language")
+    }
+
+    suspend fun movieRecommendations(movieId: Int, page: Int = 1): NetworkResult<List<TMDBSearchResult>> =
+        decodeResults("$baseUrl/movie/$movieId/recommendations?api_key=$apiKey&language=$language&page=$page")
+
+    suspend fun tvRecommendations(showId: Int, page: Int = 1): NetworkResult<List<TMDBSearchResult>> =
+        decodeResults("$baseUrl/tv/$showId/recommendations?api_key=$apiKey&language=$language&page=$page")
+
+    suspend fun movieReleaseDates(movieId: Int): NetworkResult<TMDBReleaseDatesResponse> = decode {
+        httpClient.get("$baseUrl/movie/$movieId/release_dates?api_key=$apiKey")
+    }
+
+    suspend fun tvContentRatings(showId: Int): NetworkResult<TMDBContentRatingsResponse> = decode {
+        httpClient.get("$baseUrl/tv/$showId/content_ratings?api_key=$apiKey")
     }
 
     suspend fun trendingAll(page: Int = 1): NetworkResult<List<TMDBSearchResult>> =

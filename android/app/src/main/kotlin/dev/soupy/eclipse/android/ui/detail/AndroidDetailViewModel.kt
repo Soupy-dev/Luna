@@ -15,9 +15,11 @@ import dev.soupy.eclipse.android.data.EpisodeProgressDraft
 import dev.soupy.eclipse.android.data.LibraryItemDraft
 import dev.soupy.eclipse.android.data.MovieProgressDraft
 import dev.soupy.eclipse.android.data.ProgressRepository
+import dev.soupy.eclipse.android.data.RatingsRepository
 import dev.soupy.eclipse.android.data.StreamResolutionRepository
 import dev.soupy.eclipse.android.data.StreamEpisodeSelection
 import dev.soupy.eclipse.android.core.model.DetailTarget
+import dev.soupy.eclipse.android.feature.detail.DetailCastRow
 import dev.soupy.eclipse.android.feature.detail.DetailEpisodeRow
 import dev.soupy.eclipse.android.feature.detail.DetailScreenState
 import dev.soupy.eclipse.android.feature.detail.DetailStreamRow
@@ -27,15 +29,20 @@ class AndroidDetailViewModel(
     private val repository: DetailRepository,
     private val streamResolutionRepository: StreamResolutionRepository,
     private val progressRepository: ProgressRepository,
+    private val ratingsRepository: RatingsRepository,
 ) : ViewModel() {
     private val _state = MutableStateFlow(DetailScreenState())
     val state: StateFlow<DetailScreenState> = _state.asStateFlow()
 
     private var currentTarget: DetailTarget? = null
+    private var currentProgressTarget: DetailTarget? = null
+    private var currentRatingTmdbId: Int? = null
 
     fun load(target: DetailTarget?) {
         if (target == null) {
             currentTarget = null
+            currentProgressTarget = null
+            currentRatingTmdbId = null
             _state.value = DetailScreenState()
             return
         }
@@ -47,11 +54,19 @@ class AndroidDetailViewModel(
         currentTarget = target
         viewModelScope.launch {
             _state.value = DetailScreenState(hasSelection = true, isLoading = true)
-            repository.load(target)
+            val result = repository.load(target)
+            result
                 .onSuccess { content ->
-                    _state.value = content.toUiState()
+                    currentProgressTarget = content.progressTarget ?: target
+                    currentRatingTmdbId = (currentProgressTarget ?: target).tmdbRatingId()
+                    val rating = currentRatingTmdbId?.let { id ->
+                        ratingsRepository.loadSnapshot().getOrNull()?.ratings?.get(id.toString())
+                    }
+                    _state.value = content.toUiState(userRating = rating)
                 }
                 .onFailure { error ->
+                    currentProgressTarget = null
+                    currentRatingTmdbId = null
                     _state.update {
                         it.copy(
                             hasSelection = true,
@@ -60,6 +75,86 @@ class AndroidDetailViewModel(
                         )
                     }
                 }
+        }
+    }
+
+    fun setUserRating(rating: Int) {
+        val tmdbId = currentRatingTmdbId ?: return markUnsupportedRating()
+        viewModelScope.launch {
+            ratingsRepository.setRating(tmdbId, rating)
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            userRating = rating.coerceIn(1, 5),
+                            streamStatusMessage = "Saved rating ${rating.coerceIn(1, 5)}/5.",
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(streamStatusMessage = error.message ?: "Could not save rating.")
+                    }
+                }
+        }
+    }
+
+    fun clearUserRating() {
+        val tmdbId = currentRatingTmdbId ?: return markUnsupportedRating()
+        viewModelScope.launch {
+            ratingsRepository.removeRating(tmdbId)
+                .onSuccess {
+                    _state.update {
+                        it.copy(userRating = null, streamStatusMessage = "Removed your rating.")
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(streamStatusMessage = error.message ?: "Could not remove rating.")
+                    }
+                }
+        }
+    }
+
+    fun markCurrentWatched() {
+        markCurrent(watched = true)
+    }
+
+    fun markCurrentUnwatched() {
+        markCurrent(watched = false)
+    }
+
+    fun markEpisodeWatched(episodeId: String) {
+        markEpisode(episodeId = episodeId, watched = true)
+    }
+
+    fun markEpisodeUnwatched(episodeId: String) {
+        markEpisode(episodeId = episodeId, watched = false)
+    }
+
+    fun markPreviousEpisodesWatched(episodeId: String) {
+        val target = currentProgressTarget as? DetailTarget.TmdbShow ?: return markUnsupportedProgress()
+        val episode = state.value.episodes.firstOrNull { it.id == episodeId } ?: return
+        val seasonNumber = episode.seasonNumber ?: return
+        val episodeNumber = episode.episodeNumber ?: return
+        if (episodeNumber <= 1) {
+            _state.update { it.copy(streamStatusMessage = "There are no previous episodes in this season.") }
+            return
+        }
+        viewModelScope.launch {
+            progressRepository.markPreviousEpisodesWatched(
+                showId = target.id,
+                seasonNumber = seasonNumber,
+                throughEpisodeExclusive = episodeNumber,
+                watched = true,
+            ).onSuccess {
+                _state.update {
+                    it.copy(streamStatusMessage = "Marked previous episodes watched through S${seasonNumber}E${episodeNumber - 1}.")
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(streamStatusMessage = error.message ?: "Could not mark previous episodes watched.")
+                }
+            }
         }
     }
 
@@ -145,7 +240,7 @@ class AndroidDetailViewModel(
         durationMs: Long,
         isFinished: Boolean,
     ): ContinueWatchingDraft? {
-        val target = currentTarget ?: return null
+        val target = currentProgressTarget ?: currentTarget ?: return null
         val snapshot = state.value
         if (snapshot.title.isBlank() || durationMs <= 0L) return null
 
@@ -295,9 +390,102 @@ class AndroidDetailViewModel(
             is DetailTarget.AniListMediaTarget -> Unit
         }
     }
+
+    private fun markCurrent(watched: Boolean) {
+        when (val target = currentProgressTarget ?: currentTarget) {
+            is DetailTarget.TmdbMovie -> {
+                viewModelScope.launch {
+                    progressRepository.markMovieWatched(target.id, watched)
+                        .onSuccess {
+                            _state.update {
+                                it.copy(streamStatusMessage = if (watched) "Marked movie watched." else "Marked movie unwatched.")
+                            }
+                        }
+                        .onFailure { error ->
+                            _state.update {
+                                it.copy(streamStatusMessage = error.message ?: "Could not update movie progress.")
+                            }
+                        }
+                }
+            }
+            is DetailTarget.TmdbShow -> markLoadedShowEpisodes(target.id, watched)
+            is DetailTarget.AniListMediaTarget,
+            null -> markUnsupportedProgress()
+        }
+    }
+
+    private fun markLoadedShowEpisodes(showId: Int, watched: Boolean) {
+        val episodes = state.value.episodes.filter {
+            it.seasonNumber != null && it.episodeNumber != null
+        }
+        if (episodes.isEmpty()) {
+            markUnsupportedProgress()
+            return
+        }
+        viewModelScope.launch {
+            episodes.forEach { episode ->
+                progressRepository.markEpisodeWatched(
+                    showId = showId,
+                    seasonNumber = episode.seasonNumber ?: return@forEach,
+                    episodeNumber = episode.episodeNumber ?: return@forEach,
+                    watched = watched,
+                )
+            }
+            _state.update {
+                it.copy(
+                    streamStatusMessage = if (watched) {
+                        "Marked ${episodes.size} loaded episodes watched."
+                    } else {
+                        "Marked ${episodes.size} loaded episodes unwatched."
+                    },
+                )
+            }
+        }
+    }
+
+    private fun markEpisode(episodeId: String, watched: Boolean) {
+        val target = currentProgressTarget as? DetailTarget.TmdbShow ?: return markUnsupportedProgress()
+        val episode = state.value.episodes.firstOrNull { it.id == episodeId } ?: return
+        val seasonNumber = episode.seasonNumber ?: return
+        val episodeNumber = episode.episodeNumber ?: return
+        viewModelScope.launch {
+            progressRepository.markEpisodeWatched(
+                showId = target.id,
+                seasonNumber = seasonNumber,
+                episodeNumber = episodeNumber,
+                watched = watched,
+            ).onSuccess {
+                _state.update {
+                    it.copy(
+                        streamStatusMessage = if (watched) {
+                            "Marked S${seasonNumber}E${episodeNumber} watched."
+                        } else {
+                            "Marked S${seasonNumber}E${episodeNumber} unwatched."
+                        },
+                    )
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(streamStatusMessage = error.message ?: "Could not update episode progress.")
+                }
+            }
+        }
+    }
+
+    private fun markUnsupportedProgress() {
+        _state.update {
+            it.copy(streamStatusMessage = "Progress actions need a TMDB movie or mapped TMDB series.")
+        }
+    }
+
+    private fun markUnsupportedRating() {
+        _state.update {
+            it.copy(streamStatusMessage = "Ratings need a TMDB movie or mapped TMDB series.")
+        }
+    }
 }
 
-private fun DetailContent.toUiState(): DetailScreenState = DetailScreenState(
+private fun DetailContent.toUiState(userRating: Int?): DetailScreenState = DetailScreenState(
     hasSelection = true,
     isLoading = false,
     title = title,
@@ -306,6 +494,17 @@ private fun DetailContent.toUiState(): DetailScreenState = DetailScreenState(
     posterUrl = posterUrl,
     backdropUrl = backdropUrl,
     metadataChips = metadataChips,
+    contentRating = contentRating,
+    userRating = userRating,
+    cast = cast.map {
+        DetailCastRow(
+            id = it.id,
+            name = it.name,
+            role = it.role,
+            imageUrl = it.imageUrl,
+        )
+    },
+    recommendations = recommendations,
     episodesTitle = episodesTitle,
     episodes = episodes.map {
         DetailEpisodeRow(
@@ -316,9 +515,16 @@ private fun DetailContent.toUiState(): DetailScreenState = DetailScreenState(
             overview = it.overview,
             seasonNumber = it.seasonNumber,
             episodeNumber = it.episodeNumber,
+            runtimeMinutes = it.runtimeMinutes,
         )
     },
 )
+
+private fun DetailTarget.tmdbRatingId(): Int? = when (this) {
+    is DetailTarget.TmdbMovie -> id
+    is DetailTarget.TmdbShow -> id
+    is DetailTarget.AniListMediaTarget -> null
+}
 
 private fun DetailEpisodeRow.toStreamEpisodeSelection(): StreamEpisodeSelection? {
     val season = seasonNumber ?: return null
