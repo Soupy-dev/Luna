@@ -47,8 +47,16 @@ class BackupDocumentTest {
               "preferredAnimeAudioLanguage": "jpn",
               "inAppPlayer": "VLC",
               "holdSpeedPlayer": 2.0,
+              "externalPlayer": "org.videolan.vlc",
+              "alwaysLandscape": true,
+              "vlcHeaderProxyEnabled": false,
+              "skip85sEnabled": true,
               "nextEpisodeThreshold": 0.9,
+              "subtitleForegroundColor": "#FFFFFF",
+              "subtitleStrokeColor": "#111111",
+              "subtitleStrokeWidth": 2.5,
               "subtitleFontSize": 34.0,
+              "subtitleVerticalOffset": -8.0,
               "showKanzen": true,
               "readerFontFamily": "Georgia",
               "collections": [
@@ -153,6 +161,15 @@ class BackupDocumentTest {
         assertEquals(InAppPlayer.VLC, document.payload.resolvedInAppPlayer)
         assertEquals(90, document.payload.nextEpisodeThresholdPercent())
         assertEquals(true, document.payload.enableSubtitlesByDefault)
+        assertEquals("org.videolan.vlc", document.payload.externalPlayer)
+        assertEquals(true, document.payload.alwaysLandscape)
+        assertEquals(false, document.payload.vlcHeaderProxyEnabled)
+        assertEquals(true, document.payload.skip85sEnabled)
+        assertEquals("#FFFFFF", document.payload.subtitleForegroundColor)
+        assertEquals("#111111", document.payload.subtitleStrokeColor)
+        assertEquals(2.5, document.payload.subtitleStrokeWidth)
+        assertEquals(34.0, document.payload.subtitleFontSize)
+        assertEquals(-8.0, document.payload.subtitleVerticalOffset)
         assertEquals("Georgia", document.payload.readerFontFamily)
         assertEquals(1, document.payload.collections.single().items.size)
         assertTrue(document.payload.progressData.jsonObject.containsKey("movieProgress"))

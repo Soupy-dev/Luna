@@ -116,6 +116,7 @@ fun EclipseAndroidApp() {
             catalogRepository = appContainer.catalogRepository,
             cacheRepository = appContainer.cacheRepository,
             loggerRepository = appContainer.loggerRepository,
+            trackerRepository = appContainer.trackerRepository,
         )
     }
     val mangaViewModel = rememberFeatureViewModel("manga") {
@@ -136,6 +137,18 @@ fun EclipseAndroidApp() {
     val mangaState by mangaViewModel.state.collectAsState()
     val novelState by novelViewModel.state.collectAsState()
     val playbackSettings = PlaybackSettingsSnapshot(
+        enableSubtitlesByDefault = settingsState.enableSubtitlesByDefault,
+        defaultSubtitleLanguage = settingsState.defaultSubtitleLanguage,
+        preferredAnimeAudioLanguage = settingsState.preferredAnimeAudioLanguage,
+        subtitleForegroundColor = settingsState.subtitleForegroundColor,
+        subtitleStrokeColor = settingsState.subtitleStrokeColor,
+        subtitleFontSize = settingsState.subtitleFontSize,
+        subtitleStrokeWidth = settingsState.subtitleStrokeWidth,
+        subtitleVerticalOffset = settingsState.subtitleVerticalOffset,
+        holdSpeed = settingsState.holdSpeedPlayer,
+        externalPlayer = settingsState.externalPlayer,
+        alwaysLandscape = settingsState.alwaysLandscape,
+        vlcHeaderProxyEnabled = settingsState.vlcHeaderProxyEnabled,
         aniSkipAutoSkip = settingsState.aniSkipAutoSkip,
         skip85sEnabled = settingsState.skip85sEnabled,
         showNextEpisodeButton = settingsState.showNextEpisodeButton,
@@ -239,6 +252,7 @@ fun EclipseAndroidApp() {
                             onMarkEpisodeUnwatched = detailViewModel::markEpisodeUnwatched,
                             onMarkPreviousEpisodesWatched = detailViewModel::markPreviousEpisodesWatched,
                             onPlayStream = detailViewModel::playResolvedStream,
+                            onPlayNextEpisode = detailViewModel::playNextEpisode,
                             onSelectRecommendation = { item ->
                                 selectedDetailTarget = item.detailTarget
                                 navController.navigate("detail")
@@ -315,6 +329,18 @@ fun EclipseAndroidApp() {
                             onShowNextEpisodeChanged = settingsViewModel::setShowNextEpisodeButton,
                             onNextEpisodeThresholdChanged = settingsViewModel::setNextEpisodeThreshold,
                             onPlayerSelected = settingsViewModel::setInAppPlayer,
+                            onEnableSubtitlesByDefaultChanged = settingsViewModel::setEnableSubtitlesByDefault,
+                            onDefaultSubtitleLanguageChanged = settingsViewModel::setDefaultSubtitleLanguage,
+                            onPreferredAnimeAudioLanguageChanged = settingsViewModel::setPreferredAnimeAudioLanguage,
+                            onHoldSpeedChanged = settingsViewModel::setHoldSpeed,
+                            onExternalPlayerChanged = settingsViewModel::setExternalPlayer,
+                            onAlwaysLandscapeChanged = settingsViewModel::setAlwaysLandscape,
+                            onVlcHeaderProxyChanged = settingsViewModel::setVlcHeaderProxyEnabled,
+                            onSubtitleForegroundColorChanged = settingsViewModel::setSubtitleForegroundColor,
+                            onSubtitleStrokeColorChanged = settingsViewModel::setSubtitleStrokeColor,
+                            onSubtitleStrokeWidthChanged = settingsViewModel::setSubtitleStrokeWidth,
+                            onSubtitleFontSizeChanged = settingsViewModel::setSubtitleFontSize,
+                            onSubtitleVerticalOffsetChanged = settingsViewModel::setSubtitleVerticalOffset,
                             onAniSkipAutoSkipChanged = settingsViewModel::setAniSkipAutoSkip,
                             onSkip85sChanged = settingsViewModel::setSkip85sEnabled,
                             onCatalogEnabledChanged = settingsViewModel::setCatalogEnabled,
@@ -329,6 +355,9 @@ fun EclipseAndroidApp() {
                             onReaderLineSpacingChanged = settingsViewModel::setReaderLineSpacing,
                             onReaderMarginChanged = settingsViewModel::setReaderMargin,
                             onReaderAlignmentChanged = settingsViewModel::setReaderTextAlignment,
+                            onTrackerManualConnect = settingsViewModel::saveTrackerAccount,
+                            onTrackerSyncEnabledChanged = settingsViewModel::setTrackerSyncEnabled,
+                            onTrackerDisconnect = settingsViewModel::disconnectTracker,
                             onExportBackup = settingsViewModel::exportBackup,
                             onImportBackup = settingsViewModel::importBackup,
                         )

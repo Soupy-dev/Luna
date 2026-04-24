@@ -10,10 +10,13 @@ import dev.soupy.eclipse.android.data.BackupStatusSnapshot
 import dev.soupy.eclipse.android.data.CacheRepository
 import dev.soupy.eclipse.android.data.CatalogRepository
 import dev.soupy.eclipse.android.data.LoggerRepository
+import dev.soupy.eclipse.android.data.TrackerAccountDraft
+import dev.soupy.eclipse.android.data.TrackerRepository
 import dev.soupy.eclipse.android.feature.settings.CatalogSettingsRow
 import dev.soupy.eclipse.android.feature.settings.LogSettingsRow
 import dev.soupy.eclipse.android.feature.settings.SettingsScreenState
 import dev.soupy.eclipse.android.feature.settings.StorageMetricRow
+import dev.soupy.eclipse.android.feature.settings.TrackerSettingsRow
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -29,6 +32,7 @@ class AndroidSettingsViewModel(
     private val catalogRepository: CatalogRepository,
     private val cacheRepository: CacheRepository,
     private val loggerRepository: LoggerRepository,
+    private val trackerRepository: TrackerRepository,
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsScreenState())
     val state: StateFlow<SettingsScreenState> = _state.asStateFlow()
@@ -43,6 +47,18 @@ class AndroidSettingsViewModel(
                     showNextEpisodeButton = settings.showNextEpisodeButton,
                     nextEpisodeThreshold = settings.nextEpisodeThreshold,
                     inAppPlayer = settings.inAppPlayer,
+                    enableSubtitlesByDefault = settings.enableSubtitlesByDefault,
+                    defaultSubtitleLanguage = settings.defaultSubtitleLanguage,
+                    preferredAnimeAudioLanguage = settings.preferredAnimeAudioLanguage,
+                    holdSpeedPlayer = settings.holdSpeedPlayer,
+                    externalPlayer = settings.externalPlayer,
+                    alwaysLandscape = settings.alwaysLandscape,
+                    vlcHeaderProxyEnabled = settings.vlcHeaderProxyEnabled,
+                    subtitleForegroundColor = settings.subtitleForegroundColor,
+                    subtitleStrokeColor = settings.subtitleStrokeColor,
+                    subtitleStrokeWidth = settings.subtitleStrokeWidth,
+                    subtitleFontSize = settings.subtitleFontSize,
+                    subtitleVerticalOffset = settings.subtitleVerticalOffset,
                     aniSkipAutoSkip = settings.aniSkipAutoSkip,
                     skip85sEnabled = settings.skip85sEnabled,
                     readingMode = settings.readingMode,
@@ -57,6 +73,7 @@ class AndroidSettingsViewModel(
         refreshCatalogs()
         refreshStorage()
         refreshLogs()
+        refreshTrackers()
     }
 
     fun setAutoModeEnabled(enabled: Boolean) {
@@ -114,6 +131,192 @@ class AndroidSettingsViewModel(
             settingsStore.updateSkipBehavior(
                 aniSkipAutoSkip = current.aniSkipAutoSkip,
                 skip85sEnabled = enabled,
+            )
+        }
+    }
+
+    fun setEnableSubtitlesByDefault(enabled: Boolean) {
+        val current = _state.value
+        updatePlayerPreferences(
+            enableSubtitlesByDefault = enabled,
+            defaultSubtitleLanguage = current.defaultSubtitleLanguage,
+            preferredAnimeAudioLanguage = current.preferredAnimeAudioLanguage,
+            holdSpeedPlayer = current.holdSpeedPlayer,
+            externalPlayer = current.externalPlayer,
+            alwaysLandscape = current.alwaysLandscape,
+            vlcHeaderProxyEnabled = current.vlcHeaderProxyEnabled,
+        )
+    }
+
+    fun setDefaultSubtitleLanguage(language: String) {
+        val current = _state.value
+        updatePlayerPreferences(
+            enableSubtitlesByDefault = current.enableSubtitlesByDefault,
+            defaultSubtitleLanguage = language,
+            preferredAnimeAudioLanguage = current.preferredAnimeAudioLanguage,
+            holdSpeedPlayer = current.holdSpeedPlayer,
+            externalPlayer = current.externalPlayer,
+            alwaysLandscape = current.alwaysLandscape,
+            vlcHeaderProxyEnabled = current.vlcHeaderProxyEnabled,
+        )
+    }
+
+    fun setPreferredAnimeAudioLanguage(language: String) {
+        val current = _state.value
+        updatePlayerPreferences(
+            enableSubtitlesByDefault = current.enableSubtitlesByDefault,
+            defaultSubtitleLanguage = current.defaultSubtitleLanguage,
+            preferredAnimeAudioLanguage = language,
+            holdSpeedPlayer = current.holdSpeedPlayer,
+            externalPlayer = current.externalPlayer,
+            alwaysLandscape = current.alwaysLandscape,
+            vlcHeaderProxyEnabled = current.vlcHeaderProxyEnabled,
+        )
+    }
+
+    fun setHoldSpeed(value: Double) {
+        val current = _state.value
+        updatePlayerPreferences(
+            enableSubtitlesByDefault = current.enableSubtitlesByDefault,
+            defaultSubtitleLanguage = current.defaultSubtitleLanguage,
+            preferredAnimeAudioLanguage = current.preferredAnimeAudioLanguage,
+            holdSpeedPlayer = value,
+            externalPlayer = current.externalPlayer,
+            alwaysLandscape = current.alwaysLandscape,
+            vlcHeaderProxyEnabled = current.vlcHeaderProxyEnabled,
+        )
+    }
+
+    fun setExternalPlayer(value: String) {
+        val current = _state.value
+        updatePlayerPreferences(
+            enableSubtitlesByDefault = current.enableSubtitlesByDefault,
+            defaultSubtitleLanguage = current.defaultSubtitleLanguage,
+            preferredAnimeAudioLanguage = current.preferredAnimeAudioLanguage,
+            holdSpeedPlayer = current.holdSpeedPlayer,
+            externalPlayer = value,
+            alwaysLandscape = current.alwaysLandscape,
+            vlcHeaderProxyEnabled = current.vlcHeaderProxyEnabled,
+        )
+    }
+
+    fun setAlwaysLandscape(enabled: Boolean) {
+        val current = _state.value
+        updatePlayerPreferences(
+            enableSubtitlesByDefault = current.enableSubtitlesByDefault,
+            defaultSubtitleLanguage = current.defaultSubtitleLanguage,
+            preferredAnimeAudioLanguage = current.preferredAnimeAudioLanguage,
+            holdSpeedPlayer = current.holdSpeedPlayer,
+            externalPlayer = current.externalPlayer,
+            alwaysLandscape = enabled,
+            vlcHeaderProxyEnabled = current.vlcHeaderProxyEnabled,
+        )
+    }
+
+    fun setVlcHeaderProxyEnabled(enabled: Boolean) {
+        val current = _state.value
+        updatePlayerPreferences(
+            enableSubtitlesByDefault = current.enableSubtitlesByDefault,
+            defaultSubtitleLanguage = current.defaultSubtitleLanguage,
+            preferredAnimeAudioLanguage = current.preferredAnimeAudioLanguage,
+            holdSpeedPlayer = current.holdSpeedPlayer,
+            externalPlayer = current.externalPlayer,
+            alwaysLandscape = current.alwaysLandscape,
+            vlcHeaderProxyEnabled = enabled,
+        )
+    }
+
+    fun setSubtitleForegroundColor(value: String?) {
+        val current = _state.value
+        updateSubtitleStyle(
+            foregroundColor = value,
+            strokeColor = current.subtitleStrokeColor,
+            strokeWidth = current.subtitleStrokeWidth,
+            fontSize = current.subtitleFontSize,
+            verticalOffset = current.subtitleVerticalOffset,
+        )
+    }
+
+    fun setSubtitleStrokeColor(value: String?) {
+        val current = _state.value
+        updateSubtitleStyle(
+            foregroundColor = current.subtitleForegroundColor,
+            strokeColor = value,
+            strokeWidth = current.subtitleStrokeWidth,
+            fontSize = current.subtitleFontSize,
+            verticalOffset = current.subtitleVerticalOffset,
+        )
+    }
+
+    fun setSubtitleStrokeWidth(value: Double) {
+        val current = _state.value
+        updateSubtitleStyle(
+            foregroundColor = current.subtitleForegroundColor,
+            strokeColor = current.subtitleStrokeColor,
+            strokeWidth = value,
+            fontSize = current.subtitleFontSize,
+            verticalOffset = current.subtitleVerticalOffset,
+        )
+    }
+
+    fun setSubtitleFontSize(value: Double) {
+        val current = _state.value
+        updateSubtitleStyle(
+            foregroundColor = current.subtitleForegroundColor,
+            strokeColor = current.subtitleStrokeColor,
+            strokeWidth = current.subtitleStrokeWidth,
+            fontSize = value,
+            verticalOffset = current.subtitleVerticalOffset,
+        )
+    }
+
+    fun setSubtitleVerticalOffset(value: Double) {
+        val current = _state.value
+        updateSubtitleStyle(
+            foregroundColor = current.subtitleForegroundColor,
+            strokeColor = current.subtitleStrokeColor,
+            strokeWidth = current.subtitleStrokeWidth,
+            fontSize = current.subtitleFontSize,
+            verticalOffset = value,
+        )
+    }
+
+    private fun updatePlayerPreferences(
+        enableSubtitlesByDefault: Boolean,
+        defaultSubtitleLanguage: String,
+        preferredAnimeAudioLanguage: String,
+        holdSpeedPlayer: Double,
+        externalPlayer: String,
+        alwaysLandscape: Boolean,
+        vlcHeaderProxyEnabled: Boolean,
+    ) {
+        viewModelScope.launch {
+            settingsStore.updatePlayerPreferences(
+                enableSubtitlesByDefault = enableSubtitlesByDefault,
+                defaultSubtitleLanguage = defaultSubtitleLanguage,
+                preferredAnimeAudioLanguage = preferredAnimeAudioLanguage,
+                holdSpeedPlayer = holdSpeedPlayer,
+                externalPlayer = externalPlayer,
+                alwaysLandscape = alwaysLandscape,
+                vlcHeaderProxyEnabled = vlcHeaderProxyEnabled,
+            )
+        }
+    }
+
+    private fun updateSubtitleStyle(
+        foregroundColor: String?,
+        strokeColor: String?,
+        strokeWidth: Double,
+        fontSize: Double,
+        verticalOffset: Double,
+    ) {
+        viewModelScope.launch {
+            settingsStore.updateSubtitleStyle(
+                foregroundColor = foregroundColor,
+                strokeColor = strokeColor,
+                strokeWidth = strokeWidth,
+                fontSize = fontSize,
+                verticalOffset = verticalOffset,
             )
         }
     }
@@ -303,6 +506,69 @@ class AndroidSettingsViewModel(
         }
     }
 
+    fun saveTrackerAccount(
+        service: String,
+        username: String,
+        token: String,
+    ) {
+        viewModelScope.launch {
+            trackerRepository.saveManualAccount(
+                TrackerAccountDraft(
+                    service = service,
+                    username = username,
+                    accessToken = token,
+                ),
+            ).onSuccess { snapshot ->
+                _state.value = _state.value.withTrackerState(
+                    snapshot = snapshot,
+                    status = "Saved ${service.trim().ifBlank { "tracker" }} account.",
+                )
+                loggerRepository.log("Trackers", "Saved manual tracker account for ${service.trim().ifBlank { "unknown provider" }}.")
+                refreshLogs()
+            }.onFailure { error ->
+                _state.value = _state.value.copy(
+                    trackerStatus = error.message ?: "Android could not save tracker account.",
+                )
+            }
+        }
+    }
+
+    fun setTrackerSyncEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            trackerRepository.setSyncEnabled(enabled)
+                .onSuccess { snapshot ->
+                    _state.value = _state.value.withTrackerState(
+                        snapshot = snapshot,
+                        status = if (enabled) "Tracker sync enabled." else "Tracker sync disabled.",
+                    )
+                }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(
+                        trackerStatus = error.message ?: "Android could not update tracker sync.",
+                    )
+                }
+        }
+    }
+
+    fun disconnectTracker(service: String) {
+        viewModelScope.launch {
+            trackerRepository.disconnect(service)
+                .onSuccess { snapshot ->
+                    _state.value = _state.value.withTrackerState(
+                        snapshot = snapshot,
+                        status = "Disconnected $service.",
+                    )
+                    loggerRepository.log("Trackers", "Disconnected tracker account for $service.")
+                    refreshLogs()
+                }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(
+                        trackerStatus = error.message ?: "Android could not disconnect tracker.",
+                    )
+                }
+        }
+    }
+
     private fun moveCatalog(id: String, direction: Int) {
         viewModelScope.launch {
             catalogRepository.moveCatalog(id, direction)
@@ -335,6 +601,20 @@ class AndroidSettingsViewModel(
         }
     }
 
+    private fun refreshTrackers() {
+        viewModelScope.launch {
+            trackerRepository.loadSnapshot()
+                .onSuccess { snapshot ->
+                    _state.value = _state.value.withTrackerState(snapshot)
+                }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(
+                        trackerStatus = error.message ?: "Android could not load tracker state.",
+                    )
+                }
+        }
+    }
+
     private fun runBackupMutation(
         action: suspend () -> Result<BackupStatusSnapshot>,
     ) {
@@ -345,6 +625,7 @@ class AndroidSettingsViewModel(
                     _state.value = _state.value.copy(isBackupBusy = false)
                     applyBackupStatus(status)
                     refreshCatalogs()
+                    refreshTrackers()
                 }
                 .onFailure { error ->
                     _state.value = _state.value.copy(
@@ -375,6 +656,52 @@ private fun List<dev.soupy.eclipse.android.core.model.BackupCatalog>.toUiRows():
             enabled = catalog.isEnabled,
             order = catalog.order,
         )
+    }
+
+private fun SettingsScreenState.withTrackerState(
+    snapshot: dev.soupy.eclipse.android.core.model.TrackerStateSnapshot,
+    status: String? = null,
+): SettingsScreenState {
+    val rows = snapshot.accounts.map { account ->
+        TrackerSettingsRow(
+            service = account.service,
+            username = account.username,
+            tokenPreview = account.accessToken.toTokenPreview(),
+            isConnected = account.isConnected,
+        )
+    }.ifEmpty {
+        val provider = snapshot.provider
+        val token = snapshot.accessToken
+        if (!provider.isNullOrBlank() && !token.isNullOrBlank()) {
+            listOf(
+                TrackerSettingsRow(
+                    service = provider,
+                    username = snapshot.userName.orEmpty(),
+                    tokenPreview = token.toTokenPreview(),
+                    isConnected = true,
+                ),
+            )
+        } else {
+            emptyList()
+        }
+    }
+    val trackerStatus = status ?: when {
+        rows.isEmpty() -> "No tracker accounts connected yet."
+        snapshot.lastSyncDate != null -> "${rows.size} tracker account${if (rows.size == 1) "" else "s"} - last sync ${snapshot.lastSyncDate}"
+        else -> "${rows.size} tracker account${if (rows.size == 1) "" else "s"} connected."
+    }
+    return copy(
+        trackerSyncEnabled = snapshot.syncEnabled,
+        trackerRows = rows,
+        trackerStatus = trackerStatus,
+    )
+}
+
+private fun String.toTokenPreview(): String =
+    when {
+        isBlank() -> "No token"
+        length <= 8 -> "token saved"
+        else -> "${take(4)}...${takeLast(4)}"
     }
 
 private fun Long.toByteCountLabel(): String {

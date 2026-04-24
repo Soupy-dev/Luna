@@ -235,6 +235,20 @@ class AndroidDetailViewModel(
         }
     }
 
+    fun playNextEpisode() {
+        val nextEpisode = nextEpisodeAfterCurrent()
+        if (nextEpisode == null) {
+            _state.update { it.copy(streamStatusMessage = "No next episode is loaded yet.") }
+            return
+        }
+        val selection = nextEpisode.toStreamEpisodeSelection()
+        if (selection == null) {
+            _state.update { it.copy(streamStatusMessage = "Next episode metadata is not playable yet.") }
+            return
+        }
+        resolveStreamsForEpisode(selection)
+    }
+
     fun currentPlaybackProgressDraft(
         positionMs: Long,
         durationMs: Long,
@@ -482,6 +496,18 @@ class AndroidDetailViewModel(
         _state.update {
             it.copy(streamStatusMessage = "Ratings need a TMDB movie or mapped TMDB series.")
         }
+    }
+
+    private fun nextEpisodeAfterCurrent(): DetailEpisodeRow? {
+        val playableEpisodes = state.value.episodes.filter {
+            it.seasonNumber != null && it.episodeNumber != null
+        }
+        if (playableEpisodes.size < 2) return null
+        val currentIndex = state.value.selectedEpisodeId
+            ?.let { id -> playableEpisodes.indexOfFirst { it.id == id } }
+            ?.takeIf { it >= 0 }
+            ?: 0
+        return playableEpisodes.getOrNull(currentIndex + 1)
     }
 }
 

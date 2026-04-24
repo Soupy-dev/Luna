@@ -17,10 +17,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.soupy.eclipse.android.core.design.GlassPanel
@@ -37,6 +42,18 @@ data class SettingsScreenState(
     val showNextEpisodeButton: Boolean = true,
     val nextEpisodeThreshold: Int = 90,
     val inAppPlayer: InAppPlayer = InAppPlayer.NORMAL,
+    val enableSubtitlesByDefault: Boolean = false,
+    val defaultSubtitleLanguage: String = "eng",
+    val preferredAnimeAudioLanguage: String = "jpn",
+    val holdSpeedPlayer: Double = 2.0,
+    val externalPlayer: String = "none",
+    val alwaysLandscape: Boolean = false,
+    val vlcHeaderProxyEnabled: Boolean = true,
+    val subtitleForegroundColor: String? = null,
+    val subtitleStrokeColor: String? = null,
+    val subtitleStrokeWidth: Double = 1.0,
+    val subtitleFontSize: Double = 30.0,
+    val subtitleVerticalOffset: Double = -6.0,
     val aniSkipAutoSkip: Boolean = false,
     val skip85sEnabled: Boolean = false,
     val readingMode: Int = 2,
@@ -53,6 +70,9 @@ data class SettingsScreenState(
     val storageStatus: String = "Storage has not been measured yet.",
     val logRows: List<LogSettingsRow> = emptyList(),
     val loggerStatus: String = "No Android logs captured yet.",
+    val trackerSyncEnabled: Boolean = true,
+    val trackerRows: List<TrackerSettingsRow> = emptyList(),
+    val trackerStatus: String = "No tracker accounts connected yet.",
 )
 
 data class CatalogSettingsRow(
@@ -77,6 +97,13 @@ data class LogSettingsRow(
     val level: String,
 )
 
+data class TrackerSettingsRow(
+    val service: String,
+    val username: String,
+    val tokenPreview: String,
+    val isConnected: Boolean,
+)
+
 @Composable
 fun SettingsRoute(
     state: SettingsScreenState,
@@ -84,6 +111,18 @@ fun SettingsRoute(
     onShowNextEpisodeChanged: (Boolean) -> Unit,
     onNextEpisodeThresholdChanged: (Int) -> Unit,
     onPlayerSelected: (InAppPlayer) -> Unit,
+    onEnableSubtitlesByDefaultChanged: (Boolean) -> Unit,
+    onDefaultSubtitleLanguageChanged: (String) -> Unit,
+    onPreferredAnimeAudioLanguageChanged: (String) -> Unit,
+    onHoldSpeedChanged: (Double) -> Unit,
+    onExternalPlayerChanged: (String) -> Unit,
+    onAlwaysLandscapeChanged: (Boolean) -> Unit,
+    onVlcHeaderProxyChanged: (Boolean) -> Unit,
+    onSubtitleForegroundColorChanged: (String?) -> Unit,
+    onSubtitleStrokeColorChanged: (String?) -> Unit,
+    onSubtitleStrokeWidthChanged: (Double) -> Unit,
+    onSubtitleFontSizeChanged: (Double) -> Unit,
+    onSubtitleVerticalOffsetChanged: (Double) -> Unit,
     onAniSkipAutoSkipChanged: (Boolean) -> Unit,
     onSkip85sChanged: (Boolean) -> Unit,
     onCatalogEnabledChanged: (String, Boolean) -> Unit,
@@ -98,6 +137,9 @@ fun SettingsRoute(
     onReaderLineSpacingChanged: (Double) -> Unit,
     onReaderMarginChanged: (Double) -> Unit,
     onReaderAlignmentChanged: (String) -> Unit,
+    onTrackerManualConnect: (String, String, String) -> Unit,
+    onTrackerSyncEnabledChanged: (Boolean) -> Unit,
+    onTrackerDisconnect: (String) -> Unit,
     onExportBackup: (Uri) -> Unit,
     onImportBackup: (Uri) -> Unit,
 ) {
@@ -107,6 +149,9 @@ fun SettingsRoute(
     val importLauncher = rememberLauncherForActivityResult(OpenDocument()) { uri ->
         uri?.let(onImportBackup)
     }
+    var trackerService by rememberSaveable { mutableStateOf("AniList") }
+    var trackerUsername by rememberSaveable { mutableStateOf("") }
+    var trackerToken by rememberSaveable { mutableStateOf("") }
 
     LazyColumn(
         modifier = Modifier
@@ -183,6 +228,30 @@ fun SettingsRoute(
                     )
                 }
             }
+        }
+
+        item {
+            PlayerPreferencesCard(
+                state = state,
+                onEnableSubtitlesByDefaultChanged = onEnableSubtitlesByDefaultChanged,
+                onDefaultSubtitleLanguageChanged = onDefaultSubtitleLanguageChanged,
+                onPreferredAnimeAudioLanguageChanged = onPreferredAnimeAudioLanguageChanged,
+                onHoldSpeedChanged = onHoldSpeedChanged,
+                onExternalPlayerChanged = onExternalPlayerChanged,
+                onAlwaysLandscapeChanged = onAlwaysLandscapeChanged,
+                onVlcHeaderProxyChanged = onVlcHeaderProxyChanged,
+            )
+        }
+
+        item {
+            SubtitleSettingsCard(
+                state = state,
+                onSubtitleForegroundColorChanged = onSubtitleForegroundColorChanged,
+                onSubtitleStrokeColorChanged = onSubtitleStrokeColorChanged,
+                onSubtitleStrokeWidthChanged = onSubtitleStrokeWidthChanged,
+                onSubtitleFontSizeChanged = onSubtitleFontSizeChanged,
+                onSubtitleVerticalOffsetChanged = onSubtitleVerticalOffsetChanged,
+            )
         }
 
         item {
@@ -281,6 +350,31 @@ fun SettingsRoute(
 
         item {
             SectionHeading(
+                title = "Trackers",
+                subtitle = "AniList and Trakt account state restored from backups and persisted on Android.",
+            )
+        }
+
+        item {
+            TrackerSettingsCard(
+                state = state,
+                service = trackerService,
+                username = trackerUsername,
+                token = trackerToken,
+                onServiceChanged = { trackerService = it },
+                onUsernameChanged = { trackerUsername = it },
+                onTokenChanged = { trackerToken = it },
+                onConnect = {
+                    onTrackerManualConnect(trackerService, trackerUsername, trackerToken)
+                    trackerToken = ""
+                },
+                onSyncEnabledChanged = onTrackerSyncEnabledChanged,
+                onDisconnect = onTrackerDisconnect,
+            )
+        }
+
+        item {
+            SectionHeading(
                 title = "Catalogs",
                 subtitle = "Home rows follow the same enabled state and order that Luna stores in backups.",
             )
@@ -351,6 +445,126 @@ fun SettingsRoute(
 }
 
 @Composable
+private fun PlayerPreferencesCard(
+    state: SettingsScreenState,
+    onEnableSubtitlesByDefaultChanged: (Boolean) -> Unit,
+    onDefaultSubtitleLanguageChanged: (String) -> Unit,
+    onPreferredAnimeAudioLanguageChanged: (String) -> Unit,
+    onHoldSpeedChanged: (Double) -> Unit,
+    onExternalPlayerChanged: (String) -> Unit,
+    onAlwaysLandscapeChanged: (Boolean) -> Unit,
+    onVlcHeaderProxyChanged: (Boolean) -> Unit,
+) {
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(
+                text = "Player Defaults",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            SettingInlineToggle(
+                title = "Subtitles On By Default",
+                checked = state.enableSubtitlesByDefault,
+                onCheckedChange = onEnableSubtitlesByDefaultChanged,
+            )
+            OutlinedTextField(
+                value = state.defaultSubtitleLanguage,
+                onValueChange = onDefaultSubtitleLanguageChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Default Subtitle Language") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = state.preferredAnimeAudioLanguage,
+                onValueChange = onPreferredAnimeAudioLanguageChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Preferred Anime Audio") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = state.externalPlayer,
+                onValueChange = onExternalPlayerChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("External Player Package") },
+                singleLine = true,
+            )
+            ReaderValueSlider(
+                title = "Hold Speed",
+                valueLabel = "%.2fx".format(state.holdSpeedPlayer),
+                value = state.holdSpeedPlayer.toFloat(),
+                valueRange = 1.25f..3.0f,
+                onValueChange = { onHoldSpeedChanged(it.toDouble()) },
+            )
+            SettingInlineToggle(
+                title = "Always Landscape",
+                checked = state.alwaysLandscape,
+                onCheckedChange = onAlwaysLandscapeChanged,
+            )
+            SettingInlineToggle(
+                title = "VLC Header Proxy",
+                checked = state.vlcHeaderProxyEnabled,
+                onCheckedChange = onVlcHeaderProxyChanged,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SubtitleSettingsCard(
+    state: SettingsScreenState,
+    onSubtitleForegroundColorChanged: (String?) -> Unit,
+    onSubtitleStrokeColorChanged: (String?) -> Unit,
+    onSubtitleStrokeWidthChanged: (Double) -> Unit,
+    onSubtitleFontSizeChanged: (Double) -> Unit,
+    onSubtitleVerticalOffsetChanged: (Double) -> Unit,
+) {
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(
+                text = "Subtitle Style",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            OutlinedTextField(
+                value = state.subtitleForegroundColor.orEmpty(),
+                onValueChange = { onSubtitleForegroundColorChanged(it) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Text Color") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = state.subtitleStrokeColor.orEmpty(),
+                onValueChange = { onSubtitleStrokeColorChanged(it) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Outline Color") },
+                singleLine = true,
+            )
+            ReaderValueSlider(
+                title = "Font Size",
+                valueLabel = "${state.subtitleFontSize.toInt()} sp",
+                value = state.subtitleFontSize.toFloat(),
+                valueRange = 16f..54f,
+                onValueChange = { onSubtitleFontSizeChanged(it.toDouble()) },
+            )
+            ReaderValueSlider(
+                title = "Outline Width",
+                valueLabel = "%.1f".format(state.subtitleStrokeWidth),
+                value = state.subtitleStrokeWidth.toFloat(),
+                valueRange = 0f..8f,
+                onValueChange = { onSubtitleStrokeWidthChanged(it.toDouble()) },
+            )
+            ReaderValueSlider(
+                title = "Vertical Offset",
+                valueLabel = "%.0f".format(state.subtitleVerticalOffset),
+                value = state.subtitleVerticalOffset.toFloat(),
+                valueRange = -20f..20f,
+                onValueChange = { onSubtitleVerticalOffsetChanged(it.toDouble()) },
+            )
+        }
+    }
+}
+
+@Composable
 private fun ReaderSettingsCard(
     state: SettingsScreenState,
     onReadingModeChanged: (Int) -> Unit,
@@ -400,6 +614,121 @@ private fun ReaderSettingsCard(
                 selected = state.readerTextAlignment,
                 onSelected = onReaderAlignmentChanged,
             )
+        }
+    }
+}
+
+@Composable
+private fun TrackerSettingsCard(
+    state: SettingsScreenState,
+    service: String,
+    username: String,
+    token: String,
+    onServiceChanged: (String) -> Unit,
+    onUsernameChanged: (String) -> Unit,
+    onTokenChanged: (String) -> Unit,
+    onConnect: () -> Unit,
+    onSyncEnabledChanged: (Boolean) -> Unit,
+    onDisconnect: (String) -> Unit,
+) {
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "Sync Progress",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = state.trackerStatus,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.76f),
+                    )
+                }
+                Switch(
+                    checked = state.trackerSyncEnabled,
+                    onCheckedChange = onSyncEnabledChanged,
+                )
+            }
+
+            OutlinedTextField(
+                value = service,
+                onValueChange = onServiceChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Provider") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = username,
+                onValueChange = onUsernameChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Username") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = token,
+                onValueChange = onTokenChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Token or PIN") },
+                singleLine = true,
+            )
+            Button(
+                onClick = onConnect,
+                enabled = service.isNotBlank() && token.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Save Tracker")
+            }
+
+            state.trackerRows.forEach { row ->
+                TrackerAccountRow(
+                    row = row,
+                    onDisconnect = { onDisconnect(row.service) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrackerAccountRow(
+    row: TrackerSettingsRow,
+    onDisconnect: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = row.service,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = listOf(
+                        row.username.ifBlank { "No username" },
+                        row.tokenPreview,
+                        if (row.isConnected) "Connected" else "Disconnected",
+                    ).joinToString(" - "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+            OutlinedButton(onClick = onDisconnect) {
+                Text("Disconnect")
+            }
         }
     }
 }
@@ -694,6 +1023,29 @@ private fun SettingToggleCard(
                 onCheckedChange = onCheckedChange,
             )
         }
+    }
+}
+
+@Composable
+private fun SettingInlineToggle(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
     }
 }
 

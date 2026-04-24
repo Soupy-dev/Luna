@@ -1,17 +1,27 @@
 package dev.soupy.eclipse.android.core.player
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.graphics.Color
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Browser
+import android.util.TypedValue
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -22,21 +32,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import dev.soupy.eclipse.android.core.design.GlassPanel
 import dev.soupy.eclipse.android.core.model.InAppPlayer
 import dev.soupy.eclipse.android.core.model.PlaybackSettingsSnapshot
 import dev.soupy.eclipse.android.core.model.PlayerSource
+import dev.soupy.eclipse.android.core.model.SubtitleTrack
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -52,6 +66,8 @@ fun EclipsePlayerSurface(
     source: PlayerSource? = null,
     preferredPlayer: InAppPlayer = InAppPlayer.NORMAL,
     settings: PlaybackSettingsSnapshot = PlaybackSettingsSnapshot(),
+    nextEpisodeLabel: String? = null,
+    onNextEpisode: () -> Unit = {},
     onProgress: (PlaybackProgressSnapshot) -> Unit = {},
 ) {
     if (source == null) {
@@ -78,16 +94,26 @@ fun EclipsePlayerSurface(
 
     val context = LocalContext.current
     val onProgressState = rememberUpdatedState(onProgress)
+    var progressPercent by remember(source.uri) { mutableStateOf(0f) }
+    LockLandscapeWhenRequested(settings.alwaysLandscape)
 
     if (preferredPlayer == InAppPlayer.EXTERNAL) {
         ExternalPlayerPanel(
             source = source,
+            externalPlayer = settings.externalPlayer,
             modifier = modifier,
         )
         return
     }
 
-    val exoPlayer = remember(source.uri, source.headers) {
+    val mediaItem = remember(source, settings.defaultSubtitleLanguage, settings.enableSubtitlesByDefault) {
+        source.toMediaItem(
+            defaultSubtitleLanguage = settings.defaultSubtitleLanguage,
+            enableSubtitlesByDefault = settings.enableSubtitlesByDefault,
+        )
+    }
+
+    val exoPlayer = remember(mediaItem, source.headers) {
         val httpFactory = DefaultHttpDataSource.Factory()
             .setDefaultRequestProperties(source.headers)
         val mediaSourceFactory = DefaultMediaSourceFactory(
@@ -98,10 +124,32 @@ fun EclipsePlayerSurface(
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
             .apply {
-                setMediaItem(MediaItem.fromUri(source.uri))
+                setMediaItem(mediaItem)
                 prepare()
                 playWhenReady = false
             }
+    }
+
+    LaunchedEffect(
+        exoPlayer,
+        settings.enableSubtitlesByDefault,
+        settings.defaultSubtitleLanguage,
+        settings.preferredAnimeAudioLanguage,
+    ) {
+        val textLanguage = settings.defaultSubtitleLanguage.normalizedLanguageCode()
+        val audioLanguage = settings.preferredAnimeAudioLanguage.normalizedLanguageCode()
+        val parameters = exoPlayer.trackSelectionParameters
+            .buildUpon()
+            .setPreferredAudioLanguage(audioLanguage)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !settings.enableSubtitlesByDefault)
+            .setSelectUndeterminedTextLanguage(settings.enableSubtitlesByDefault)
+            .apply {
+                if (settings.enableSubtitlesByDefault) {
+                    setPreferredTextLanguage(textLanguage)
+                }
+            }
+            .build()
+        exoPlayer.trackSelectionParameters = parameters
     }
 
     fun emitProgressSnapshot(forceFinished: Boolean = false) {
@@ -113,6 +161,11 @@ fun EclipsePlayerSurface(
         val positionMs = exoPlayer.currentPosition
             .coerceAtLeast(0L)
             .coerceAtMost(durationMs)
+        progressPercent = if (forceFinished) {
+            1f
+        } else {
+            (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+        }
         onProgressState.value(
             PlaybackProgressSnapshot(
                 positionMs = positionMs,
@@ -168,26 +221,14 @@ fun EclipsePlayerSurface(
             }
         }
 
-        if (settings.skip85sEnabled) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                Button(
-                    onClick = {
-                        val currentPosition = exoPlayer.currentPosition.coerceAtLeast(0L)
-                        val duration = exoPlayer.duration.takeIf { it > 0 && it != C.TIME_UNSET }
-                        val targetPosition = duration?.let { durationMs ->
-                            (currentPosition + 85_000L).coerceAtMost((durationMs - 1_000L).coerceAtLeast(0L))
-                        } ?: (currentPosition + 85_000L)
-                        exoPlayer.seekTo(targetPosition)
-                        emitProgressSnapshot()
-                    },
-                ) {
-                    Text("Skip 85s")
-                }
-            }
-        }
+        PlaybackShortcutRow(
+            exoPlayer = exoPlayer,
+            settings = settings,
+            progressPercent = progressPercent,
+            nextEpisodeLabel = nextEpisodeLabel,
+            onNextEpisode = onNextEpisode,
+            onProgressChanged = { emitProgressSnapshot() },
+        )
 
         AndroidView(
             modifier = Modifier
@@ -197,11 +238,110 @@ fun EclipsePlayerSurface(
                 PlayerView(viewContext).apply {
                     player = exoPlayer
                     useController = true
+                    applySubtitleStyle(settings)
                 }
             },
             update = { playerView ->
                 playerView.player = exoPlayer
+                playerView.applySubtitleStyle(settings)
             },
+        )
+    }
+}
+
+@Composable
+private fun LockLandscapeWhenRequested(alwaysLandscape: Boolean) {
+    val activity = LocalContext.current.findActivity()
+    DisposableEffect(activity, alwaysLandscape) {
+        val previousOrientation = activity?.requestedOrientation
+        if (activity != null && alwaysLandscape) {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        onDispose {
+            if (activity != null && previousOrientation != null) {
+                activity.requestedOrientation = previousOrientation
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaybackShortcutRow(
+    exoPlayer: ExoPlayer,
+    settings: PlaybackSettingsSnapshot,
+    progressPercent: Float,
+    nextEpisodeLabel: String?,
+    onNextEpisode: () -> Unit,
+    onProgressChanged: () -> Unit,
+) {
+    val showNextEpisode = settings.showNextEpisodeButton &&
+        nextEpisodeLabel != null &&
+        progressPercent * 100f >= settings.nextEpisodeThreshold
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        if (showNextEpisode) {
+            Button(onClick = onNextEpisode) {
+                Text(nextEpisodeLabel)
+            }
+        }
+
+        if (settings.holdSpeed > 1.0) {
+            HoldSpeedSurface(
+                speed = settings.holdSpeed,
+                onHoldStart = { exoPlayer.setPlaybackSpeed(settings.holdSpeed.toFloat()) },
+                onHoldEnd = { exoPlayer.setPlaybackSpeed(1f) },
+            )
+        }
+
+        if (settings.skip85sEnabled) {
+            Button(
+                onClick = {
+                    val currentPosition = exoPlayer.currentPosition.coerceAtLeast(0L)
+                    val duration = exoPlayer.duration.takeIf { it > 0 && it != C.TIME_UNSET }
+                    val targetPosition = duration?.let { durationMs ->
+                        (currentPosition + 85_000L).coerceAtMost((durationMs - 1_000L).coerceAtLeast(0L))
+                    } ?: (currentPosition + 85_000L)
+                    exoPlayer.seekTo(targetPosition)
+                    onProgressChanged()
+                },
+                modifier = Modifier.padding(start = 10.dp),
+            ) {
+                Text("Skip 85s")
+            }
+        }
+    }
+}
+
+@Composable
+private fun HoldSpeedSurface(
+    speed: Double,
+    onHoldStart: () -> Unit,
+    onHoldEnd: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.pointerInput(speed) {
+            detectTapGestures(
+                onPress = {
+                    onHoldStart()
+                    try {
+                        tryAwaitRelease()
+                    } finally {
+                        onHoldEnd()
+                    }
+                },
+            )
+        },
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Text(
+            text = "Hold %.2fx".format(speed),
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
         )
     }
 }
@@ -209,6 +349,7 @@ fun EclipsePlayerSurface(
 @Composable
 private fun ExternalPlayerPanel(
     source: PlayerSource,
+    externalPlayer: String,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -233,7 +374,7 @@ private fun ExternalPlayerPanel(
             Button(
                 onClick = {
                     launchError = runCatching {
-                        context.startActivity(source.externalPlayerIntent())
+                        context.startActivity(source.externalPlayerIntent(externalPlayer))
                     }.exceptionOrNull()?.let { error ->
                         if (error is ActivityNotFoundException) {
                             "No external video player is available for this stream."
@@ -256,11 +397,15 @@ private fun ExternalPlayerPanel(
     }
 }
 
-private fun PlayerSource.externalPlayerIntent(): Intent {
+private fun PlayerSource.externalPlayerIntent(externalPlayer: String): Intent {
     val streamUri = Uri.parse(uri)
+    val preferredPackage = externalPlayer.trim().takeUnless {
+        it.isBlank() || it.equals("none", ignoreCase = true)
+    }
     val openIntent = Intent(Intent.ACTION_VIEW).apply {
         setDataAndType(streamUri, mimeType ?: "video/*")
         putExtra(Intent.EXTRA_TITLE, title)
+        preferredPackage?.let(::setPackage)
         if (headers.isNotEmpty()) {
             putExtra(
                 Browser.EXTRA_HEADERS,
@@ -275,6 +420,115 @@ private fun PlayerSource.externalPlayerIntent(): Intent {
     return Intent.createChooser(openIntent, title ?: "Open stream").apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
+}
+
+private fun PlayerSource.toMediaItem(
+    defaultSubtitleLanguage: String,
+    enableSubtitlesByDefault: Boolean,
+): MediaItem {
+    val subtitleConfigurations = subtitles.mapNotNull { subtitle ->
+        subtitle.toSubtitleConfiguration(
+            defaultSubtitleLanguage = defaultSubtitleLanguage,
+            enableSubtitlesByDefault = enableSubtitlesByDefault,
+        )
+    }
+
+    return MediaItem.Builder()
+        .setUri(uri)
+        .apply {
+            mimeType?.let(::setMimeType)
+            if (subtitleConfigurations.isNotEmpty()) {
+                setSubtitleConfigurations(subtitleConfigurations)
+            }
+        }
+        .build()
+}
+
+private fun SubtitleTrack.toSubtitleConfiguration(
+    defaultSubtitleLanguage: String,
+    enableSubtitlesByDefault: Boolean,
+): MediaItem.SubtitleConfiguration? {
+    val subtitleUri = uri?.takeIf { it.isNotBlank() } ?: return null
+    val normalizedLanguage = language?.normalizedLanguageCode()
+    val defaultLanguage = defaultSubtitleLanguage.normalizedLanguageCode()
+    val selectionFlags = if (
+        isDefault ||
+        enableSubtitlesByDefault && normalizedLanguage != null && normalizedLanguage.matchesLanguage(defaultLanguage)
+    ) {
+        C.SELECTION_FLAG_DEFAULT
+    } else {
+        0
+    }
+
+    return MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitleUri))
+        .setMimeType(format.toSubtitleMimeType())
+        .setLanguage(normalizedLanguage)
+        .setLabel(label)
+        .setId(id)
+        .setSelectionFlags(selectionFlags)
+        .build()
+}
+
+private fun PlayerView.applySubtitleStyle(settings: PlaybackSettingsSnapshot) {
+    subtitleView?.apply {
+        setApplyEmbeddedStyles(false)
+        setFixedTextSize(
+            TypedValue.COMPLEX_UNIT_SP,
+            settings.subtitleFontSize.toFloat().coerceIn(16f, 54f),
+        )
+        setBottomPaddingFraction(settings.subtitleVerticalOffset.toBottomPaddingFraction())
+        setStyle(
+            CaptionStyleCompat(
+                settings.subtitleForegroundColor.toAndroidColor(Color.WHITE),
+                Color.TRANSPARENT,
+                Color.TRANSPARENT,
+                if (settings.subtitleStrokeWidth > 0.0) {
+                    CaptionStyleCompat.EDGE_TYPE_OUTLINE
+                } else {
+                    CaptionStyleCompat.EDGE_TYPE_NONE
+                },
+                settings.subtitleStrokeColor.toAndroidColor(Color.BLACK),
+                Typeface.DEFAULT_BOLD,
+            ),
+        )
+    }
+}
+
+private fun String?.toSubtitleMimeType(): String {
+    val raw = this?.trim().orEmpty()
+    return when (raw.lowercase()) {
+        "vtt", "webvtt", "text/vtt", "text/webvtt" -> MimeTypes.TEXT_VTT
+        "srt", "subrip", "application/x-subrip" -> MimeTypes.APPLICATION_SUBRIP
+        "ssa", "ass", "text/x-ssa" -> MimeTypes.TEXT_SSA
+        "ttml", "application/ttml+xml" -> MimeTypes.APPLICATION_TTML
+        "" -> MimeTypes.TEXT_VTT
+        else -> raw.takeIf { it.contains('/') } ?: MimeTypes.TEXT_VTT
+    }
+}
+
+private fun String?.toAndroidColor(fallback: Int): Int =
+    runCatching {
+        val value = this?.trim()?.takeIf { it.isNotBlank() } ?: return@runCatching fallback
+        Color.parseColor(if (value.startsWith("#")) value else "#$value")
+    }.getOrDefault(fallback)
+
+private fun Double.toBottomPaddingFraction(): Float =
+    (0.08f + (-this.toFloat() / 100f)).coerceIn(0.02f, 0.28f)
+
+private fun String.normalizedLanguageCode(): String =
+    trim()
+        .lowercase()
+        .replace('_', '-')
+        .takeIf { it.isNotBlank() }
+        ?: "und"
+
+private fun String.matchesLanguage(other: String): Boolean =
+    this == other || substringBefore('-') == other.substringBefore('-')
+
+private fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 enum class PlayerBackend {

@@ -103,6 +103,7 @@ fun DetailRoute(
     onMarkEpisodeUnwatched: (String) -> Unit,
     onMarkPreviousEpisodesWatched: (String) -> Unit,
     onPlayStream: (String) -> Unit,
+    onPlayNextEpisode: () -> Unit,
     onSelectRecommendation: (ExploreMediaCard) -> Unit,
     onPlaybackProgress: (PlaybackProgressSnapshot) -> Unit,
     preferredPlayer: InAppPlayer = InAppPlayer.NORMAL,
@@ -362,6 +363,8 @@ fun DetailRoute(
                 source = state.playerSource,
                 preferredPlayer = preferredPlayer,
                 settings = playbackSettings,
+                nextEpisodeLabel = state.nextEpisodeLabel(),
+                onNextEpisode = onPlayNextEpisode,
                 onProgress = onPlaybackProgress,
             )
         }
@@ -524,5 +527,18 @@ fun DetailRoute(
             }
         }
     }
+}
+
+private fun DetailScreenState.nextEpisodeLabel(): String? {
+    val playableEpisodes = episodes.filter {
+        it.seasonNumber != null && it.episodeNumber != null
+    }
+    if (playableEpisodes.size < 2) return null
+    val currentIndex = selectedEpisodeId
+        ?.let { id -> playableEpisodes.indexOfFirst { it.id == id } }
+        ?.takeIf { it >= 0 }
+        ?: 0
+    val nextEpisode = playableEpisodes.getOrNull(currentIndex + 1) ?: return null
+    return nextEpisode.subtitle?.let { "Next $it" } ?: "Next Episode"
 }
 

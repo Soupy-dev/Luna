@@ -101,6 +101,46 @@ class SettingsStore(
         }
     }
 
+    suspend fun updatePlayerPreferences(
+        enableSubtitlesByDefault: Boolean,
+        defaultSubtitleLanguage: String,
+        preferredAnimeAudioLanguage: String,
+        holdSpeedPlayer: Double,
+        externalPlayer: String,
+        alwaysLandscape: Boolean,
+        vlcHeaderProxyEnabled: Boolean,
+    ) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.enableSubtitlesByDefault] = enableSubtitlesByDefault
+            prefs[Keys.defaultSubtitleLanguage] = defaultSubtitleLanguage.normalizedLanguageCode("eng")
+            prefs[Keys.preferredAnimeAudioLanguage] = preferredAnimeAudioLanguage.normalizedLanguageCode("jpn")
+            prefs[Keys.holdSpeedPlayer] = holdSpeedPlayer.coerceIn(1.25, 3.0)
+            prefs[Keys.externalPlayer] = externalPlayer.trim().ifBlank { "none" }
+            prefs[Keys.alwaysLandscape] = alwaysLandscape
+            prefs[Keys.vlcHeaderProxyEnabled] = vlcHeaderProxyEnabled
+        }
+    }
+
+    suspend fun updateSubtitleStyle(
+        foregroundColor: String?,
+        strokeColor: String?,
+        strokeWidth: Double,
+        fontSize: Double,
+        verticalOffset: Double,
+    ) {
+        context.dataStore.edit { prefs ->
+            foregroundColor.normalizedOptionalColor()?.let { value ->
+                prefs[Keys.subtitleForegroundColor] = value
+            } ?: prefs.remove(Keys.subtitleForegroundColor)
+            strokeColor.normalizedOptionalColor()?.let { value ->
+                prefs[Keys.subtitleStrokeColor] = value
+            } ?: prefs.remove(Keys.subtitleStrokeColor)
+            prefs[Keys.subtitleStrokeWidth] = strokeWidth.coerceIn(0.0, 8.0)
+            prefs[Keys.subtitleFontSize] = fontSize.coerceIn(16.0, 54.0)
+            prefs[Keys.subtitleVerticalOffset] = verticalOffset.coerceIn(-20.0, 20.0)
+        }
+    }
+
     suspend fun updateReader(
         readingMode: Int,
         readerFontSize: Double,
@@ -304,3 +344,17 @@ private fun String.toInAppPlayer(): InAppPlayer = when (trim().lowercase()) {
     "normal", "default", "media3", "exoplayer" -> InAppPlayer.NORMAL
     else -> runCatching { InAppPlayer.valueOf(this) }.getOrDefault(InAppPlayer.NORMAL)
 }
+
+private fun String.normalizedLanguageCode(fallback: String): String =
+    trim()
+        .lowercase()
+        .replace('_', '-')
+        .takeIf { it.isNotBlank() }
+        ?: fallback
+
+private fun String?.normalizedOptionalColor(): String? =
+    this?.trim()
+        ?.takeIf { it.isNotBlank() && it != "none" }
+        ?.let { value ->
+            if (value.startsWith("#")) value else "#$value"
+        }
