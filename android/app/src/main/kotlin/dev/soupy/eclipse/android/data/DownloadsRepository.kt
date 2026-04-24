@@ -10,6 +10,10 @@ import dev.soupy.eclipse.android.core.storage.DownloadsStore
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.ByteBuffer
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -60,13 +64,15 @@ class DownloadsRepository(
                     error = "Unsupported source URI: $sourceUri",
                 ),
             )
-            sourceUri.isHlsPlaylist() -> writeRecord(
-                queued.copy(
-                    status = DownloadStatus.FAILED,
-                    progressLabel = "HLS playlist downloads are recognized, but segment packaging is the next offline milestone.",
-                    error = "HLS packaging pending",
-                ),
-            )
+            sourceUri.isHlsPlaylist() -> {
+                writeRecord(
+                    queued.copy(
+                        status = DownloadStatus.DOWNLOADING,
+                        progressLabel = "Packaging HLS playlist segments for offline playback.",
+                    ),
+                )
+                writeRecord(downloadEngine.downloadHls(queued))
+            }
             else -> {
                 writeRecord(
                     queued.copy(
@@ -236,6 +242,246 @@ private class DirectFileDownloadEngine(
             )
         }
     }
+
+    suspend fun downloadHls(record: DownloadRecord): DownloadRecord = withContext(Dispatchers.IO) {
+        val sourceUri = record.sourceUri ?: return@withContext record.copy(
+            status = DownloadStatus.FAILED,
+            error = "No HLS playlist URI was captured for this download.",
+        )
+
+        runCatching {
+            val directory = downloadsStore.downloadsDirectory()
+            val outputFile = File(directory, "${record.id.safeFileStem()}.ts")
+            val hls = HlsPlaylistDownloader(
+                headers = record.requestHeaders,
+                outputFile = outputFile,
+            )
+            val result = hls.download(URL(sourceUri))
+            val subtitleFiles = record.subtitleTracks.downloadSubtitles(directory, record.id)
+
+            record.copy(
+                status = DownloadStatus.COMPLETED,
+                progressPercent = 1f,
+                progressLabel = buildString {
+                    append("Packaged ${result.segmentCount} HLS segment")
+                    if (result.segmentCount != 1) append("s")
+                    append(" (${result.downloadedBytes.toByteCountLabel()}) into Android app storage.")
+                    if (subtitleFiles.isNotEmpty()) {
+                        append(" Added ${subtitleFiles.size} subtitle file")
+                        if (subtitleFiles.size != 1) append("s")
+                        append(".")
+                    }
+                },
+                downloadedBytes = result.downloadedBytes,
+                totalBytes = result.downloadedBytes,
+                localFileName = outputFile.name,
+                localUri = outputFile.toURI().toString(),
+                subtitleFileNames = subtitleFiles,
+                error = null,
+            )
+        }.getOrElse { error ->
+            record.copy(
+                status = DownloadStatus.FAILED,
+                progressLabel = "HLS packaging failed: ${error.message ?: "unknown error"}",
+                error = error.message ?: error::class.simpleName,
+            )
+        }
+    }
+}
+
+private data class HlsDownloadResult(
+    val segmentCount: Int,
+    val downloadedBytes: Long,
+)
+
+private data class HlsVariant(
+    val url: URL,
+    val bandwidth: Int,
+)
+
+private data class HlsSegment(
+    val url: URL,
+    val sequenceNumber: Long,
+)
+
+private data class HlsEncryptionKey(
+    val method: String,
+    val keyUrl: URL,
+    val iv: ByteArray?,
+)
+
+private data class HlsDecryptionKey(
+    val bytes: ByteArray,
+    val iv: ByteArray?,
+)
+
+private data class HlsMediaPlaylist(
+    val segments: List<HlsSegment>,
+    val initSegmentUrl: URL?,
+    val encryptionKey: HlsEncryptionKey?,
+)
+
+private class HlsPlaylistDownloader(
+    private val headers: Map<String, String>,
+    private val outputFile: File,
+) {
+    fun download(playlistUrl: URL): HlsDownloadResult {
+        val firstPlaylist = fetchText(playlistUrl)
+        val mediaPlaylistUrl: URL
+        val mediaPlaylist: String
+
+        if (firstPlaylist.contains("#EXT-X-STREAM-INF")) {
+            val bestVariant = parseMasterPlaylist(firstPlaylist, playlistUrl)
+                .maxByOrNull(HlsVariant::bandwidth)
+                ?: error("HLS master playlist did not contain playable variants.")
+            mediaPlaylistUrl = bestVariant.url
+            mediaPlaylist = fetchText(bestVariant.url)
+        } else {
+            mediaPlaylistUrl = playlistUrl
+            mediaPlaylist = firstPlaylist
+        }
+
+        val parsed = parseMediaPlaylist(mediaPlaylist, mediaPlaylistUrl)
+        if (parsed.segments.isEmpty()) {
+            error("HLS media playlist did not contain any segments.")
+        }
+
+        val decryptionKey = parsed.encryptionKey?.let { key ->
+            if (!key.method.equals("AES-128", ignoreCase = true)) {
+                error("Unsupported HLS encryption method ${key.method}.")
+            }
+            HlsDecryptionKey(
+                bytes = fetchBytes(key.keyUrl),
+                iv = key.iv,
+            )
+        }
+
+        var downloadedBytes = 0L
+        outputFile.outputStream().use { output ->
+            parsed.initSegmentUrl?.let { initUrl ->
+                val initBytes = fetchBytes(initUrl)
+                output.write(initBytes)
+                downloadedBytes += initBytes.size
+            }
+
+            parsed.segments.forEach { segment ->
+                val rawBytes = fetchBytes(segment.url)
+                val segmentBytes = if (decryptionKey != null) {
+                    decryptAes128(
+                        data = rawBytes,
+                        keyBytes = decryptionKey.bytes,
+                        iv = decryptionKey.iv ?: segment.sequenceNumber.toAesIv(),
+                    )
+                } else {
+                    rawBytes
+                }
+                output.write(segmentBytes)
+                downloadedBytes += segmentBytes.size
+            }
+        }
+
+        return HlsDownloadResult(
+            segmentCount = parsed.segments.size,
+            downloadedBytes = downloadedBytes,
+        )
+    }
+
+    private fun parseMasterPlaylist(content: String, baseUrl: URL): List<HlsVariant> {
+        val lines = content.lineSequence().map(String::trim).toList()
+        val variants = mutableListOf<HlsVariant>()
+        var lastBandwidth = -1
+        lines.forEach { line ->
+            when {
+                line.startsWith("#EXT-X-STREAM-INF:") -> {
+                    lastBandwidth = line.substringAfter(':').parseAttribute("BANDWIDTH")?.toIntOrNull() ?: 0
+                }
+                line.isNotEmpty() && !line.startsWith("#") && lastBandwidth >= 0 -> {
+                    variants += HlsVariant(
+                        url = URL(baseUrl, line),
+                        bandwidth = lastBandwidth,
+                    )
+                    lastBandwidth = -1
+                }
+            }
+        }
+        return variants
+    }
+
+    private fun parseMediaPlaylist(content: String, baseUrl: URL): HlsMediaPlaylist {
+        val lines = content.lineSequence().map(String::trim).toList()
+        val segments = mutableListOf<HlsSegment>()
+        var mediaSequence = 0L
+        var nextSequence = 0L
+        var initSegmentUrl: URL? = null
+        var encryptionKey: HlsEncryptionKey? = null
+
+        lines.forEach { line ->
+            when {
+                line.startsWith("#EXT-X-MEDIA-SEQUENCE:") -> {
+                    mediaSequence = line.substringAfter(':').toLongOrNull() ?: 0L
+                    nextSequence = mediaSequence
+                }
+                line.startsWith("#EXT-X-MAP:") -> {
+                    val attrs = line.substringAfter(':')
+                    if (attrs.parseAttribute("BYTERANGE") != null) {
+                        error("HLS init segments with BYTERANGE are not supported yet.")
+                    }
+                    initSegmentUrl = attrs.parseAttribute("URI")?.let { uri -> URL(baseUrl, uri) }
+                }
+                line.startsWith("#EXT-X-KEY:") -> {
+                    val attrs = line.substringAfter(':')
+                    val method = attrs.parseAttribute("METHOD") ?: "NONE"
+                    if (method.equals("NONE", ignoreCase = true)) {
+                        encryptionKey = null
+                    } else {
+                        val uri = attrs.parseAttribute("URI")
+                            ?: error("Encrypted HLS playlist is missing EXT-X-KEY URI.")
+                        encryptionKey = HlsEncryptionKey(
+                            method = method,
+                            keyUrl = URL(baseUrl, uri),
+                            iv = attrs.parseAttribute("IV")?.hexToBytes(),
+                        )
+                    }
+                }
+                line.startsWith("#EXT-X-BYTERANGE:") -> {
+                    error("HLS segments with BYTERANGE are not supported yet.")
+                }
+                line.isNotEmpty() && !line.startsWith("#") -> {
+                    segments += HlsSegment(
+                        url = URL(baseUrl, line),
+                        sequenceNumber = nextSequence,
+                    )
+                    nextSequence += 1
+                }
+            }
+        }
+
+        return HlsMediaPlaylist(
+            segments = segments,
+            initSegmentUrl = initSegmentUrl,
+            encryptionKey = encryptionKey,
+        )
+    }
+
+    private fun fetchText(url: URL): String = fetchBytes(url).toString(Charsets.UTF_8)
+
+    private fun fetchBytes(url: URL): ByteArray {
+        val connection = url.openConnection() as HttpURLConnection
+        try {
+            connection.instanceFollowRedirects = true
+            headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 30_000
+            connection.connect()
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                error("HTTP $status while fetching HLS resource ${url.toExternalForm()}")
+            }
+            return connection.inputStream.use { input -> input.readBytes() }
+        } finally {
+            connection.disconnect()
+        }
+    }
 }
 
 private fun DownloadSnapshot.normalized(): DownloadSnapshot = copy(
@@ -340,6 +586,55 @@ private fun String.fileExtension(default: String): String {
 private fun String.safeFileStem(): String = replace(Regex("[^A-Za-z0-9._-]+"), "_")
     .trim('_')
     .ifBlank { "download_${System.currentTimeMillis()}" }
+
+private fun String.parseAttribute(key: String): String? {
+    val prefix = "$key="
+    var index = 0
+    while (index < length) {
+        val nextComma = indexOf(',', startIndex = index).takeIf { it >= 0 } ?: length
+        val partStart = index
+        val keyStart = substring(partStart, nextComma).indexOf(prefix)
+        if (keyStart == 0) {
+            val valueStart = partStart + prefix.length
+            if (valueStart < length && this[valueStart] == '"') {
+                val endQuote = indexOf('"', startIndex = valueStart + 1).takeIf { it >= 0 } ?: length
+                return substring(valueStart + 1, endQuote)
+            }
+            return substring(valueStart, nextComma)
+        }
+        index = nextComma + 1
+    }
+    return null
+}
+
+private fun String.hexToBytes(): ByteArray {
+    val clean = removePrefix("0x").removePrefix("0X")
+    require(clean.length % 2 == 0) { "Invalid hex length." }
+    return ByteArray(clean.length / 2) { index ->
+        clean.substring(index * 2, index * 2 + 2).toInt(16).toByte()
+    }
+}
+
+private fun Long.toAesIv(): ByteArray = ByteBuffer.allocate(16)
+    .putLong(0L)
+    .putLong(this)
+    .array()
+
+private fun decryptAes128(
+    data: ByteArray,
+    keyBytes: ByteArray,
+    iv: ByteArray,
+): ByteArray {
+    require(keyBytes.size == 16) { "HLS AES-128 key must be 16 bytes." }
+    require(iv.size == 16) { "HLS AES-128 IV must be 16 bytes." }
+    val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+    cipher.init(
+        Cipher.DECRYPT_MODE,
+        SecretKeySpec(keyBytes, "AES"),
+        IvParameterSpec(iv),
+    )
+    return cipher.doFinal(data)
+}
 
 private fun Long.toByteCountLabel(): String {
     if (this < 1_000) return "$this B"
