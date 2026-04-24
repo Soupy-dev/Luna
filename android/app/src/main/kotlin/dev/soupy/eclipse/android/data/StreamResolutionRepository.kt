@@ -2,9 +2,13 @@ package dev.soupy.eclipse.android.data
 
 import dev.soupy.eclipse.android.core.model.DetailTarget
 import dev.soupy.eclipse.android.core.model.PlayerSource
+import dev.soupy.eclipse.android.core.model.StremioContentIdRequest
 import dev.soupy.eclipse.android.core.model.StremioManifest
 import dev.soupy.eclipse.android.core.model.StremioStream
 import dev.soupy.eclipse.android.core.model.SubtitleTrack
+import dev.soupy.eclipse.android.core.model.buildContentId
+import dev.soupy.eclipse.android.core.model.isDirectHttp
+import dev.soupy.eclipse.android.core.model.qualityScore
 import dev.soupy.eclipse.android.core.network.EclipseJson
 import dev.soupy.eclipse.android.core.network.StremioService
 import dev.soupy.eclipse.android.core.network.TmdbService
@@ -21,6 +25,7 @@ data class ResolvedStreamCandidate(
     val supportingText: String? = null,
     val addonName: String,
     val isPlayable: Boolean,
+    val qualityScore: Double = 0.0,
     val playerSource: PlayerSource? = null,
 )
 
@@ -71,16 +76,23 @@ class StreamResolutionRepository(
         val candidates = buildList {
             addons.forEach { addon ->
                 val addonLabel = addon.name.ifBlank { addon.transportUrl }
+                val manifest = addon.manifest()
+                val contentId = manifest?.buildContentId(request.toContentIdRequest())
+                    ?: StremioManifest().buildContentId(request.toContentIdRequest())
+                if (contentId == null) {
+                    return@forEach
+                }
                 stremioService.fetchStreams(
                     transportUrl = addon.transportUrl,
                     type = request.type,
-                    id = request.id,
+                    id = contentId,
                 ).orNull()?.streams.orEmpty()
                     .mapIndexed { index, stream ->
                         stream.toResolvedCandidate(
                             addon = addon,
                             addonLabel = addonLabel,
                             requestSummary = request.summary,
+                            contentId = contentId,
                             index = index,
                         )
                     }
@@ -88,6 +100,7 @@ class StreamResolutionRepository(
             }
         }.sortedWith(
             compareByDescending<ResolvedStreamCandidate> { it.isPlayable }
+                .thenByDescending { it.qualityScore }
                 .thenBy { it.addonName.lowercase() }
                 .thenBy { it.title.lowercase() },
         )
@@ -120,18 +133,19 @@ class StreamResolutionRepository(
         is DetailTarget.TmdbMovie -> {
             val movie = tmdbService.movieDetail(target.id).orThrow()
             val imdbId = movie.externalIds?.imdbId?.takeIf { it.isNotBlank() }
-                ?: error("TMDB didn't return an IMDb ID for this movie, so Android can't build a Stremio request yet.")
             StremioRequest(
                 type = "movie",
-                id = imdbId,
-                summary = movie.title.ifBlank { imdbId },
+                tmdbId = target.id,
+                imdbId = imdbId,
+                season = null,
+                episode = null,
+                summary = movie.title.ifBlank { imdbId ?: "tmdb:${target.id}" },
             )
         }
 
         is DetailTarget.TmdbShow -> {
             val show = tmdbService.tvShowDetail(target.id).orThrow()
             val imdbId = show.externalIds?.imdbId?.takeIf { it.isNotBlank() }
-                ?: error("TMDB didn't return an IMDb ID for this series, so Android can't build a Stremio request yet.")
             val firstSeason = show.seasons.firstOrNull { it.seasonNumber > 0 } ?: show.seasons.firstOrNull()
                 ?: error("This series doesn't expose any seasons yet, so Android can't resolve Stremio episode streams.")
             val seasonDetail = tmdbService.seasonDetail(target.id, firstSeason.seasonNumber).orThrow()
@@ -139,7 +153,10 @@ class StreamResolutionRepository(
                 ?: error("This series doesn't expose a playable episode yet for Android stream resolution.")
             StremioRequest(
                 type = "series",
-                id = "$imdbId:${firstSeason.seasonNumber}:${firstEpisode.episodeNumber}",
+                tmdbId = target.id,
+                imdbId = imdbId,
+                season = firstSeason.seasonNumber,
+                episode = firstEpisode.episodeNumber,
                 summary = "${show.name} S${firstSeason.seasonNumber}E${firstEpisode.episodeNumber}",
             )
         }
@@ -150,17 +167,30 @@ class StreamResolutionRepository(
 
 private data class StremioRequest(
     val type: String,
-    val id: String,
+    val tmdbId: Int,
+    val imdbId: String?,
+    val season: Int?,
+    val episode: Int?,
     val summary: String,
-)
+) {
+    fun toContentIdRequest(): StremioContentIdRequest = StremioContentIdRequest(
+        tmdbId = tmdbId,
+        imdbId = imdbId,
+        type = type,
+        season = season,
+        episode = episode,
+    )
+}
 
 private fun StremioStream.toResolvedCandidate(
     addon: StremioAddonEntity,
     addonLabel: String,
     requestSummary: String,
+    contentId: String,
     index: Int,
 ): ResolvedStreamCandidate {
-    val directUrl = url?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+    val directUrl = url?.takeIf { isDirectHttp }
+    val score = qualityScore()
     val playerSource = directUrl?.let {
         PlayerSource(
             uri = it,
@@ -193,11 +223,13 @@ private fun StremioStream.toResolvedCandidate(
         supportingText = listOfNotNull(
             description?.takeIf { it.isNotBlank() },
             stateText,
+            "Score ${(score * 100).toInt()}",
             behaviorHints?.filename,
-            requestSummary.takeIf { playerSource != null && description.isNullOrBlank() },
+            "$requestSummary via $contentId".takeIf { playerSource != null && description.isNullOrBlank() },
         ).joinToString(" | ").ifBlank { null },
         addonName = addonLabel,
         isPlayable = playerSource != null,
+        qualityScore = score,
         playerSource = playerSource,
     )
 }

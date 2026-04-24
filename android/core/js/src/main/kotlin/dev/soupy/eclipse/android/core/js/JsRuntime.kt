@@ -1,11 +1,31 @@
 package dev.soupy.eclipse.android.core.js
 
+import kotlinx.serialization.json.JsonObject
+
 interface JsEngine {
     suspend fun execute(request: ScriptExecutionRequest): Result<ScriptExecutionResult>
 }
 
 interface WebViewSessionBroker {
     suspend fun fetch(request: WebViewBridgeRequest): Result<WebViewBridgeResponse>
+}
+
+interface ServiceRuntime {
+    suspend fun load(source: ServiceRuntimeSource): Result<Unit>
+    suspend fun search(request: ServiceSearchRequest): Result<List<ServiceSearchResult>>
+    suspend fun details(source: ServiceRuntimeSource, href: String): Result<JsonObject>
+    suspend fun episodes(source: ServiceRuntimeSource, href: String): Result<List<ServiceEpisodeLink>>
+    suspend fun stream(source: ServiceRuntimeSource, href: String, softSub: Boolean = false): Result<ServiceStreamResult>
+    fun parseSettings(script: String): List<ServiceSettingDescriptor>
+}
+
+interface KanzenModuleRuntime {
+    suspend fun load(module: ModuleManifest, script: String, isNovel: Boolean = false): Result<Unit>
+    suspend fun search(module: ModuleManifest, query: String, page: Int = 0): Result<List<ServiceSearchResult>>
+    suspend fun details(module: ModuleManifest, params: JsonObject): Result<JsonObject>
+    suspend fun chapters(module: ModuleManifest, params: JsonObject): Result<List<ServiceEpisodeLink>>
+    suspend fun images(module: ModuleManifest, params: JsonObject): Result<List<String>>
+    suspend fun text(module: ModuleManifest, params: JsonObject): Result<String>
 }
 
 class NoopJsEngine : JsEngine {
@@ -18,5 +38,20 @@ class NoopJsEngine : JsEngine {
                 ),
             ),
         )
+}
+
+data class ServiceSettingDescriptor(
+    val key: String,
+    val label: String,
+    val type: ServiceSettingType,
+    val defaultValue: String,
+    val options: List<String> = emptyList(),
+)
+
+enum class ServiceSettingType {
+    TEXT,
+    BOOLEAN,
+    NUMBER,
+    SELECT,
 }
 

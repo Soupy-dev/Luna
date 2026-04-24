@@ -5,6 +5,8 @@ import android.net.Uri
 import dev.soupy.eclipse.android.core.model.BackupData
 import dev.soupy.eclipse.android.core.model.BackupDocument
 import dev.soupy.eclipse.android.core.model.ServiceBackup
+import dev.soupy.eclipse.android.core.model.StremioAddonBackup
+import dev.soupy.eclipse.android.core.model.hasBackupData
 import dev.soupy.eclipse.android.core.network.EclipseJson
 import dev.soupy.eclipse.android.core.storage.BackupFileStore
 import dev.soupy.eclipse.android.core.storage.ServiceDao
@@ -43,7 +45,7 @@ class BackupRepository(
         backupFileStore.write(document)
         document.toStatus(
             headline = "Backup exported",
-            supportingPrefix = "Saved settings plus ${document.payload.services.size} services and ${document.payload.stremioAddons.size} addons to your selected JSON archive.",
+            supportingPrefix = "Saved settings plus ${document.payload.services.size} services and ${document.payload.stremioAddons.orEmpty().size} addons to your selected JSON archive.",
         )
     }
 
@@ -53,7 +55,7 @@ class BackupRepository(
         backupFileStore.write(document)
         document.toStatus(
             headline = "Backup imported",
-            supportingPrefix = "Restored Android-owned settings plus ${document.payload.services.size} services and ${document.payload.stremioAddons.size} addons from the selected archive.",
+            supportingPrefix = "Restored Android-owned settings plus ${document.payload.services.size} services and ${document.payload.stremioAddons.orEmpty().size} addons from the selected archive.",
         )
     }
 
@@ -66,31 +68,61 @@ class BackupRepository(
 
         return BackupDocument(
             payload = BackupData(
-                version = maxOf(payload?.version ?: 1, 1),
+                version = payload?.version ?: "1.0",
                 createdDate = Instant.now().toString(),
                 accentColor = settings.accentColor,
                 tmdbLanguage = settings.tmdbLanguage,
-                selectedAppearance = payload?.selectedAppearance,
+                selectedAppearance = settings.selectedAppearance,
+                enableSubtitlesByDefault = settings.enableSubtitlesByDefault,
+                defaultSubtitleLanguage = settings.defaultSubtitleLanguage,
+                enableVLCSubtitleEditMenu = settings.enableVLCSubtitleEditMenu,
+                preferredAnimeAudioLanguage = settings.preferredAnimeAudioLanguage,
                 inAppPlayer = settings.inAppPlayer,
-                holdSpeedPlayer = payload?.holdSpeedPlayer ?: true,
-                externalPlayer = payload?.externalPlayer,
-                alwaysLandscape = payload?.alwaysLandscape ?: false,
-                aniSkipAutoSkip = payload?.aniSkipAutoSkip ?: false,
-                skip85sEnabled = payload?.skip85sEnabled ?: false,
+                showScheduleTab = settings.showScheduleTab,
+                showLocalScheduleTime = settings.showLocalScheduleTime,
+                holdSpeedPlayer = settings.holdSpeedPlayer,
+                externalPlayer = settings.externalPlayer,
+                alwaysLandscape = settings.alwaysLandscape,
+                aniSkipAutoSkip = settings.aniSkipAutoSkip,
+                skip85sEnabled = settings.skip85sEnabled,
                 showNextEpisodeButton = settings.showNextEpisodeButton,
-                nextEpisodeThreshold = settings.nextEpisodeThreshold,
-                vlcHeaderProxyEnabled = payload?.vlcHeaderProxyEnabled ?: false,
+                nextEpisodeThreshold = settings.nextEpisodeThreshold / 100.0,
+                vlcHeaderProxyEnabled = settings.vlcHeaderProxyEnabled,
+                subtitleForegroundColor = settings.subtitleForegroundColor,
+                subtitleStrokeColor = settings.subtitleStrokeColor,
+                subtitleStrokeWidth = settings.subtitleStrokeWidth,
+                subtitleFontSize = settings.subtitleFontSize,
+                subtitleVerticalOffset = settings.subtitleVerticalOffset,
+                showKanzen = settings.showKanzen,
+                kanzenAutoMode = settings.kanzenAutoMode,
+                kanzenAutoUpdateModules = settings.kanzenAutoUpdateModules,
+                seasonMenu = settings.seasonMenu,
+                horizontalEpisodeList = settings.horizontalEpisodeList,
+                mediaColumnsPortrait = settings.mediaColumnsPortrait,
+                mediaColumnsLandscape = settings.mediaColumnsLandscape,
+                readingMode = settings.readingMode,
+                readerFontSize = settings.readerFontSize,
+                readerFontFamily = settings.readerFontFamily,
+                readerFontWeight = settings.readerFontWeight,
+                readerColorPreset = settings.readerColorPreset,
+                readerTextAlignment = settings.readerTextAlignment,
+                readerLineSpacing = settings.readerLineSpacing,
+                readerMargin = settings.readerMargin,
+                autoClearCacheEnabled = settings.autoClearCacheEnabled,
+                autoClearCacheThresholdMB = settings.autoClearCacheThresholdMB,
+                highQualityThreshold = settings.highQualityThreshold,
                 collections = payload?.collections.orEmpty(),
-                progressData = payload?.progressData.orEmpty(),
-                trackerState = payload?.trackerState,
+                progressData = payload?.progressData ?: BackupData().progressData,
+                trackerState = payload?.trackerState ?: BackupData().trackerState,
                 catalogs = payload?.catalogs.orEmpty(),
                 services = services.map(ServiceEntity::toBackup),
                 stremioAddons = addons.map(StremioAddonEntity::toBackup),
                 mangaCollections = payload?.mangaCollections.orEmpty(),
-                mangaProgressData = payload?.mangaProgressData.orEmpty(),
+                mangaReadingProgress = payload?.mangaReadingProgress.orEmpty(),
+                mangaProgressData = payload?.mangaProgressData ?: BackupData().mangaProgressData,
                 mangaCatalogs = payload?.mangaCatalogs.orEmpty(),
                 kanzenModules = payload?.kanzenModules.orEmpty(),
-                recommendationCache = payload?.recommendationCache.orEmpty(),
+                recommendationCache = payload?.recommendationCache ?: BackupData().recommendationCache,
                 userRatings = payload?.userRatings.orEmpty(),
             ),
             unknownKeys = existing?.unknownKeys.orEmpty(),
@@ -100,7 +132,8 @@ class BackupRepository(
     private suspend fun applyPayload(payload: BackupData) {
         settingsStore.restoreFromBackup(payload)
         val importedServices = syncServices(payload.services)
-        val importedAddons = syncAddons(payload.stremioAddons)
+        val importedAddons = payload.stremioAddons?.let { syncAddons(it) }
+            ?: stremioAddonDao.observeAll().first()
         settingsStore.retainAutoModeSources(
             importedServices.mapTo(mutableSetOf()) { "service:${it.id}" }
                 .apply { addAll(importedAddons.map { "stremio:${it.transportUrl}" }) },
@@ -112,12 +145,12 @@ class BackupRepository(
         val currentById = current.associateBy(ServiceEntity::id)
         val now = System.currentTimeMillis()
         val imported = backups.mapIndexed { index, backup ->
-            val id = backup.id.ifBlank { backup.name.slugified() }
+            val id = backup.id.ifBlank { backup.resolvedName.slugified() }
             val currentEntity = currentById[id]
-            val inferredScriptUrl = backup.scriptUrl ?: backup.manifestUrl?.takeIf {
+            val inferredScriptUrl = backup.resolvedScriptUrl ?: backup.resolvedManifestUrl?.takeIf {
                 backup.sourceKind.equals("script", ignoreCase = true)
             }
-            val manifestUrl = backup.manifestUrl?.takeUnless {
+            val manifestUrl = backup.resolvedManifestUrl?.takeUnless {
                 inferredScriptUrl != null &&
                     backup.sourceKind.equals("script", ignoreCase = true) &&
                     it == inferredScriptUrl
@@ -125,11 +158,11 @@ class BackupRepository(
             val scriptUrl = inferredScriptUrl
             ServiceEntity(
                 id = id,
-                name = backup.name.ifBlank { id },
+                name = backup.resolvedName.ifBlank { id },
                 manifestUrl = manifestUrl,
                 scriptUrl = scriptUrl,
-                enabled = backup.enabled,
-                sortIndex = if (backups.any { it.sortIndex != 0 }) backup.sortIndex else index,
+                enabled = backup.active,
+                sortIndex = if (backups.any { it.sortIndex != 0L }) backup.sortIndex.toInt() else index,
                 sourceKind = backup.sourceKind ?: when {
                     scriptUrl != null && manifestUrl != null -> "manifest+script"
                     scriptUrl != null -> "script"
@@ -150,23 +183,21 @@ class BackupRepository(
         return imported
     }
 
-    private suspend fun syncAddons(backups: List<ServiceBackup>): List<StremioAddonEntity> {
+    private suspend fun syncAddons(backups: List<StremioAddonBackup>): List<StremioAddonEntity> {
         val current = stremioAddonDao.observeAll().first()
         val currentByTransport = current.associateBy(StremioAddonEntity::transportUrl)
         val now = System.currentTimeMillis()
         val imported = backups.mapIndexed { index, backup ->
-            val transportUrl = backup.transportUrl
-                ?: backup.manifestUrl
-                ?: backup.id.ifBlank { "addon-${index + 1}" }
+            val transportUrl = backup.resolvedTransportUrl.ifBlank { "addon-${index + 1}" }
             val currentEntity = currentByTransport[transportUrl]
             StremioAddonEntity(
                 transportUrl = transportUrl,
-                manifestId = backup.id.ifBlank { transportUrl },
-                name = backup.name.ifBlank { transportUrl },
-                enabled = backup.enabled,
-                sortIndex = if (backups.any { it.sortIndex != 0 }) backup.sortIndex else index,
+                manifestId = backup.resolvedManifestId,
+                name = backup.resolvedName.ifBlank { transportUrl },
+                enabled = backup.active,
+                sortIndex = if (backups.any { it.sortIndex != 0L }) backup.sortIndex.toInt() else index,
                 configured = transportUrl.isNotBlank(),
-                manifestJson = currentEntity?.manifestJson,
+                manifestJson = backup.manifestJson ?: currentEntity?.manifestJson,
                 createdAt = currentEntity?.createdAt ?: now,
                 updatedAt = now,
             )
@@ -199,19 +230,23 @@ private fun ServiceEntity.toBackup(): ServiceBackup = ServiceBackup(
     manifestUrl = manifestUrl,
     scriptUrl = scriptUrl,
     enabled = enabled,
-    sortIndex = sortIndex,
+    isActive = enabled,
+    sortIndex = sortIndex.toLong(),
     sourceKind = sourceKind,
     configurationJson = configurationJson,
 )
 
-private fun StremioAddonEntity.toBackup(): ServiceBackup = ServiceBackup(
+private fun StremioAddonEntity.toBackup(): StremioAddonBackup = StremioAddonBackup(
     id = manifestId,
     name = name,
     manifestUrl = transportUrl,
     transportUrl = transportUrl,
     enabled = enabled,
-    sortIndex = sortIndex,
+    isActive = enabled,
+    sortIndex = sortIndex.toLong(),
     sourceKind = "stremio-addon",
+    configuredURL = transportUrl,
+    manifestJson = manifestJson,
 )
 
 private fun BackupDocument?.toStatus(): BackupStatusSnapshot = if (this == null) {
@@ -234,11 +269,11 @@ private fun BackupDocument.toStatus(
     val createdDate = payload.createdDate?.toReadableTimestamp() ?: "unknown date"
     val preservedSections = buildList {
         if (payload.collections.isNotEmpty()) add("collections")
-        if (payload.progressData.isNotEmpty()) add("progress")
+        if (payload.progressData.hasBackupData()) add("progress")
         if (payload.catalogs.isNotEmpty()) add("catalogs")
-        if (payload.mangaCollections.isNotEmpty() || payload.mangaProgressData.isNotEmpty()) add("manga")
+        if (payload.mangaCollections.isNotEmpty() || payload.mangaReadingProgress.isNotEmpty() || payload.mangaProgressData.hasBackupData()) add("manga")
         if (payload.kanzenModules.isNotEmpty()) add("modules")
-        if (payload.recommendationCache.isNotEmpty() || payload.userRatings.isNotEmpty()) add("personalization")
+        if (payload.recommendationCache.hasBackupData() || payload.userRatings.isNotEmpty()) add("personalization")
     }
     val preservationText = if (preservedSections.isEmpty()) {
         " The rest of the archive is ready for later Android parity work."

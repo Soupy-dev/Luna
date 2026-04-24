@@ -4,6 +4,18 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
+private val qualityPatterns = listOf(
+    "2160p" to 1.00,
+    "4k" to 1.00,
+    "1080p" to 0.90,
+    "720p" to 0.72,
+    "480p" to 0.48,
+    "cam" to -0.35,
+    "hdcam" to -0.35,
+    "telesync" to -0.30,
+    " ts " to -0.30,
+)
+
 @Serializable
 data class StremioManifestBehaviorHints(
     val configurable: Boolean = false,
@@ -26,6 +38,7 @@ data class StremioManifest(
     @SerialName("logo") val logoUrl: String? = null,
     val background: String? = null,
     val resources: List<StremioResourceDescriptor> = emptyList(),
+    @SerialName("idPrefixes") val idPrefixes: List<String> = emptyList(),
     val types: List<String> = emptyList(),
     val catalogs: List<JsonObject> = emptyList(),
     @SerialName("behaviorHints") val behaviorHints: StremioManifestBehaviorHints = StremioManifestBehaviorHints(),
@@ -78,5 +91,72 @@ data class StremioAddon(
     val enabled: Boolean = true,
     val sortIndex: Int = 0,
 )
+
+@Serializable
+data class StremioContentIdRequest(
+    val tmdbId: Int,
+    val imdbId: String? = null,
+    val type: String,
+    val season: Int? = null,
+    val episode: Int? = null,
+)
+
+val StremioStream.isDirectHttp: Boolean
+    get() = url?.startsWith("http://") == true || url?.startsWith("https://") == true
+
+fun StremioManifest.buildContentId(request: StremioContentIdRequest): String? {
+    val prefixes = idPrefixes.ifEmpty {
+        resources
+            .filter { resource -> resource.name.equals("stream", ignoreCase = true) }
+            .flatMap(StremioResourceDescriptor::idPrefixes)
+    }
+    val supportsAny = prefixes.isEmpty()
+    val supportsImdb = supportsAny || prefixes.any { prefix ->
+        prefix == "tt" || prefix == "imdb" || prefix == "imdb:"
+    }
+    val supportsTmdb = supportsAny || prefixes.any { prefix ->
+        prefix == "tmdb" || prefix == "tmdb:"
+    }
+
+    if (supportsImdb) {
+        val imdb = request.imdbId?.takeIf { it.isNotBlank() }?.let { value ->
+            if (value.startsWith("tt")) value else "tt$value"
+        }
+        if (imdb != null) {
+            return if (request.type == "series" && request.season != null && request.episode != null) {
+                "$imdb:${request.season}:${request.episode}"
+            } else {
+                imdb
+            }
+        }
+    }
+
+    if (supportsTmdb) {
+        return if (request.type == "series" && request.season != null && request.episode != null) {
+            "tmdb:${request.tmdbId}:${request.season}:${request.episode}"
+        } else {
+            "tmdb:${request.tmdbId}"
+        }
+    }
+
+    return null
+}
+
+fun StremioStream.qualityScore(): Double {
+    val haystack = listOfNotNull(
+        name,
+        title,
+        description,
+        behaviorHints?.filename,
+    ).joinToString(" ").lowercase()
+
+    val base = qualityPatterns.firstOrNull { (needle, _) -> haystack.contains(needle) }?.second ?: 0.50
+    val hdrBoost = if (haystack.contains("hdr") || haystack.contains("dolby vision") || haystack.contains("dv")) 0.04 else 0.0
+    val remuxBoost = if (haystack.contains("remux") || haystack.contains("bluray")) 0.04 else 0.0
+    val webBoost = if (haystack.contains("web-dl") || haystack.contains("webrip")) 0.02 else 0.0
+    val notWebReadyPenalty = if (behaviorHints?.notWebReady == true) 0.08 else 0.0
+
+    return (base + hdrBoost + remuxBoost + webBoost - notWebReadyPenalty).coerceIn(0.0, 1.0)
+}
 
 

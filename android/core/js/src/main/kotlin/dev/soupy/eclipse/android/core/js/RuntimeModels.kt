@@ -52,4 +52,47 @@ data class WebViewBridgeResponse(
     val headers: Map<String, String> = emptyMap(),
 )
 
+@Serializable
+data class ServiceRuntimeSource(
+    val id: String,
+    val name: String,
+    val script: String,
+    val baseUrl: String? = null,
+    val settings: JsonObject = JsonObject(emptyMap()),
+)
+
+@Serializable
+data class ServiceSearchRequest(
+    val source: ServiceRuntimeSource,
+    val query: String,
+    val page: Int = 0,
+)
+
+@Serializable
+data class ServiceSearchResult(
+    val title: String,
+    val href: String,
+    val image: String? = null,
+    val subtitle: String? = null,
+    val metadata: JsonObject = JsonObject(emptyMap()),
+)
+
+@Serializable
+data class ServiceEpisodeLink(
+    val title: String,
+    val href: String,
+    val seasonNumber: Int? = null,
+    val episodeNumber: Int? = null,
+    val metadata: JsonObject = JsonObject(emptyMap()),
+)
+
+@Serializable
+data class ServiceStreamResult(
+    val streams: List<String> = emptyList(),
+    val subtitles: List<String> = emptyList(),
+    val sources: List<JsonObject> = emptyList(),
+    val headers: Map<String, String> = emptyMap(),
+    val defaultSubtitle: String? = null,
+)
+
 
