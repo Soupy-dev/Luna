@@ -43,7 +43,7 @@ class AndroidDownloadsViewModel(
     }
 
     fun queueDownload(draft: DownloadDraft) = mutate(
-        successMessage = "Queued a metadata-first download draft on Android.",
+        successMessage = "Queued download on Android.",
     ) {
         repository.queueDownload(draft)
     }
@@ -106,6 +106,7 @@ private fun DownloadSnapshot.toUiState(
     val first = items.firstOrNull()
     val queuedCount = items.count { it.status == DownloadStatus.QUEUED }
     val pausedCount = items.count { it.status == DownloadStatus.PAUSED }
+    val downloadingCount = items.count { it.status == DownloadStatus.DOWNLOADING }
     val completedCount = items.count { it.status == DownloadStatus.COMPLETED }
 
     return DownloadsScreenState(
@@ -113,6 +114,7 @@ private fun DownloadSnapshot.toUiState(
         noticeMessage = noticeMessage,
         heroTitle = first?.title ?: "Downloads",
         heroSubtitle = when {
+            downloadingCount > 0 -> "Downloading"
             completedCount > 0 -> "Offline queue"
             queuedCount > 0 -> "Queued downloads"
             pausedCount > 0 -> "Paused downloads"
@@ -122,16 +124,23 @@ private fun DownloadSnapshot.toUiState(
         heroSupportingText = when {
             items.isEmpty() ->
                 "Android now persists download queue metadata so the real downloader can slot into the same user-facing flow."
+            downloadingCount > 0 ->
+                "Android is saving direct streams into app-private storage. HLS packaging still needs the segment worker."
             completedCount > 0 ->
-                "Completed items already survive app restarts. The next milestone is wiring actual offline packaging and playback to the same queue."
+                "Completed direct downloads now survive app restarts with local file metadata."
             else ->
-                "These entries are metadata-first download drafts. They keep offline flow state real while source resolution and transfer plumbing land."
+                "These entries keep offline flow state real while source resolution and HLS transfer plumbing land."
         },
         metrics = listOf(
             DownloadMetric(
                 label = "Queued",
                 value = queuedCount.toString(),
-                supportingText = "Waiting for source resolution and offline packaging.",
+                supportingText = "Waiting for a direct source or retry.",
+            ),
+            DownloadMetric(
+                label = "Active",
+                value = downloadingCount.toString(),
+                supportingText = "Direct stream transfer in progress.",
             ),
             DownloadMetric(
                 label = "Paused",
@@ -154,17 +163,18 @@ private fun DownloadSnapshot.toUiState(
                 mediaLabel = record.mediaLabel,
                 statusLabel = when (record.status) {
                     DownloadStatus.QUEUED -> "Queued"
+                    DownloadStatus.DOWNLOADING -> "Downloading"
                     DownloadStatus.PAUSED -> "Paused"
                     DownloadStatus.COMPLETED -> "Completed"
                     DownloadStatus.FAILED -> "Failed"
                 },
                 progressPercent = record.progressPercent,
-                progressLabel = record.progressLabel,
+                progressLabel = record.progressLabel ?: record.localUri?.let { "Stored locally as ${record.localFileName}" },
                 sourceLabel = record.sourceLabel,
                 hasDirectSource = !record.sourceUri.isNullOrBlank(),
                 subtitleCount = record.subtitleTracks.size,
                 detailTarget = record.detailTarget,
-                canPause = record.status == DownloadStatus.QUEUED,
+                canPause = record.status == DownloadStatus.QUEUED || record.status == DownloadStatus.DOWNLOADING,
                 canResume = record.status == DownloadStatus.PAUSED || record.status == DownloadStatus.FAILED,
                 canMarkComplete = record.status != DownloadStatus.COMPLETED,
             )

@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class DownloadStatus {
     QUEUED,
+    DOWNLOADING,
     PAUSED,
     COMPLETED,
     FAILED,
@@ -27,6 +28,12 @@ data class DownloadRecord(
     val mimeType: String? = null,
     val requestHeaders: Map<String, String> = emptyMap(),
     val subtitleTracks: List<SubtitleTrack> = emptyList(),
+    val downloadedBytes: Long = 0,
+    val totalBytes: Long = 0,
+    val localFileName: String? = null,
+    val localUri: String? = null,
+    val subtitleFileNames: List<String> = emptyList(),
+    val error: String? = null,
     val addedAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
 )
