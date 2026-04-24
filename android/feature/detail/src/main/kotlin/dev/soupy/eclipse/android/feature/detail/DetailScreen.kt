@@ -37,6 +37,8 @@ data class DetailEpisodeRow(
     val subtitle: String? = null,
     val imageUrl: String? = null,
     val overview: String? = null,
+    val seasonNumber: Int? = null,
+    val episodeNumber: Int? = null,
 )
 
 data class DetailStreamRow(
@@ -64,6 +66,8 @@ data class DetailScreenState(
     val streamStatusMessage: String? = null,
     val streamCandidates: List<DetailStreamRow> = emptyList(),
     val playerSource: PlayerSource? = null,
+    val selectedEpisodeId: String? = null,
+    val selectedEpisodeLabel: String? = null,
 )
 
 @Composable
@@ -74,6 +78,7 @@ fun DetailRoute(
     onQueueResume: () -> Unit,
     onQueueDownload: () -> Unit,
     onResolveStreams: () -> Unit,
+    onResolveEpisodeStreams: (String) -> Unit,
     onPlayStream: (String) -> Unit,
     onPlaybackProgress: (PlaybackProgressSnapshot) -> Unit,
     preferredPlayer: InAppPlayer = InAppPlayer.NORMAL,
@@ -145,7 +150,7 @@ fun DetailRoute(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
-                            text = "Save this title to the Android library. Direct in-app playback now updates Continue Watching automatically, and the manual resume button is still here as a fallback.",
+                            text = "Save this title to the Android library. Direct in-app playback now updates Continue Watching automatically, and episode rows can resolve their own streams when metadata is available.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                         )
@@ -162,7 +167,13 @@ fun DetailRoute(
                                 Text("Queue Download")
                             }
                             Button(onClick = onResolveStreams) {
-                                Text(if (state.isResolvingStreams) "Resolving..." else "Resolve Streams")
+                                Text(
+                                    when {
+                                        state.isResolvingStreams -> "Resolving..."
+                                        state.selectedEpisodeLabel != null -> "Resolve ${state.selectedEpisodeLabel}"
+                                        else -> "Resolve Streams"
+                                    },
+                                )
                             }
                         }
                     }
@@ -296,6 +307,11 @@ fun DetailRoute(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
                                 )
+                            }
+                            if (episode.seasonNumber != null && episode.episodeNumber != null) {
+                                Button(onClick = { onResolveEpisodeStreams(episode.id) }) {
+                                    Text("Resolve Episode")
+                                }
                             }
                         }
                     }

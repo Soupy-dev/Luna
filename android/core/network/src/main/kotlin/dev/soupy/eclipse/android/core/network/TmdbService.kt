@@ -46,6 +46,12 @@ class TmdbService(
     suspend fun popularMovies(page: Int = 1): NetworkResult<List<TMDBSearchResult>> =
         decodeResults("$baseUrl/movie/popular?api_key=$apiKey&language=$language&page=$page&include_adult=false")
 
+    suspend fun nowPlayingMovies(page: Int = 1): NetworkResult<List<TMDBSearchResult>> =
+        decodeResults("$baseUrl/movie/now_playing?api_key=$apiKey&language=$language&page=$page&include_adult=false")
+
+    suspend fun upcomingMovies(page: Int = 1): NetworkResult<List<TMDBSearchResult>> =
+        decodeResults("$baseUrl/movie/upcoming?api_key=$apiKey&language=$language&page=$page&include_adult=false")
+
     suspend fun topRatedMovies(page: Int = 1): NetworkResult<List<TMDBSearchResult>> =
         decodeResults("$baseUrl/movie/top_rated?api_key=$apiKey&language=$language&page=$page&include_adult=false")
 

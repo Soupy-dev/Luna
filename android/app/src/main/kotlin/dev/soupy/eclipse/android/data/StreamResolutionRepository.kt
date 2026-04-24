@@ -7,8 +7,10 @@ import dev.soupy.eclipse.android.core.model.StremioManifest
 import dev.soupy.eclipse.android.core.model.StremioStream
 import dev.soupy.eclipse.android.core.model.SubtitleTrack
 import dev.soupy.eclipse.android.core.model.buildContentId
+import dev.soupy.eclipse.android.core.model.displayTitle
 import dev.soupy.eclipse.android.core.model.isDirectHttp
 import dev.soupy.eclipse.android.core.model.qualityScore
+import dev.soupy.eclipse.android.core.network.AniListService
 import dev.soupy.eclipse.android.core.network.EclipseJson
 import dev.soupy.eclipse.android.core.network.StremioService
 import dev.soupy.eclipse.android.core.network.TmdbService
@@ -35,20 +37,25 @@ data class StreamResolutionResult(
     val selectedSource: PlayerSource? = null,
 )
 
+data class StreamEpisodeSelection(
+    val seasonNumber: Int,
+    val episodeNumber: Int,
+    val label: String,
+)
+
 class StreamResolutionRepository(
     private val tmdbService: TmdbService,
+    private val aniListService: AniListService,
+    private val animeTmdbMapper: AnimeTmdbMapper,
     private val stremioService: StremioService,
     private val stremioAddonDao: StremioAddonDao,
     private val settingsStore: SettingsStore,
 ) {
-    suspend fun resolve(target: DetailTarget): Result<StreamResolutionResult> = runCatching {
-        if (target is DetailTarget.AniListMediaTarget) {
-            return@runCatching StreamResolutionResult(
-                statusMessage = "Anime stream resolution still needs the AniList-to-TMDB/Stremio bridge on Android. TMDB movie and series detail pages are supported first.",
-            )
-        }
-
-        val request = buildRequest(target)
+    suspend fun resolve(
+        target: DetailTarget,
+        episode: StreamEpisodeSelection? = null,
+    ): Result<StreamResolutionResult> = runCatching {
+        val request = buildRequest(target, episode)
         val settings = settingsStore.settings.first()
         val addons = stremioAddonDao.observeAll().first()
             .filter(StremioAddonEntity::enabled)
@@ -129,7 +136,10 @@ class StreamResolutionRepository(
         )
     }
 
-    private suspend fun buildRequest(target: DetailTarget): StremioRequest = when (target) {
+    private suspend fun buildRequest(
+        target: DetailTarget,
+        episode: StreamEpisodeSelection?,
+    ): StremioRequest = when (target) {
         is DetailTarget.TmdbMovie -> {
             val movie = tmdbService.movieDetail(target.id).orThrow()
             val imdbId = movie.externalIds?.imdbId?.takeIf { it.isNotBlank() }
@@ -146,22 +156,67 @@ class StreamResolutionRepository(
         is DetailTarget.TmdbShow -> {
             val show = tmdbService.tvShowDetail(target.id).orThrow()
             val imdbId = show.externalIds?.imdbId?.takeIf { it.isNotBlank() }
-            val firstSeason = show.seasons.firstOrNull { it.seasonNumber > 0 } ?: show.seasons.firstOrNull()
-                ?: error("This series doesn't expose any seasons yet, so Android can't resolve Stremio episode streams.")
-            val seasonDetail = tmdbService.seasonDetail(target.id, firstSeason.seasonNumber).orThrow()
-            val firstEpisode = seasonDetail.episodes.firstOrNull { it.episodeNumber > 0 }
-                ?: error("This series doesn't expose a playable episode yet for Android stream resolution.")
+            val selectedEpisode = episode ?: firstPlayableEpisode(target.id)
             StremioRequest(
                 type = "series",
                 tmdbId = target.id,
                 imdbId = imdbId,
-                season = firstSeason.seasonNumber,
-                episode = firstEpisode.episodeNumber,
-                summary = "${show.name} S${firstSeason.seasonNumber}E${firstEpisode.episodeNumber}",
+                season = selectedEpisode.seasonNumber,
+                episode = selectedEpisode.episodeNumber,
+                summary = "${show.name} ${selectedEpisode.label}",
             )
         }
 
-        is DetailTarget.AniListMediaTarget -> error("AniList media targets are not supported in the first Android stream resolver.")
+        is DetailTarget.AniListMediaTarget -> {
+            val media = aniListService.mediaById(target.id).orThrow()
+            val match = animeTmdbMapper.findBestMatch(media)
+                ?: error("Android couldn't match this AniList anime to TMDB yet, so Stremio episode IDs could not be built.")
+
+            when (val tmdbTarget = match.target) {
+                is DetailTarget.TmdbMovie -> {
+                    val movie = tmdbService.movieDetail(tmdbTarget.id).orThrow()
+                    StremioRequest(
+                        type = "movie",
+                        tmdbId = tmdbTarget.id,
+                        imdbId = movie.externalIds?.imdbId?.takeIf { it.isNotBlank() },
+                        season = null,
+                        episode = null,
+                        summary = "${media.displayTitle} via ${match.title}",
+                    )
+                }
+
+                is DetailTarget.TmdbShow -> {
+                    val show = tmdbService.tvShowDetail(tmdbTarget.id).orThrow()
+                    val selectedEpisode = episode ?: firstPlayableEpisode(tmdbTarget.id)
+                    StremioRequest(
+                        type = "series",
+                        tmdbId = tmdbTarget.id,
+                        imdbId = show.externalIds?.imdbId?.takeIf { it.isNotBlank() },
+                        season = selectedEpisode.seasonNumber,
+                        episode = selectedEpisode.episodeNumber,
+                        summary = "${media.displayTitle} ${selectedEpisode.label} via ${match.title}",
+                    )
+                }
+
+                is DetailTarget.AniListMediaTarget -> error("AniList-to-AniList stream mapping is not supported.")
+            }
+        }
+    }
+
+    private suspend fun firstPlayableEpisode(showId: Int): StreamEpisodeSelection {
+        val show = tmdbService.tvShowDetail(showId).orThrow()
+        val firstSeason = show.seasons.firstOrNull { it.seasonNumber > 0 && it.episodeCount > 0 }
+            ?: show.seasons.firstOrNull { it.episodeCount > 0 }
+            ?: error("This series doesn't expose any seasons yet, so Android can't resolve Stremio episode streams.")
+        val seasonDetail = tmdbService.seasonDetail(showId, firstSeason.seasonNumber).orThrow()
+        val firstEpisode = seasonDetail.episodes.firstOrNull { it.episodeNumber > 0 }
+            ?: error("This series doesn't expose a playable episode yet for Android stream resolution.")
+
+        return StreamEpisodeSelection(
+            seasonNumber = firstSeason.seasonNumber,
+            episodeNumber = firstEpisode.episodeNumber,
+            label = "S${firstSeason.seasonNumber}E${firstEpisode.episodeNumber}",
+        )
     }
 }
 

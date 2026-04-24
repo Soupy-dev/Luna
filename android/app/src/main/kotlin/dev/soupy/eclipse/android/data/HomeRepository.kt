@@ -29,6 +29,14 @@ class HomeRepository(
                 if (tmdbEnabled) tmdbService.popularMovies()
                 else dev.soupy.eclipse.android.core.network.NetworkResult.Success(emptyList<dev.soupy.eclipse.android.core.model.TMDBSearchResult>())
             }
+            val nowPlayingMoviesDeferred = async {
+                if (tmdbEnabled) tmdbService.nowPlayingMovies()
+                else dev.soupy.eclipse.android.core.network.NetworkResult.Success(emptyList<dev.soupy.eclipse.android.core.model.TMDBSearchResult>())
+            }
+            val upcomingMoviesDeferred = async {
+                if (tmdbEnabled) tmdbService.upcomingMovies()
+                else dev.soupy.eclipse.android.core.network.NetworkResult.Success(emptyList<dev.soupy.eclipse.android.core.model.TMDBSearchResult>())
+            }
             val popularTvDeferred = async {
                 if (tmdbEnabled) tmdbService.popularTv()
                 else dev.soupy.eclipse.android.core.network.NetworkResult.Success(emptyList<dev.soupy.eclipse.android.core.model.TMDBSearchResult>())
@@ -41,6 +49,10 @@ class HomeRepository(
                 if (tmdbEnabled) tmdbService.topRatedTv()
                 else dev.soupy.eclipse.android.core.network.NetworkResult.Success(emptyList<dev.soupy.eclipse.android.core.model.TMDBSearchResult>())
             }
+            val topRatedMoviesDeferred = async {
+                if (tmdbEnabled) tmdbService.topRatedMovies()
+                else dev.soupy.eclipse.android.core.network.NetworkResult.Success(emptyList<dev.soupy.eclipse.android.core.model.TMDBSearchResult>())
+            }
             val animeCatalogsDeferred = async { aniListService.fetchHomeCatalogs() }
 
             val sections = buildList {
@@ -49,9 +61,12 @@ class HomeRepository(
                     .take(12)
                     .map { it.toExploreMediaCard("Trending") }
                 val popularMovies = popularMoviesDeferred.await().orEmptyList().take(12).map { it.toExploreMediaCard("Movie") }
+                val nowPlayingMovies = nowPlayingMoviesDeferred.await().orEmptyList().take(12).map { it.toExploreMediaCard("Now playing") }
+                val upcomingMovies = upcomingMoviesDeferred.await().orEmptyList().take(12).map { it.toExploreMediaCard("Upcoming") }
                 val popularTv = popularTvDeferred.await().orEmptyList().take(12).map { it.toExploreMediaCard("Series") }
                 val airingToday = airingTodayDeferred.await().orEmptyList().take(12).map { it.toExploreMediaCard("Airing today") }
                 val topRatedTv = topRatedTvDeferred.await().orEmptyList().take(12).map { it.toExploreMediaCard("Top rated") }
+                val topRatedMovies = topRatedMoviesDeferred.await().orEmptyList().take(12).map { it.toExploreMediaCard("Top rated") }
                 val animeCatalogs = animeCatalogsDeferred.await().orThrow()
 
                 if (trending.isNotEmpty()) {
@@ -59,6 +74,12 @@ class HomeRepository(
                 }
                 if (popularMovies.isNotEmpty()) {
                     add(MediaCarouselSection("tmdb-movies", "Popular Movies", "What people are queueing right now", popularMovies))
+                }
+                if (nowPlayingMovies.isNotEmpty()) {
+                    add(MediaCarouselSection("tmdb-now-playing", "Now Playing Movies", "Fresh theatrical and streaming movie picks", nowPlayingMovies))
+                }
+                if (upcomingMovies.isNotEmpty()) {
+                    add(MediaCarouselSection("tmdb-upcoming-movies", "Upcoming Movies", "Movies arriving soon", upcomingMovies))
                 }
                 if (popularTv.isNotEmpty()) {
                     add(MediaCarouselSection("tmdb-tv", "Popular Series", "The TV side of the current Luna browse flow", popularTv))
@@ -69,8 +90,14 @@ class HomeRepository(
                 if (topRatedTv.isNotEmpty()) {
                     add(MediaCarouselSection("tmdb-top-tv", "Top Rated Series", "High-signal TV picks from TMDB", topRatedTv))
                 }
+                if (topRatedMovies.isNotEmpty()) {
+                    add(MediaCarouselSection("tmdb-top-movies", "Top Rated Movies", "High-signal movie picks from TMDB", topRatedMovies))
+                }
                 if (animeCatalogs.trending.isNotEmpty()) {
                     add(MediaCarouselSection("anime-trending", "Trending Anime", "AniList-powered anime discovery", animeCatalogs.trending.take(12).map { it.toExploreMediaCard("Anime") }))
+                }
+                if (animeCatalogs.popular.isNotEmpty()) {
+                    add(MediaCarouselSection("anime-popular", "Popular Anime", "Frequently watched AniList anime picks", animeCatalogs.popular.take(12).map { it.toExploreMediaCard("Anime") }))
                 }
                 if (animeCatalogs.airing.isNotEmpty()) {
                     add(MediaCarouselSection("anime-airing", "Currently Airing Anime", "What's actively rolling out now", animeCatalogs.airing.take(12).map { it.toExploreMediaCard("Airing") }))

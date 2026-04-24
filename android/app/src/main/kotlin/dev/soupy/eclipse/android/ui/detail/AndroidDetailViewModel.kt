@@ -13,6 +13,7 @@ import dev.soupy.eclipse.android.data.DetailRepository
 import dev.soupy.eclipse.android.data.DownloadDraft
 import dev.soupy.eclipse.android.data.LibraryItemDraft
 import dev.soupy.eclipse.android.data.StreamResolutionRepository
+import dev.soupy.eclipse.android.data.StreamEpisodeSelection
 import dev.soupy.eclipse.android.core.model.DetailTarget
 import dev.soupy.eclipse.android.feature.detail.DetailEpisodeRow
 import dev.soupy.eclipse.android.feature.detail.DetailScreenState
@@ -63,6 +64,19 @@ class AndroidDetailViewModel(
     }
 
     fun resolveStreams() {
+        val selectedEpisode = state.value.selectedEpisodeId
+            ?.let { id -> state.value.episodes.firstOrNull { it.id == id } }
+            ?.toStreamEpisodeSelection()
+        resolveStreamsForEpisode(selectedEpisode)
+    }
+
+    fun resolveEpisodeStreams(episodeId: String) {
+        val episode = state.value.episodes.firstOrNull { it.id == episodeId } ?: return
+        val selection = episode.toStreamEpisodeSelection() ?: return
+        resolveStreamsForEpisode(selection)
+    }
+
+    private fun resolveStreamsForEpisode(episode: StreamEpisodeSelection?) {
         val target = currentTarget ?: return
         if (_state.value.isResolvingStreams) return
 
@@ -70,10 +84,18 @@ class AndroidDetailViewModel(
             _state.update {
                 it.copy(
                     isResolvingStreams = true,
-                    streamStatusMessage = "Resolving addon streams...",
+                    streamStatusMessage = episode?.let { selected ->
+                        "Resolving addon streams for ${selected.label}..."
+                    } ?: "Resolving addon streams...",
+                    selectedEpisodeId = episode?.let { selected ->
+                        _state.value.episodes.firstOrNull {
+                            it.seasonNumber == selected.seasonNumber && it.episodeNumber == selected.episodeNumber
+                        }?.id
+                    } ?: it.selectedEpisodeId,
+                    selectedEpisodeLabel = episode?.label ?: it.selectedEpisodeLabel,
                 )
             }
-            streamResolutionRepository.resolve(target)
+            streamResolutionRepository.resolve(target, episode)
                 .onSuccess { result ->
                     _state.update { state ->
                         state.copy(
@@ -229,8 +251,20 @@ private fun DetailContent.toUiState(): DetailScreenState = DetailScreenState(
             subtitle = it.subtitle,
             imageUrl = it.imageUrl,
             overview = it.overview,
+            seasonNumber = it.seasonNumber,
+            episodeNumber = it.episodeNumber,
         )
     },
 )
+
+private fun DetailEpisodeRow.toStreamEpisodeSelection(): StreamEpisodeSelection? {
+    val season = seasonNumber ?: return null
+    val episode = episodeNumber ?: return null
+    return StreamEpisodeSelection(
+        seasonNumber = season,
+        episodeNumber = episode,
+        label = "S${season}E${episode}",
+    )
+}
 
 

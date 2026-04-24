@@ -48,6 +48,9 @@ class EclipseAppContainer(
         aniListService = aniListService,
         tmdbEnabled = tmdbApiKey.isNotBlank(),
     )
+    private val animeTmdbMapper: AnimeTmdbMapper = AnimeTmdbMapper(
+        tmdbService = tmdbService,
+    )
     val searchRepository: SearchRepository = SearchRepository(
         tmdbService = tmdbService,
         aniListService = aniListService,
@@ -56,9 +59,12 @@ class EclipseAppContainer(
     val detailRepository: DetailRepository = DetailRepository(
         tmdbService = tmdbService,
         aniListService = aniListService,
+        animeTmdbMapper = animeTmdbMapper,
     )
     val streamResolutionRepository: StreamResolutionRepository = StreamResolutionRepository(
         tmdbService = tmdbService,
+        aniListService = aniListService,
+        animeTmdbMapper = animeTmdbMapper,
         stremioService = stremioService,
         stremioAddonDao = database.stremioAddonDao(),
         settingsStore = settingsStore,

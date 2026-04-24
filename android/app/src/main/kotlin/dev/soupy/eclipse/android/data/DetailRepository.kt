@@ -1,5 +1,7 @@
 package dev.soupy.eclipse.android.data
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import dev.soupy.eclipse.android.core.model.AniListMedia
 import dev.soupy.eclipse.android.core.model.DetailTarget
 import dev.soupy.eclipse.android.core.model.displayTitle
@@ -17,6 +19,8 @@ data class DetailEpisodeEntry(
     val subtitle: String? = null,
     val imageUrl: String? = null,
     val overview: String? = null,
+    val seasonNumber: Int? = null,
+    val episodeNumber: Int? = null,
 )
 
 data class DetailContent(
@@ -33,6 +37,7 @@ data class DetailContent(
 class DetailRepository(
     private val tmdbService: TmdbService,
     private val aniListService: AniListService,
+    private val animeTmdbMapper: AnimeTmdbMapper,
 ) {
     suspend fun load(target: DetailTarget): Result<DetailContent> = runCatching {
         when (target) {
@@ -55,8 +60,10 @@ class DetailRepository(
 
             is DetailTarget.TmdbShow -> {
                 val show = tmdbService.tvShowDetail(target.id).orThrow()
-                val firstSeason = show.seasons.firstOrNull { it.seasonNumber > 0 } ?: show.seasons.firstOrNull()
-                val seasonDetail = firstSeason?.let { tmdbService.seasonDetail(target.id, it.seasonNumber).orNull() }
+                val seasonDetails = tmdbService.firstPlayableSeasonDetails(
+                    showId = target.id,
+                    seasons = show.seasons,
+                )
 
                 DetailContent(
                     title = show.name,
@@ -70,14 +77,19 @@ class DetailRepository(
                         show.seasons.size.takeIf { it > 0 }?.let { add("$it seasons") }
                         addAll(show.genres.map { it.name }.take(3))
                     },
-                    episodesTitle = seasonDetail?.name ?: firstSeason?.name,
-                    episodes = seasonDetail?.episodes?.take(10)?.map { it.toDetailEpisodeEntry() }.orEmpty(),
+                    episodesTitle = seasonDetails.title(show.name),
+                    episodes = seasonDetails.flatMap { seasonDetail ->
+                        seasonDetail.episodes.map { it.toDetailEpisodeEntry() }
+                    },
                 )
             }
 
             is DetailTarget.AniListMediaTarget -> {
                 val media = aniListService.mediaById(target.id).orThrow()
-                media.toDetailContent()
+                media.toDetailContent(
+                    tmdbMatch = animeTmdbMapper.findBestMatch(media),
+                    tmdbService = tmdbService,
+                )
             }
         }
     }
@@ -89,24 +101,84 @@ private fun TMDBEpisode.toDetailEpisodeEntry(): DetailEpisodeEntry = DetailEpiso
     subtitle = "S$seasonNumber | E$episodeNumber" + (airDate?.takeIf { it.isNotBlank() }?.let { " | $it" } ?: ""),
     imageUrl = fullStillUrl,
     overview = overview,
+    seasonNumber = seasonNumber,
+    episodeNumber = episodeNumber,
 )
 
-private fun AniListMedia.toDetailContent(): DetailContent = DetailContent(
-    title = displayTitle,
-    subtitle = listOfNotNull(
-        format?.replace('_', ' '),
-        seasonYear?.toString(),
-    ).joinToString(" | ").ifBlank { "Anime" },
-    overview = description?.stripHtmlTags(),
-    posterUrl = posterUrl,
-    backdropUrl = bannerImage ?: posterUrl,
-    metadataChips = buildList {
-        add("Anime")
-        format?.replace('_', ' ')?.let(::add)
-        seasonYear?.toString()?.let(::add)
-        episodes?.takeIf { it > 0 }?.let { add("$it eps") }
-        status?.replace('_', ' ')?.let(::add)
-        addAll(genres.take(3))
-    },
-)
+private suspend fun AniListMedia.toDetailContent(
+    tmdbMatch: AnimeTmdbMatch?,
+    tmdbService: TmdbService,
+): DetailContent {
+    val tmdbShowEpisodes = (tmdbMatch?.target as? DetailTarget.TmdbShow)?.let { target ->
+        runCatching {
+            val show = tmdbService.tvShowDetail(target.id).orThrow()
+            val seasons = tmdbService.firstPlayableSeasonDetails(
+                showId = target.id,
+                seasons = show.seasons,
+            )
+            seasons.title(show.name) to seasons.flatMap { seasonDetail ->
+                seasonDetail.episodes.map { it.toDetailEpisodeEntry() }
+            }
+        }.getOrNull()
+    }
+    val syntheticEpisodes = if (tmdbShowEpisodes == null) syntheticAnimeEpisodes() else emptyList()
+
+    return DetailContent(
+        title = displayTitle,
+        subtitle = listOfNotNull(
+            format?.replace('_', ' '),
+            seasonYear?.toString(),
+            tmdbMatch?.title?.let { "TMDB: $it" },
+        ).joinToString(" | ").ifBlank { "Anime" },
+        overview = description?.stripHtmlTags(),
+        posterUrl = posterUrl,
+        backdropUrl = bannerImage ?: posterUrl,
+        metadataChips = buildList {
+            add("Anime")
+            format?.replace('_', ' ')?.let(::add)
+            seasonYear?.toString()?.let(::add)
+            episodes?.takeIf { it > 0 }?.let { add("$it eps") }
+            status?.replace('_', ' ')?.let(::add)
+            tmdbMatch?.let { add("TMDB match ${(it.confidence * 100).toInt()}%") }
+            addAll(genres.take(3))
+        },
+        episodesTitle = tmdbShowEpisodes?.first ?: syntheticEpisodes.takeIf { it.isNotEmpty() }?.let { "Episodes" },
+        episodes = tmdbShowEpisodes?.second ?: syntheticEpisodes,
+    )
+}
+
+private suspend fun TmdbService.firstPlayableSeasonDetails(
+    showId: Int,
+    seasons: List<dev.soupy.eclipse.android.core.model.TMDBSeason>,
+): List<dev.soupy.eclipse.android.core.model.TMDBSeasonDetail> = coroutineScope {
+    seasons
+        .filter { season -> season.seasonNumber > 0 && season.episodeCount > 0 }
+        .take(3)
+        .map { season ->
+            async { seasonDetail(showId, season.seasonNumber).orNull() }
+        }
+        .mapNotNull { deferred -> deferred.await() }
+        .filter { season -> season.episodes.isNotEmpty() }
+}
+
+private fun List<dev.soupy.eclipse.android.core.model.TMDBSeasonDetail>.title(showName: String): String? = when {
+    isEmpty() -> null
+    size == 1 -> first().name.ifBlank { "$showName Episodes" }
+    else -> "Episodes"
+}
+
+private fun AniListMedia.syntheticAnimeEpisodes(): List<DetailEpisodeEntry> {
+    val count = episodes ?: nextAiringEpisode?.episode?.minus(1) ?: 0
+    return (1..count.coerceAtMost(24)).map { episode ->
+        DetailEpisodeEntry(
+            id = "anilist-$id-episode-$episode",
+            title = "Episode $episode",
+            subtitle = "Episode $episode",
+            imageUrl = posterUrl,
+            overview = null,
+            seasonNumber = 1,
+            episodeNumber = episode,
+        )
+    }
+}
 

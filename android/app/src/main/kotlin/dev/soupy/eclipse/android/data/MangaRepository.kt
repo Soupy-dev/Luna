@@ -10,10 +10,12 @@ import dev.soupy.eclipse.android.core.storage.MangaStore
 data class MangaOverviewSnapshot(
     val collections: List<MangaLibraryCollection>,
     val recentProgress: List<Pair<String, MangaProgress>>,
+    val recentNovelProgress: List<Pair<String, MangaProgress>>,
     val modules: List<KanzenModuleRecord>,
     val savedCount: Int,
     val readChapterCount: Int,
     val novelCount: Int,
+    val novelReadChapterCount: Int,
     val importedFromBackup: Boolean,
 )
 
@@ -47,16 +49,26 @@ private fun MangaLibrarySnapshot.toOverview(importedFromBackup: Boolean): MangaO
     val progressEntries = readingProgress.entries
         .sortedByDescending { (_, progress) -> progress.lastReadDate.orEmpty() }
         .take(8)
+    val novelProgressEntries = readingProgress.entries
+        .filter { (_, progress) -> progress.isNovelProgress }
+        .sortedByDescending { (_, progress) -> progress.lastReadDate.orEmpty() }
+        .take(8)
+    val allNovelProgress = readingProgress.values.filter(MangaProgress::isNovelProgress)
 
     return MangaOverviewSnapshot(
         collections = collections,
         recentProgress = progressEntries.map { (id, progress) -> id to progress },
+        recentNovelProgress = novelProgressEntries.map { (id, progress) -> id to progress },
         modules = modules,
         savedCount = collections.flatMap(MangaLibraryCollection::items)
             .distinctBy { item -> item.aniListId }
             .size,
         readChapterCount = readingProgress.values.sumOf { progress -> progress.readChapterNumbers.size },
-        novelCount = readingProgress.values.count { progress -> progress.isNovel == true || progress.format == "NOVEL" },
+        novelCount = allNovelProgress.size,
+        novelReadChapterCount = allNovelProgress.sumOf { progress -> progress.readChapterNumbers.size },
         importedFromBackup = importedFromBackup,
     )
 }
+
+private val MangaProgress.isNovelProgress: Boolean
+    get() = isNovel == true || format.equals("NOVEL", ignoreCase = true) || format.equals("LIGHT_NOVEL", ignoreCase = true)

@@ -31,11 +31,13 @@ The Android namespace now uses `dev.soupy.eclipse.android` rather than the earli
 - Room/DataStore/file-backed persistence foundations
 - A working Media3 normal-player boundary
 - JS runtime and WebView helper interfaces for the future sideload-first provider ecosystem
-- Live TMDB/AniList-backed browse, search, detail, and airing schedule flows
+- Live TMDB/AniList-backed browse, search, detail, and airing schedule flows, including iOS-parity TMDB movie rows for now playing, upcoming, and top-rated movies
 - Persisted Android-side library and continue-watching state, with direct-player progress now syncing resume entries automatically
 - A DataStore-backed settings screen with player selection, next-episode controls, and the auto-mode warning
 - Settings backup import/export that preserves unsupported Luna backup sections for later parity work
-- First-pass Stremio addon stream resolution on TMDB movie and series detail pages, with direct URLs playable in the Android normal player
+- First-pass Stremio addon stream resolution on TMDB movie and series detail pages, plus an AniList-to-TMDB anime bridge for resolving mapped anime episodes
+- Episode-aware stream resolution from detail episode rows instead of only resolving the first series episode
+- Backup-backed manga and novel overview surfaces for restored Kanzen library/progress/module data
 
 ## Version choices
 
@@ -44,9 +46,9 @@ The Android dependency versions in `gradle/libs.versions.toml` were chosen from 
 ## Current limitations
 
 - The full feature set from the Apple app is not finished yet. Android now has a real shell, persistence, backup flow, and first-pass Stremio resolution, but it is still well short of full parity.
-- Anime-specific source resolution is not wired into the Android stream resolver yet. The first supported path is TMDB movie and series detail.
+- Anime-specific source resolution now has an AniList-to-TMDB bridge, but it is still heuristic and not as complete as the Apple app's full AniList/TMDB episode reconstruction.
 - Torrent-style Stremio results are surfaced in the UI, but they are not playable yet because Android still needs its torrent engine or alternate-player handoff work.
-- Services, downloads, trackers, manga, novels, and alternate player backends are still earlier-stage compared with the Apple app.
+- Services, downloads, trackers, manga/novel readers, and alternate player backends are still earlier-stage compared with the Apple app.
 
 ## Running on Windows
 
@@ -67,7 +69,7 @@ The debug APK will land under `android/app/build/outputs/apk/debug/`.
 
 ## Next recommended steps
 
-1. Expand the resolver beyond TMDB movies and shows into the anime-specific AniList/TMDB hybrid flow.
+1. Harden the anime-specific AniList/TMDB hybrid flow with the fuller iOS episode reconstruction and special/OVA mapping.
 2. Add real downloader execution behind the existing downloads queue and metadata state.
 3. Broaden Stremio support with torrent or alternate-player handling, not just direct URL streams.
 4. Feed the same playback progress layer into next-episode orchestration instead of only continue-watching sync.

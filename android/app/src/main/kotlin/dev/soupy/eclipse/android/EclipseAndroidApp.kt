@@ -51,6 +51,7 @@ import dev.soupy.eclipse.android.ui.downloads.AndroidDownloadsViewModel
 import dev.soupy.eclipse.android.ui.home.AndroidHomeViewModel
 import dev.soupy.eclipse.android.ui.library.AndroidLibraryViewModel
 import dev.soupy.eclipse.android.ui.manga.AndroidMangaViewModel
+import dev.soupy.eclipse.android.ui.novel.AndroidNovelViewModel
 import dev.soupy.eclipse.android.ui.rememberFeatureViewModel
 import dev.soupy.eclipse.android.ui.schedule.AndroidScheduleViewModel
 import dev.soupy.eclipse.android.ui.search.AndroidSearchViewModel
@@ -115,6 +116,9 @@ fun EclipseAndroidApp() {
     val mangaViewModel = rememberFeatureViewModel("manga") {
         AndroidMangaViewModel(appContainer.mangaRepository)
     }
+    val novelViewModel = rememberFeatureViewModel("novel") {
+        AndroidNovelViewModel(appContainer.mangaRepository)
+    }
 
     val homeState by homeViewModel.state.collectAsState()
     val searchState by searchViewModel.state.collectAsState()
@@ -125,6 +129,7 @@ fun EclipseAndroidApp() {
     val downloadsState by downloadsViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val mangaState by mangaViewModel.state.collectAsState()
+    val novelState by novelViewModel.state.collectAsState()
     val playbackSettings = PlaybackSettingsSnapshot(
         aniSkipAutoSkip = settingsState.aniSkipAutoSkip,
         skip85sEnabled = settingsState.skip85sEnabled,
@@ -219,6 +224,7 @@ fun EclipseAndroidApp() {
                                     ?.let(downloadsViewModel::queueDownload)
                             },
                             onResolveStreams = detailViewModel::resolveStreams,
+                            onResolveEpisodeStreams = detailViewModel::resolveEpisodeStreams,
                             onPlayStream = detailViewModel::playResolvedStream,
                             onPlaybackProgress = { progress ->
                                 detailViewModel.currentPlaybackProgressDraft(
@@ -304,7 +310,12 @@ fun EclipseAndroidApp() {
                             onRefresh = mangaViewModel::refresh,
                         )
                     }
-                    composable("novel") { NovelRoute() }
+                    composable("novel") {
+                        NovelRoute(
+                            state = novelState,
+                            onRefresh = novelViewModel::refresh,
+                        )
+                    }
                 }
             }
         }
