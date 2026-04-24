@@ -9,6 +9,7 @@ import dev.soupy.eclipse.android.core.model.StremioAddonBackup
 import dev.soupy.eclipse.android.core.model.hasBackupData
 import dev.soupy.eclipse.android.core.network.EclipseJson
 import dev.soupy.eclipse.android.core.storage.BackupFileStore
+import dev.soupy.eclipse.android.core.storage.MangaStore
 import dev.soupy.eclipse.android.core.storage.ServiceDao
 import dev.soupy.eclipse.android.core.storage.ServiceEntity
 import dev.soupy.eclipse.android.core.storage.SettingsStore
@@ -31,6 +32,7 @@ class BackupRepository(
     private val context: Context,
     private val backupFileStore: BackupFileStore,
     private val settingsStore: SettingsStore,
+    private val mangaStore: MangaStore,
     private val serviceDao: ServiceDao,
     private val stremioAddonDao: StremioAddonDao,
 ) {
@@ -65,6 +67,15 @@ class BackupRepository(
         val settings = settingsStore.settings.first()
         val services = serviceDao.observeAll().first()
         val addons = stremioAddonDao.observeAll().first()
+        val manga = mangaStore.read()
+        val exportedMangaCollections = manga.takeIf { it.hasUserData }?.toBackupCollections()
+            ?: payload?.mangaCollections.orEmpty()
+        val exportedMangaProgress = manga.takeIf { it.hasUserData }?.toBackupProgress()
+            ?: payload?.mangaReadingProgress.orEmpty()
+        val exportedMangaCatalogs = manga.takeIf { it.hasUserData }?.catalogs
+            ?: payload?.mangaCatalogs.orEmpty()
+        val exportedKanzenModules = manga.takeIf { it.hasUserData }?.toBackupModules()
+            ?: payload?.kanzenModules.orEmpty()
 
         return BackupDocument(
             payload = BackupData(
@@ -117,11 +128,11 @@ class BackupRepository(
                 catalogs = payload?.catalogs.orEmpty(),
                 services = services.map(ServiceEntity::toBackup),
                 stremioAddons = addons.map(StremioAddonEntity::toBackup),
-                mangaCollections = payload?.mangaCollections.orEmpty(),
-                mangaReadingProgress = payload?.mangaReadingProgress.orEmpty(),
+                mangaCollections = exportedMangaCollections,
+                mangaReadingProgress = exportedMangaProgress,
                 mangaProgressData = payload?.mangaProgressData ?: BackupData().mangaProgressData,
-                mangaCatalogs = payload?.mangaCatalogs.orEmpty(),
-                kanzenModules = payload?.kanzenModules.orEmpty(),
+                mangaCatalogs = exportedMangaCatalogs,
+                kanzenModules = exportedKanzenModules,
                 recommendationCache = payload?.recommendationCache ?: BackupData().recommendationCache,
                 userRatings = payload?.userRatings.orEmpty(),
             ),
@@ -131,6 +142,7 @@ class BackupRepository(
 
     private suspend fun applyPayload(payload: BackupData) {
         settingsStore.restoreFromBackup(payload)
+        mangaStore.write(payload.toMangaLibrarySnapshot())
         val importedServices = syncServices(payload.services)
         val importedAddons = payload.stremioAddons?.let { syncAddons(it) }
             ?: stremioAddonDao.observeAll().first()

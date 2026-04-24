@@ -13,6 +13,7 @@ import dev.soupy.eclipse.android.core.storage.BackupFileStore
 import dev.soupy.eclipse.android.core.storage.DownloadsStore
 import dev.soupy.eclipse.android.core.storage.EclipseDatabase
 import dev.soupy.eclipse.android.core.storage.LibraryStore
+import dev.soupy.eclipse.android.core.storage.MangaStore
 import dev.soupy.eclipse.android.core.storage.SettingsStore
 
 class EclipseAppContainer(
@@ -34,6 +35,10 @@ class EclipseAppContainer(
         json = EclipseJson,
     )
     private val downloadsStore: DownloadsStore = DownloadsStore(
+        context = context,
+        json = EclipseJson,
+    )
+    private val mangaStore: MangaStore = MangaStore(
         context = context,
         json = EclipseJson,
     )
@@ -73,11 +78,16 @@ class EclipseAppContainer(
         context = context,
         backupFileStore = backupFileStore,
         settingsStore = settingsStore,
+        mangaStore = mangaStore,
         serviceDao = database.serviceDao(),
         stremioAddonDao = database.stremioAddonDao(),
     )
     val downloadsRepository: DownloadsRepository = DownloadsRepository(
         downloadsStore = downloadsStore,
+    )
+    val mangaRepository: MangaRepository = MangaRepository(
+        mangaStore = mangaStore,
+        backupFileStore = backupFileStore,
     )
 }
 

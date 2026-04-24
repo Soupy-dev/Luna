@@ -50,6 +50,7 @@ import dev.soupy.eclipse.android.ui.detail.AndroidDetailViewModel
 import dev.soupy.eclipse.android.ui.downloads.AndroidDownloadsViewModel
 import dev.soupy.eclipse.android.ui.home.AndroidHomeViewModel
 import dev.soupy.eclipse.android.ui.library.AndroidLibraryViewModel
+import dev.soupy.eclipse.android.ui.manga.AndroidMangaViewModel
 import dev.soupy.eclipse.android.ui.rememberFeatureViewModel
 import dev.soupy.eclipse.android.ui.schedule.AndroidScheduleViewModel
 import dev.soupy.eclipse.android.ui.search.AndroidSearchViewModel
@@ -111,6 +112,9 @@ fun EclipseAndroidApp() {
             backupRepository = appContainer.backupRepository,
         )
     }
+    val mangaViewModel = rememberFeatureViewModel("manga") {
+        AndroidMangaViewModel(appContainer.mangaRepository)
+    }
 
     val homeState by homeViewModel.state.collectAsState()
     val searchState by searchViewModel.state.collectAsState()
@@ -120,6 +124,7 @@ fun EclipseAndroidApp() {
     val servicesState by servicesViewModel.state.collectAsState()
     val downloadsState by downloadsViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
+    val mangaState by mangaViewModel.state.collectAsState()
     val playbackSettings = PlaybackSettingsSnapshot(
         aniSkipAutoSkip = settingsState.aniSkipAutoSkip,
         skip85sEnabled = settingsState.skip85sEnabled,
@@ -293,7 +298,12 @@ fun EclipseAndroidApp() {
                             onImportBackup = settingsViewModel::importBackup,
                         )
                     }
-                    composable("manga") { MangaRoute() }
+                    composable("manga") {
+                        MangaRoute(
+                            state = mangaState,
+                            onRefresh = mangaViewModel::refresh,
+                        )
+                    }
                     composable("novel") { NovelRoute() }
                 }
             }
