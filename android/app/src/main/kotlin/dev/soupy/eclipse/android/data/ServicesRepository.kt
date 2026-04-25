@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
 
 data class ServiceDraft(
     val name: String,
@@ -24,6 +25,8 @@ data class ServiceSourceRecord(
     val autoModeId: String,
     val name: String,
     val subtitle: String? = null,
+    val configurationJson: String? = null,
+    val configurationSummary: String? = null,
     val enabled: Boolean = true,
     val sortIndex: Int = 0,
 )
@@ -68,6 +71,8 @@ class ServicesRepository(
                     autoModeId = entity.autoModeId,
                     name = entity.name,
                     subtitle = buildServiceSubtitle(entity),
+                    configurationJson = entity.configurationJson,
+                    configurationSummary = entity.configurationSummary(),
                     enabled = entity.enabled,
                     sortIndex = entity.sortIndex,
                 )
@@ -176,6 +181,24 @@ class ServicesRepository(
         service.copy(enabled = enabled, updatedAt = System.currentTimeMillis())
     }
 
+    suspend fun setServiceConfiguration(
+        id: String,
+        configurationJson: String?,
+    ): Result<Unit> = updateService(id) { service ->
+        val normalized = configurationJson
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.also { raw ->
+                require(runCatching { EclipseJson.decodeFromString<JsonObject>(raw) }.isSuccess) {
+                    "Service configuration must be a JSON object."
+                }
+            }
+        service.copy(
+            configurationJson = normalized,
+            updatedAt = System.currentTimeMillis(),
+        )
+    }
+
     suspend fun setAddonEnabled(transportUrl: String, enabled: Boolean): Result<Unit> = updateAddon(transportUrl) { addon ->
         addon.copy(enabled = enabled, updatedAt = System.currentTimeMillis())
     }
@@ -261,6 +284,18 @@ private fun buildServiceSubtitle(entity: ServiceEntity): String? = when {
     !entity.scriptUrl.isNullOrBlank() -> entity.scriptUrl
     !entity.manifestUrl.isNullOrBlank() -> entity.manifestUrl
     else -> entity.sourceKind
+}
+
+private fun ServiceEntity.configurationSummary(): String? {
+    val raw = configurationJson?.takeIf { it.isNotBlank() } ?: return null
+    val count = runCatching {
+        EclipseJson.decodeFromString<JsonObject>(raw).size
+    }.getOrDefault(0)
+    return when (count) {
+        0 -> "Configuration saved"
+        1 -> "1 provider setting saved"
+        else -> "$count provider settings saved"
+    }
 }
 
 private fun StremioAddonEntity.manifest(): StremioManifest? = manifestJson?.runCatching {

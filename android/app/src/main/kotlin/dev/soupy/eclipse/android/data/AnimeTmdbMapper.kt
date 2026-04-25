@@ -30,6 +30,19 @@ data class AnimeTmdbMatch(
     val sourceRelationType: String? = null,
     val tmdbSeasonNumber: Int? = null,
     val tmdbEpisodeOffset: Int = 0,
+    val episodeMappings: List<AnimeEpisodeMapping> = emptyList(),
+)
+
+data class AnimeEpisodeMapping(
+    val localSeasonNumber: Int,
+    val localEpisodeNumber: Int,
+    val anilistMediaId: Int,
+    val anilistTitle: String,
+    val relationType: String? = null,
+    val tmdbSeasonNumber: Int,
+    val tmdbEpisodeNumber: Int,
+    val tmdbEpisodeOffset: Int = 0,
+    val isSpecial: Boolean = false,
 )
 
 internal data class AnimeTmdbSeasonMatch(
@@ -110,12 +123,22 @@ class AnimeTmdbMapper(
         val show = tmdbService.tvShowDetail(tmdbId).orNull() ?: return this
         val seasonMatch = sourceMedia.bestTmdbSeasonMatch(show)
         val showEpisodeScore = sourceMedia.totalEpisodeAlignmentScore(show)
-        val hydratedConfidence = (confidence + max(seasonMatch?.confidence ?: 0.0, showEpisodeScore)).coerceIn(0.0, 1.0)
+        val episodeMappings = sourceMedia.reconstructTmdbEpisodeMappings(
+            show = show,
+            anchorSeasonMatch = seasonMatch,
+        )
+        val reconstructionBoost = if (episodeMappings.isNotEmpty()) 0.03 else 0.0
+        val hydratedConfidence = (
+            confidence +
+                max(seasonMatch?.confidence ?: 0.0, showEpisodeScore) +
+                reconstructionBoost
+            ).coerceIn(0.0, 1.0)
 
         return copy(
             confidence = hydratedConfidence,
             tmdbSeasonNumber = seasonMatch?.seasonNumber,
             tmdbEpisodeOffset = seasonMatch?.episodeOffset ?: 0,
+            episodeMappings = episodeMappings,
         )
     }
 }
@@ -126,28 +149,29 @@ private data class AnimeSearchSeed(
     val depth: Int,
 )
 
+private val AnimeRelationPriority = mapOf(
+    "PARENT" to 0,
+    "SOURCE" to 1,
+    "PREQUEL" to 2,
+    "SEQUEL" to 3,
+    "SEASON" to 4,
+    "ALTERNATIVE" to 5,
+    "SIDE_STORY" to 6,
+    "SPIN_OFF" to 7,
+    "OTHER" to 8,
+)
+
 private fun AniListMedia.matchSearchSeeds(): List<AnimeSearchSeed> {
     val seeds = mutableListOf(AnimeSearchSeed(this, null, depth = 0))
     val visitedIds = mutableSetOf(id)
-    val relationPriority = mapOf(
-        "PARENT" to 0,
-        "SOURCE" to 1,
-        "PREQUEL" to 2,
-        "SEQUEL" to 3,
-        "SEASON" to 4,
-        "ALTERNATIVE" to 5,
-        "SIDE_STORY" to 6,
-        "SPIN_OFF" to 7,
-        "OTHER" to 8,
-    )
-    val allowedRelationTypes = relationPriority.keys
+    val allowedRelationTypes = AnimeRelationPriority.keys
 
     fun collect(media: AniListMedia, depth: Int) {
-        if (depth >= 2 || seeds.size >= 14) return
+        if (depth >= 3 || seeds.size >= 24) return
         media.relationEdges
             .asSequence()
             .filter { edge -> edge.relationType in allowedRelationTypes }
-            .sortedBy { edge -> relationPriority[edge.relationType] ?: Int.MAX_VALUE }
+            .sortedBy { edge -> AnimeRelationPriority[edge.relationType] ?: Int.MAX_VALUE }
             .forEach { edge ->
                 val node = edge.node ?: return@forEach
                 if (!node.type.equals("ANIME", ignoreCase = true) && node.type != null) {
@@ -255,6 +279,109 @@ internal fun AniListMedia.bestTmdbSeasonMatch(show: TMDBTVShowDetail): AnimeTmdb
         seasonNumber = season.seasonNumber,
         confidence = score.coerceIn(0.0, 0.24),
     ).takeIf { score >= 0.08 }
+}
+
+internal fun AniListMedia.reconstructTmdbEpisodeMappings(
+    show: TMDBTVShowDetail,
+    anchorSeasonMatch: AnimeTmdbSeasonMatch? = bestTmdbSeasonMatch(show),
+): List<AnimeEpisodeMapping> {
+    val playableSeasons = show.seasons
+        .filter { season -> season.episodeCount > 0 }
+        .sortedBy(TMDBSeason::seasonNumber)
+    if (playableSeasons.isEmpty()) return emptyList()
+
+    val seeds = matchSearchSeeds()
+        .sortedWith(
+            compareBy<AnimeSearchSeed> { seed -> seed.depth }
+                .thenBy { seed -> AnimeRelationPriority[seed.relationType] ?: Int.MAX_VALUE }
+                .thenBy { seed -> seed.media.seasonYear ?: Int.MAX_VALUE }
+                .thenBy { seed -> seed.media.id },
+        )
+    val regularSeasons = playableSeasons.filter { season -> season.seasonNumber > 0 }
+    val specialSeason = playableSeasons.firstOrNull { season -> season.seasonNumber == 0 }
+    val usedSeasonNumbers = mutableSetOf<Int>()
+    val assignments = mutableListOf<Pair<AnimeSearchSeed, AnimeTmdbSeasonMatch>>()
+
+    fun assign(seed: AnimeSearchSeed, match: AnimeTmdbSeasonMatch?) {
+        val seasonNumber = match?.seasonNumber ?: return
+        val season = playableSeasons.firstOrNull { it.seasonNumber == seasonNumber } ?: return
+        if (!usedSeasonNumbers.add(season.seasonNumber)) return
+        assignments += seed to match
+    }
+
+    val sourceSeed = seeds.firstOrNull { seed -> seed.media.id == id } ?: AnimeSearchSeed(this, null, depth = 0)
+    assign(sourceSeed, anchorSeasonMatch)
+    val anchorSeasonNumber = anchorSeasonMatch?.seasonNumber
+
+    seeds
+        .filterNot { seed -> seed.media.id == id }
+        .filterNot { seed -> seed.media.isLikelySpecialEntry() }
+        .forEach { seed ->
+            val directMatch = seed.media.bestTmdbSeasonMatch(show)
+                ?.takeIf { match -> match.seasonNumber > 0 && match.seasonNumber !in usedSeasonNumbers }
+            val relationFallback = when (seed.relationType) {
+                "PREQUEL" -> regularSeasons
+                    .filter { season -> anchorSeasonNumber == null || season.seasonNumber < anchorSeasonNumber }
+                    .lastOrNull { season -> season.seasonNumber !in usedSeasonNumbers }
+                "SEQUEL", "SEASON" -> regularSeasons
+                    .filter { season -> anchorSeasonNumber == null || season.seasonNumber > anchorSeasonNumber }
+                    .firstOrNull { season -> season.seasonNumber !in usedSeasonNumbers }
+                else -> regularSeasons.firstOrNull { season -> season.seasonNumber !in usedSeasonNumbers }
+            }?.let { season ->
+                AnimeTmdbSeasonMatch(
+                    seasonNumber = season.seasonNumber,
+                    confidence = 0.10,
+                )
+            }
+            assign(seed, directMatch ?: relationFallback)
+        }
+
+    seeds
+        .filter { seed -> seed.media.isLikelySpecialEntry() }
+        .forEach { seed ->
+            val directMatch = seed.media.bestTmdbSeasonMatch(show)
+                ?.takeIf { match -> match.seasonNumber !in usedSeasonNumbers }
+            val specialFallback = specialSeason
+                ?.takeIf { season -> season.seasonNumber !in usedSeasonNumbers }
+                ?.let { season ->
+                    AnimeTmdbSeasonMatch(
+                        seasonNumber = season.seasonNumber,
+                        confidence = 0.12,
+                    )
+                }
+            assign(seed, directMatch ?: specialFallback)
+        }
+
+    if (assignments.isEmpty()) return emptyList()
+
+    return assignments
+        .sortedWith(
+            compareBy<Pair<AnimeSearchSeed, AnimeTmdbSeasonMatch>> { (_, match) -> match.seasonNumber }
+                .thenBy { (seed, _) -> seed.depth }
+                .thenBy { (seed, _) -> seed.media.id },
+        )
+        .flatMap { (seed, match) ->
+            val season = playableSeasons.firstOrNull { it.seasonNumber == match.seasonNumber }
+                ?: return@flatMap emptyList()
+            val episodeCount = seed.media.effectiveEpisodeCount()
+                ?.coerceAtLeast(1)
+                ?: season.episodeCount
+            val offset = match.episodeOffset.coerceAtLeast(0)
+            val localSeasonNumber = match.seasonNumber.takeIf { it > 0 } ?: 0
+            (1..episodeCount.coerceAtMost(200)).map { localEpisode ->
+                AnimeEpisodeMapping(
+                    localSeasonNumber = localSeasonNumber,
+                    localEpisodeNumber = localEpisode,
+                    anilistMediaId = seed.media.id,
+                    anilistTitle = seed.media.displayTitle,
+                    relationType = seed.relationType,
+                    tmdbSeasonNumber = match.seasonNumber,
+                    tmdbEpisodeNumber = localEpisode + offset,
+                    tmdbEpisodeOffset = offset,
+                    isSpecial = match.seasonNumber == 0 || seed.media.isLikelySpecialEntry(),
+                )
+            }
+        }
 }
 
 private fun AniListMedia.totalEpisodeAlignmentScore(show: TMDBTVShowDetail): Double {

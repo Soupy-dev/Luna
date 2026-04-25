@@ -21,6 +21,7 @@ import dev.soupy.eclipse.android.data.LoggerRepository
 import dev.soupy.eclipse.android.data.MangaRepository
 import dev.soupy.eclipse.android.data.TrackerAccountDraft
 import dev.soupy.eclipse.android.data.TrackerRepository
+import dev.soupy.eclipse.android.data.TrackerSyncSummary
 import dev.soupy.eclipse.android.feature.settings.CatalogSettingsRow
 import dev.soupy.eclipse.android.feature.settings.LogSettingsRow
 import dev.soupy.eclipse.android.feature.settings.SettingsScreenState
@@ -47,7 +48,12 @@ class AndroidSettingsViewModel(
     private val mangaRepository: MangaRepository,
     private val aniListService: AniListService,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(SettingsScreenState())
+    private val _state = MutableStateFlow(
+        SettingsScreenState(
+            aniListOAuthUrl = trackerRepository.authorizationUrl("AniList").orEmpty(),
+            traktOAuthUrl = trackerRepository.authorizationUrl("Trakt").orEmpty(),
+        ),
+    )
     val state: StateFlow<SettingsScreenState> = _state.asStateFlow()
 
     init {
@@ -641,6 +647,32 @@ class AndroidSettingsViewModel(
         }
     }
 
+    fun handleTrackerOAuthCallback(callbackUri: String) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(trackerStatus = "Finishing tracker authorization...")
+            trackerRepository.exchangeOAuthCallback(callbackUri)
+                .onSuccess { snapshot ->
+                    _state.value = _state.value.withTrackerState(
+                        snapshot = snapshot,
+                        status = "Tracker authorization complete.",
+                    )
+                    loggerRepository.log("Trackers", "Completed tracker OAuth authorization.")
+                    refreshLogs()
+                }
+                .onFailure { error ->
+                    loggerRepository.log(
+                        tag = "Trackers",
+                        message = error.message ?: "Tracker authorization failed.",
+                        level = "error",
+                    )
+                    _state.value = _state.value.copy(
+                        trackerStatus = error.message ?: "Android could not finish tracker authorization.",
+                    )
+                    refreshLogs()
+                }
+        }
+    }
+
     fun setTrackerSyncEnabled(enabled: Boolean) {
         viewModelScope.launch {
             trackerRepository.setSyncEnabled(enabled)
@@ -693,6 +725,36 @@ class AndroidSettingsViewModel(
                     _state.value = _state.value.copy(
                         trackerStatus = error.message ?: "Android tracker sync failed.",
                     )
+                }
+        }
+    }
+
+    fun syncMangaProgressNow() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(trackerStatus = "Syncing manga progress to AniList...")
+            val mangaSnapshot = mangaRepository.loadSnapshot()
+                .getOrElse { error ->
+                    val message = error.message ?: "Android could not load local manga progress."
+                    _state.value = _state.value.copy(trackerStatus = message)
+                    loggerRepository.log("Trackers", message, level = "error")
+                    refreshLogs()
+                    return@launch
+                }
+            trackerRepository.syncStoredMangaProgress(mangaSnapshot)
+                .onSuccess { summary ->
+                    val status = summary.toMangaSyncStatusMessage()
+                    _state.value = _state.value.withTrackerState(
+                        snapshot = summary.state,
+                        status = status,
+                    )
+                    loggerRepository.log("Trackers", status)
+                    refreshLogs()
+                }
+                .onFailure { error ->
+                    val message = error.message ?: "Android manga tracker sync failed."
+                    _state.value = _state.value.copy(trackerStatus = message)
+                    loggerRepository.log("Trackers", message, level = "error")
+                    refreshLogs()
                 }
         }
     }
@@ -963,6 +1025,17 @@ private fun NetworkResult.Failure.toStatusMessage(prefix: String): String = when
     is NetworkResult.Failure.Connectivity -> "$prefix ${throwable.message ?: "network unavailable"}"
     is NetworkResult.Failure.Serialization -> "$prefix ${throwable.message ?: "unexpected AniList response"}"
 }
+
+private fun TrackerSyncSummary.toMangaSyncStatusMessage(): String = when {
+    attemptedAccounts == 0 -> "No connected AniList account is ready to sync manga progress."
+    attemptedItems == 0 -> "No AniList-backed manga progress is ready to sync yet."
+    failures.isNotEmpty() && syncedItems == 0 -> "Manga progress sync failed: ${failures.first()}"
+    failures.isNotEmpty() -> "Synced $syncedItems manga item${syncedItems.pluralSuffix()} with ${failures.size} issue${failures.size.pluralSuffix()}."
+    syncedItems > 0 -> "Synced $syncedItems manga item${syncedItems.pluralSuffix()} to AniList."
+    else -> "Manga progress sync skipped $skippedItems item${skippedItems.pluralSuffix()} with no remote updates."
+}
+
+private fun Int.pluralSuffix(): String = if (this == 1) "" else "s"
 
 private fun String.toTokenPreview(): String =
     when {

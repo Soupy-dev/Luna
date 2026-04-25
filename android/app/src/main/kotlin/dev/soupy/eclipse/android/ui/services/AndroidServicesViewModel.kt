@@ -95,6 +95,15 @@ class AndroidServicesViewModel(
         if (!enabled) settingsStore.removeAutoModeSource(autoModeId)
     }
 
+    fun setServiceConfiguration(
+        id: String,
+        configurationJson: String?,
+    ) = mutate(
+        successMessage = "Saved provider configuration.",
+    ) {
+        repository.setServiceConfiguration(id, configurationJson).getOrThrow()
+    }
+
     fun setAddonEnabled(
         transportUrl: String,
         autoModeId: String,
@@ -207,6 +216,8 @@ private fun ServiceSourceRecord.toUiRow(selectedSourceIds: Set<String>): Service
     autoModeId = autoModeId,
     name = name,
     subtitle = subtitle,
+    configurationJson = configurationJson,
+    configurationSummary = configurationSummary,
     enabled = enabled,
     selectedInAutoMode = autoModeId in selectedSourceIds,
 )

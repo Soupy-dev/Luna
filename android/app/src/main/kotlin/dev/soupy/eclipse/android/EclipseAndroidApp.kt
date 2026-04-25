@@ -80,7 +80,10 @@ private val destinations = listOf(
 )
 
 @Composable
-fun EclipseAndroidApp() {
+fun EclipseAndroidApp(
+    trackerCallbackUri: String? = null,
+    onTrackerCallbackConsumed: () -> Unit = {},
+) {
     val appContainer = rememberAppContainer()
     val homeViewModel = rememberFeatureViewModel("home") {
         AndroidHomeViewModel(appContainer.homeRepository)
@@ -187,6 +190,12 @@ fun EclipseAndroidApp() {
 
     LaunchedEffect(selectedDetailTarget) {
         detailViewModel.load(selectedDetailTarget)
+    }
+
+    LaunchedEffect(trackerCallbackUri) {
+        val callbackUri = trackerCallbackUri?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        settingsViewModel.handleTrackerOAuthCallback(callbackUri)
+        onTrackerCallbackConsumed()
     }
 
     EclipseTheme {
@@ -312,6 +321,7 @@ fun EclipseAndroidApp() {
                             onAutoModeChanged = servicesViewModel::setAutoModeEnabled,
                             onAutoModeSourceChanged = servicesViewModel::setAutoModeSourceEnabled,
                             onAddService = servicesViewModel::addService,
+                            onSaveServiceConfiguration = servicesViewModel::setServiceConfiguration,
                             onImportAddon = servicesViewModel::importAddon,
                             onToggleServiceEnabled = servicesViewModel::setServiceEnabled,
                             onToggleAddonEnabled = servicesViewModel::setAddonEnabled,
@@ -408,6 +418,7 @@ fun EclipseAndroidApp() {
                                     novelViewModel.refresh()
                                 }
                             },
+                            onAniListSyncMangaProgress = settingsViewModel::syncMangaProgressNow,
                             onExportBackup = settingsViewModel::exportBackup,
                             onImportBackup = settingsViewModel::importBackup,
                             onHighQualityThresholdChanged = settingsViewModel::setHighQualityThreshold,

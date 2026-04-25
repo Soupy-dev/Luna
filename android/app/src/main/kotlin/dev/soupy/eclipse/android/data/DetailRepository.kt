@@ -177,10 +177,12 @@ private suspend fun AniListMedia.toDetailContent(
                 val recommendationsDeferred = async { tmdbService.tvRecommendations(target.id).orEmptyList() }
                 val ratingsDeferred = async { tmdbService.tvContentRatings(target.id).orNull() }
                 val show = showDeferred.await()
+                val preferredSeasonNumber = match.tmdbSeasonNumber
+                    ?: match.episodeMappings.firstOrNull { mapping -> mapping.anilistMediaId == id }?.tmdbSeasonNumber
                 val seasons = tmdbService.playableSeasonDetails(
                     showId = target.id,
                     seasons = show.seasons,
-                    preferredSeasonNumber = match.tmdbSeasonNumber,
+                    preferredSeasonNumber = preferredSeasonNumber,
                 )
                 val animeEpisodes = toAnimeDetailEpisodeEntries(
                     tmdbMatch = match,
@@ -318,7 +320,12 @@ private fun AniListMedia.toAnimeDetailEpisodeEntries(
     tmdbMatch: AnimeTmdbMatch,
     seasonDetails: List<TMDBSeasonDetail>,
 ): List<DetailEpisodeEntry>? {
-    val tmdbSeasonNumber = tmdbMatch.tmdbSeasonNumber ?: return null
+    val mappedEpisodes = tmdbMatch.episodeMappings
+        .filter { mapping -> mapping.anilistMediaId == id }
+        .ifEmpty { emptyList() }
+    val tmdbSeasonNumber = tmdbMatch.tmdbSeasonNumber
+        ?: mappedEpisodes.firstOrNull()?.tmdbSeasonNumber
+        ?: return null
     val seasonDetail = seasonDetails.firstOrNull { it.seasonNumber == tmdbSeasonNumber } ?: return null
     val tmdbEpisodes = seasonDetail.episodes
         .filter { it.episodeNumber > 0 }
@@ -328,18 +335,24 @@ private fun AniListMedia.toAnimeDetailEpisodeEntries(
 
     val localSeasonNumber = tmdbSeasonNumber
     val offset = tmdbMatch.tmdbEpisodeOffset.coerceAtLeast(0)
+    val mappingsByLocalEpisode = mappedEpisodes.associateBy(AnimeEpisodeMapping::localEpisodeNumber)
     return (1..expectedCount.coerceAtMost(200)).map { localEpisodeNumber ->
-        val tmdbEpisode = tmdbEpisodes.getOrNull(localEpisodeNumber - 1 + offset)
-        val resolvedTmdbEpisodeNumber = tmdbEpisode?.episodeNumber ?: (localEpisodeNumber + offset)
+        val mapping = mappingsByLocalEpisode[localEpisodeNumber]
+        val resolvedSeasonNumber = mapping?.tmdbSeasonNumber ?: tmdbSeasonNumber
+        val resolvedTmdbEpisodeNumber = mapping?.tmdbEpisodeNumber ?: (localEpisodeNumber + offset)
+        val tmdbEpisode = tmdbEpisodes.firstOrNull { episode ->
+            episode.seasonNumber == resolvedSeasonNumber && episode.episodeNumber == resolvedTmdbEpisodeNumber
+        } ?: tmdbEpisodes.getOrNull(localEpisodeNumber - 1 + offset)
         DetailEpisodeEntry(
-            id = "anilist-$id-s$localSeasonNumber-e$localEpisodeNumber-tmdb-$tmdbSeasonNumber-$resolvedTmdbEpisodeNumber",
+            id = "anilist-$id-s$localSeasonNumber-e$localEpisodeNumber-tmdb-$resolvedSeasonNumber-$resolvedTmdbEpisodeNumber",
             title = tmdbEpisode?.name?.takeIf { it.isNotBlank() } ?: "Episode $localEpisodeNumber",
             subtitle = buildList {
                 add("S$localSeasonNumber")
                 add("E$localEpisodeNumber")
-                if (tmdbSeasonNumber != localSeasonNumber || resolvedTmdbEpisodeNumber != localEpisodeNumber) {
-                    add("TMDB S${tmdbSeasonNumber}E${resolvedTmdbEpisodeNumber}")
+                if (resolvedSeasonNumber != localSeasonNumber || resolvedTmdbEpisodeNumber != localEpisodeNumber) {
+                    add("TMDB S${resolvedSeasonNumber}E${resolvedTmdbEpisodeNumber}")
                 }
+                if (mapping?.isSpecial == true) add("Special")
                 tmdbEpisode?.runtime?.takeIf { it > 0 }?.let { add(formatRuntime(it)) }
                 tmdbEpisode?.airDate?.takeIf { it.isNotBlank() }?.let(::add)
             }.joinToString(" | "),
@@ -348,7 +361,7 @@ private fun AniListMedia.toAnimeDetailEpisodeEntries(
             seasonNumber = localSeasonNumber,
             episodeNumber = localEpisodeNumber,
             runtimeMinutes = tmdbEpisode?.runtime,
-            tmdbSeasonNumber = tmdbSeasonNumber,
+            tmdbSeasonNumber = resolvedSeasonNumber,
             tmdbEpisodeNumber = resolvedTmdbEpisodeNumber,
         )
     }

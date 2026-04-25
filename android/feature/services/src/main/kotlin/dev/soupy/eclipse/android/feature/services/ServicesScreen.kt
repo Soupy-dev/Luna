@@ -1,11 +1,14 @@
 package dev.soupy.eclipse.android.feature.services
 
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,23 +23,28 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import dev.soupy.eclipse.android.core.design.ErrorPanel
 import dev.soupy.eclipse.android.core.design.GlassPanel
 import dev.soupy.eclipse.android.core.design.HeroBackdrop
 import dev.soupy.eclipse.android.core.design.LoadingPanel
 import dev.soupy.eclipse.android.core.design.SectionHeading
+import org.json.JSONObject
 
 data class ServiceSourceRow(
     val id: String,
     val autoModeId: String,
     val name: String,
     val subtitle: String? = null,
+    val configurationJson: String? = null,
+    val configurationSummary: String? = null,
     val enabled: Boolean = true,
     val selectedInAutoMode: Boolean = false,
 )
@@ -77,6 +85,7 @@ fun ServicesRoute(
     onAutoModeChanged: (Boolean) -> Unit,
     onAutoModeSourceChanged: (String, Boolean) -> Unit,
     onAddService: (String, String, String?) -> Unit,
+    onSaveServiceConfiguration: (String, String?) -> Unit,
     onImportAddon: (String) -> Unit,
     onToggleServiceEnabled: (String, String, Boolean) -> Unit,
     onToggleAddonEnabled: (String, String, Boolean) -> Unit,
@@ -92,7 +101,10 @@ fun ServicesRoute(
     var serviceScriptUrl by rememberSaveable { mutableStateOf("") }
     var serviceManifestUrl by rememberSaveable { mutableStateOf("") }
     var addonTransportUrl by rememberSaveable { mutableStateOf("") }
+    var activeConfigurationUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    var activeServiceConfigurationId by rememberSaveable { mutableStateOf<String?>(null) }
     val uriHandler = LocalUriHandler.current
+    val activeServiceConfiguration = state.services.firstOrNull { service -> service.id == activeServiceConfigurationId }
 
     LazyColumn(
         modifier = Modifier
@@ -137,6 +149,29 @@ fun ServicesRoute(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
+            }
+        }
+
+        activeConfigurationUrl?.let { configurationUrl ->
+            item {
+                StremioConfigurationPanel(
+                    configurationUrl = configurationUrl,
+                    onOpenExternal = { uriHandler.openUri(configurationUrl) },
+                    onClose = { activeConfigurationUrl = null },
+                )
+            }
+        }
+
+        activeServiceConfiguration?.let { service ->
+            item {
+                CustomServiceConfigurationPanel(
+                    service = service,
+                    onSave = { configurationJson ->
+                        onSaveServiceConfiguration(service.id, configurationJson)
+                        activeServiceConfigurationId = null
+                    },
+                    onClose = { activeServiceConfigurationId = null },
+                )
             }
         }
 
@@ -293,7 +328,10 @@ fun ServicesRoute(
             items(state.services, key = { it.id }) { service ->
                 ServiceCard(
                     title = service.name,
-                    subtitle = service.subtitle,
+                    subtitle = listOfNotNull(
+                        service.subtitle,
+                        service.configurationSummary,
+                    ).joinToString("\n").ifBlank { null },
                     enabled = service.enabled,
                     selectedInAutoMode = service.selectedInAutoMode,
                     autoModeEnabled = state.autoModeEnabled,
@@ -305,6 +343,7 @@ fun ServicesRoute(
                     },
                     onMoveUp = { onMoveServiceUp(service.id) },
                     onMoveDown = { onMoveServiceDown(service.id) },
+                    onConfigure = { activeServiceConfigurationId = service.id },
                     onRemove = { onRemoveService(service.id, service.autoModeId) },
                 )
             }
@@ -354,11 +393,165 @@ fun ServicesRoute(
                     onMoveUp = { onMoveAddonUp(addon.transportUrl) },
                     onMoveDown = { onMoveAddonDown(addon.transportUrl) },
                     onConfigure = addon.configurationUrl?.let { configurationUrl ->
-                        { uriHandler.openUri(configurationUrl) }
+                        { activeConfigurationUrl = configurationUrl }
                     },
                     onRefresh = { onRefreshAddon(addon.transportUrl) },
                     onRemove = { onRemoveAddon(addon.transportUrl, addon.autoModeId) },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StremioConfigurationPanel(
+    configurationUrl: String,
+    onOpenExternal: () -> Unit,
+    onClose: () -> Unit,
+) {
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "Addon Configuration",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = configurationUrl,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                OutlinedButton(onClick = onClose) {
+                    Text("Close")
+                }
+            }
+            AndroidView(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(520.dp),
+                factory = { context ->
+                    WebView(context).apply {
+                        tag = configurationUrl
+                        webViewClient = WebViewClient()
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        loadUrl(configurationUrl)
+                    }
+                },
+                update = { webView ->
+                    if (webView.tag != configurationUrl) {
+                        webView.tag = configurationUrl
+                        webView.loadUrl(configurationUrl)
+                    }
+                },
+            )
+            OutlinedButton(
+                onClick = onOpenExternal,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Open Browser")
+            }
+        }
+    }
+}
+
+private data class ConfigFormRow(
+    val key: String = "",
+    val value: String = "",
+)
+
+@Composable
+private fun CustomServiceConfigurationPanel(
+    service: ServiceSourceRow,
+    onSave: (String?) -> Unit,
+    onClose: () -> Unit,
+) {
+    var rows by remember(service.id, service.configurationJson) {
+        mutableStateOf(service.configurationJson.toConfigRows())
+    }
+    val hasRows = rows.any { row -> row.key.isNotBlank() || row.value.isNotBlank() }
+
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "Provider Configuration",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = listOfNotNull(service.name, service.configurationSummary).joinToString(" | "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                    )
+                }
+                OutlinedButton(onClick = onClose) {
+                    Text("Close")
+                }
+            }
+
+            rows.forEachIndexed { index, row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedTextField(
+                        value = row.key,
+                        onValueChange = { value ->
+                            rows = rows.updated(index, row.copy(key = value))
+                        },
+                        modifier = Modifier.weight(0.42f),
+                        label = { Text("Key") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = row.value,
+                        onValueChange = { value ->
+                            rows = rows.updated(index, row.copy(value = value))
+                        },
+                        modifier = Modifier.weight(0.58f),
+                        label = { Text("Value") },
+                        singleLine = true,
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(
+                    onClick = { rows = rows + ConfigFormRow() },
+                    enabled = rows.size < 24,
+                ) {
+                    Text("Add Setting")
+                }
+                OutlinedButton(
+                    onClick = { rows = listOf(ConfigFormRow()) },
+                    enabled = hasRows,
+                ) {
+                    Text("Clear")
+                }
+                Button(
+                    onClick = { onSave(rows.toConfigurationJson()) },
+                ) {
+                    Text("Save")
+                }
             }
         }
     }
@@ -443,6 +636,52 @@ private fun ServiceCard(
                 }
             }
         }
+    }
+}
+
+private fun String?.toConfigRows(): List<ConfigFormRow> {
+    val raw = this?.takeIf { it.isNotBlank() } ?: return listOf(ConfigFormRow())
+    val parsed = runCatching {
+        val json = JSONObject(raw)
+        val keys = json.keys()
+        buildList {
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val value = json.opt(key)
+                    ?.takeUnless { it == JSONObject.NULL }
+                    ?.toString()
+                    .orEmpty()
+                add(ConfigFormRow(key = key, value = value))
+            }
+        }
+    }.getOrDefault(emptyList())
+    return parsed.ifEmpty { listOf(ConfigFormRow()) }
+}
+
+private fun List<ConfigFormRow>.updated(
+    index: Int,
+    row: ConfigFormRow,
+): List<ConfigFormRow> = mapIndexed { currentIndex, currentRow ->
+    if (currentIndex == index) row else currentRow
+}
+
+private fun List<ConfigFormRow>.toConfigurationJson(): String? {
+    val json = JSONObject()
+    filter { row -> row.key.isNotBlank() }
+        .forEach { row ->
+            json.put(row.key.trim(), row.value.typedJsonValue())
+        }
+    return json.takeIf { it.length() > 0 }?.toString()
+}
+
+private fun String.typedJsonValue(): Any {
+    val clean = trim()
+    return when {
+        clean.equals("true", ignoreCase = true) -> true
+        clean.equals("false", ignoreCase = true) -> false
+        clean.toLongOrNull() != null -> clean.toLong()
+        clean.toDoubleOrNull() != null -> clean.toDouble()
+        else -> this
     }
 }
 

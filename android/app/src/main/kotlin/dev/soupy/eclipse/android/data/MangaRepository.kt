@@ -171,6 +171,10 @@ class MangaRepository(
     private val httpClient: EclipseHttpClient = EclipseHttpClient(),
     private val kanzenRuntime: KanzenModuleRuntime? = null,
 ) {
+    suspend fun loadSnapshot(): Result<MangaLibrarySnapshot> = runCatching {
+        seedFromBackupIfNeeded().first
+    }
+
     suspend fun loadOverview(): Result<MangaOverviewSnapshot> = runCatching {
         coroutineScope {
             val backupDeferred = async { seedFromBackupIfNeeded() }

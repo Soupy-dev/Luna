@@ -1,6 +1,7 @@
 package dev.soupy.eclipse.android.data
 
 import android.content.Context
+import androidx.work.WorkManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
@@ -175,6 +176,7 @@ class EclipseAppContainer(
     )
     val downloadsRepository: DownloadsRepository = DownloadsRepository(
         downloadsStore = downloadsStore,
+        workManager = WorkManager.getInstance(context.applicationContext),
     )
     val readerCacheRepository: ReaderCacheRepository = ReaderCacheRepository(context)
     val mangaRepository: MangaRepository = MangaRepository(

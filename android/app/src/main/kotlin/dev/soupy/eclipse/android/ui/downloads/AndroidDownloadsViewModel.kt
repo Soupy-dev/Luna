@@ -29,6 +29,7 @@ class AndroidDownloadsViewModel(
 
     init {
         refresh()
+        resumeInterruptedTransfers()
     }
 
     fun refresh() {
@@ -66,6 +67,19 @@ class AndroidDownloadsViewModel(
         successMessage = "Retried or verified download.",
     ) {
         repository.resume(id)
+    }
+
+    private fun resumeInterruptedTransfers() {
+        viewModelScope.launch {
+            repository.resumeInterruptedTransfers()
+                .onSuccess { result ->
+                    if (result.resumedTransfers == 0) return@onSuccess
+                    _state.value = result.snapshot.toUiState(
+                        noticeMessage = "Resumed ${result.resumedTransfers} queued Android transfer${if (result.resumedTransfers == 1) "" else "s"} after startup.",
+                        playerSource = _state.value.playerSource,
+                    )
+                }
+        }
     }
 
     fun playOffline(id: String) {

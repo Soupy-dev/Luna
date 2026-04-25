@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
@@ -30,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -57,6 +59,10 @@ import dev.soupy.eclipse.android.core.model.SkipSegment
 import dev.soupy.eclipse.android.core.model.SubtitleTrack
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import org.videolan.libvlc.LibVLC
+import org.videolan.libvlc.Media
+import org.videolan.libvlc.MediaPlayer
+import org.videolan.libvlc.util.VLCVideoLayout
 
 private const val DoubleTapSeekDeltaMs = 10_000L
 
@@ -90,7 +96,7 @@ fun EclipsePlayerSurface(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = "Media3/ExoPlayer is wired here for Milestone 1. VLC, mpv, external-player handoff, AniSkip, and next-episode orchestration will hang off this boundary later.",
+                    text = "Media3/ExoPlayer is wired here for direct playback, VLC can use the embedded LibVLC backend, and mpv/custom external players can receive direct Android handoff intents.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                 )
@@ -129,10 +135,21 @@ fun EclipsePlayerSurface(
         return
     }
 
-    if (preferredPlayer == InAppPlayer.EXTERNAL) {
+    val nativePlayerPackage = preferredPlayer.nativePackageName()
+    if (preferredPlayer == InAppPlayer.VLC) {
+        EmbeddedVlcPlayerPanel(
+            source = source,
+            modifier = modifier,
+            onProgress = onProgressState.value,
+        )
+        return
+    }
+
+    if (preferredPlayer == InAppPlayer.EXTERNAL || nativePlayerPackage != null) {
         ExternalPlayerPanel(
             source = source,
-            externalPlayer = settings.externalPlayer,
+            playerLabel = preferredPlayer.externalPanelLabel(),
+            externalPlayer = nativePlayerPackage ?: settings.externalPlayer,
             modifier = modifier,
         )
         return
@@ -268,16 +285,6 @@ fun EclipsePlayerSurface(
             .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (preferredPlayer == InAppPlayer.VLC || preferredPlayer == InAppPlayer.MPV) {
-            GlassPanel {
-                Text(
-                    text = "${preferredPlayer.name.lowercase()} backend is selected. Direct streams fall back to Normal playback until that Android backend lands.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
-                )
-            }
-        }
-
         PlaybackShortcutRow(
             exoPlayer = exoPlayer,
             settings = settings,
@@ -471,8 +478,130 @@ private fun ExoPlayer.seekBy(deltaMs: Long) {
 }
 
 @Composable
+private fun EmbeddedVlcPlayerPanel(
+    source: PlayerSource,
+    modifier: Modifier = Modifier,
+    onProgress: (PlaybackProgressSnapshot) -> Unit,
+) {
+    var session by remember(source.uri) { mutableStateOf<VlcSession?>(null) }
+    var playbackError by remember(source.uri) { mutableStateOf<String?>(null) }
+
+    DisposableEffect(source.uri) {
+        onDispose {
+            session?.release()
+            session = null
+        }
+    }
+
+    LaunchedEffect(session) {
+        while (isActive) {
+            val player = session?.mediaPlayer
+            if (player != null) {
+                val positionMs = player.time.coerceAtLeast(0L)
+                val durationMs = player.length.coerceAtLeast(0L)
+                onProgress(
+                    PlaybackProgressSnapshot(
+                        positionMs = positionMs,
+                        durationMs = durationMs,
+                        isFinished = durationMs > 0L && positionMs >= (durationMs - 1_000L).coerceAtLeast(0L),
+                    ),
+                )
+            }
+            delay(1_000L)
+        }
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(16 / 9f),
+        color = androidx.compose.ui.graphics.Color.Black,
+    ) {
+        key(source.uri) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
+                    VLCVideoLayout(context).also { layout ->
+                        runCatching {
+                            VlcSession.create(
+                                context = context,
+                                layout = layout,
+                                source = source,
+                            )
+                        }.onSuccess { created ->
+                            session?.release()
+                            session = created
+                            playbackError = null
+                        }.onFailure { error ->
+                            playbackError = error.message ?: "Embedded VLC playback failed."
+                        }
+                    }
+                },
+            )
+        }
+        playbackError?.let { error ->
+            GlassPanel(
+                modifier = Modifier.padding(16.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Embedded VLC unavailable",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private class VlcSession(
+    val mediaPlayer: MediaPlayer,
+    private val libVlc: LibVLC,
+) {
+    fun release() {
+        runCatching { mediaPlayer.stop() }
+        runCatching { mediaPlayer.detachViews() }
+        runCatching { mediaPlayer.release() }
+        runCatching { libVlc.release() }
+    }
+
+    companion object {
+        fun create(
+            context: Context,
+            layout: VLCVideoLayout,
+            source: PlayerSource,
+        ): VlcSession {
+            val libVlc = LibVLC(
+                context.applicationContext,
+                arrayListOf(
+                    "--network-caching=1500",
+                    "--http-reconnect",
+                ),
+            )
+            val mediaPlayer = MediaPlayer(libVlc)
+            mediaPlayer.attachViews(layout, null, false, false)
+            val media = Media(libVlc, Uri.parse(source.uri))
+            source.headers.forEach { (name, value) ->
+                media.addOption(":http-header=$name: $value")
+            }
+            mediaPlayer.media = media
+            media.release()
+            mediaPlayer.play()
+            return VlcSession(mediaPlayer, libVlc)
+        }
+    }
+}
+
+@Composable
 private fun ExternalPlayerPanel(
     source: PlayerSource,
+    playerLabel: String,
     externalPlayer: String,
     modifier: Modifier = Modifier,
 ) {
@@ -486,12 +615,12 @@ private fun ExternalPlayerPanel(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                text = source.title ?: "External player",
+                text = source.title ?: playerLabel,
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "Open this direct stream with another installed Android player.",
+                text = "Open this direct stream with $playerLabel.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
             )
@@ -501,14 +630,14 @@ private fun ExternalPlayerPanel(
                         context.startActivity(source.externalPlayerIntent(externalPlayer))
                     }.exceptionOrNull()?.let { error ->
                         if (error is ActivityNotFoundException) {
-                            "No external video player is available for this stream."
+                            "$playerLabel is not installed or cannot open this stream."
                         } else {
-                            error.message ?: "External player launch failed."
+                            error.message ?: "$playerLabel launch failed."
                         }
                     }
                 },
             ) {
-                Text("Open External Player")
+                Text("Open $playerLabel")
             }
             launchError?.let {
                 Text(
@@ -544,6 +673,20 @@ private fun PlayerSource.externalPlayerIntent(externalPlayer: String): Intent {
     return Intent.createChooser(openIntent, title ?: "Open stream").apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
+}
+
+private fun InAppPlayer.nativePackageName(): String? = when (this) {
+    InAppPlayer.VLC -> "org.videolan.vlc"
+    InAppPlayer.MPV -> "is.xyz.mpv"
+    InAppPlayer.NORMAL,
+    InAppPlayer.EXTERNAL -> null
+}
+
+private fun InAppPlayer.externalPanelLabel(): String = when (this) {
+    InAppPlayer.VLC -> "VLC"
+    InAppPlayer.MPV -> "mpv"
+    InAppPlayer.EXTERNAL -> "External Player"
+    InAppPlayer.NORMAL -> "Normal Player"
 }
 
 private fun PlayerSource.toMediaItem(

@@ -29,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import dev.soupy.eclipse.android.core.design.GlassPanel
 import dev.soupy.eclipse.android.core.design.HeroBackdrop
@@ -82,6 +83,8 @@ data class SettingsScreenState(
     val trackerSyncEnabled: Boolean = true,
     val trackerRows: List<TrackerSettingsRow> = emptyList(),
     val trackerStatus: String = "No tracker accounts connected yet.",
+    val aniListOAuthUrl: String = "",
+    val traktOAuthUrl: String = "",
 )
 
 data class CatalogSettingsRow(
@@ -155,6 +158,7 @@ fun SettingsRoute(
     onTrackerSyncNow: () -> Unit,
     onAniListImportLibrary: () -> Unit,
     onAniListImportMangaLibrary: () -> Unit,
+    onAniListSyncMangaProgress: () -> Unit,
     onExportBackup: (Uri) -> Unit,
     onImportBackup: (Uri) -> Unit,
     onHighQualityThresholdChanged: (Double) -> Unit,
@@ -435,6 +439,7 @@ fun SettingsRoute(
                 onSyncNow = onTrackerSyncNow,
                 onAniListImportLibrary = onAniListImportLibrary,
                 onAniListImportMangaLibrary = onAniListImportMangaLibrary,
+                onAniListSyncMangaProgress = onAniListSyncMangaProgress,
             )
         }
 
@@ -745,10 +750,12 @@ private fun TrackerSettingsCard(
     onSyncNow: () -> Unit,
     onAniListImportLibrary: () -> Unit,
     onAniListImportMangaLibrary: () -> Unit,
+    onAniListSyncMangaProgress: () -> Unit,
 ) {
     val hasAniListAccount = state.trackerRows.any { row ->
         row.isConnected && row.service.equals("AniList", ignoreCase = true)
     }
+    val uriHandler = LocalUriHandler.current
     GlassPanel {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(
@@ -774,6 +781,26 @@ private fun TrackerSettingsCard(
                     checked = state.trackerSyncEnabled,
                     onCheckedChange = onSyncEnabledChanged,
                 )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Button(
+                    onClick = { uriHandler.openUri(state.aniListOAuthUrl) },
+                    enabled = state.aniListOAuthUrl.isNotBlank(),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Connect AniList")
+                }
+                OutlinedButton(
+                    onClick = { uriHandler.openUri(state.traktOAuthUrl) },
+                    enabled = state.traktOAuthUrl.isNotBlank(),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Connect Trakt")
+                }
             }
 
             OutlinedTextField(
@@ -824,6 +851,13 @@ private fun TrackerSettingsCard(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Import AniList Manga Library")
+            }
+            OutlinedButton(
+                onClick = onAniListSyncMangaProgress,
+                enabled = hasAniListAccount,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Sync Manga Progress")
             }
 
             state.trackerRows.forEach { row ->

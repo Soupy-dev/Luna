@@ -1,5 +1,11 @@
 package dev.soupy.eclipse.android.data
 
+import androidx.work.Constraints
+import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import dev.soupy.eclipse.android.core.model.DetailTarget
 import dev.soupy.eclipse.android.core.model.DownloadRecord
 import dev.soupy.eclipse.android.core.model.DownloadSnapshot
@@ -14,7 +20,9 @@ import java.nio.ByteBuffer
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 private const val BufferSize = 64 * 1024
@@ -44,10 +52,25 @@ data class DownloadVerificationResult(
     val missingFiles: Int,
 )
 
+data class DownloadResumeResult(
+    val snapshot: DownloadSnapshot,
+    val resumedTransfers: Int,
+)
+
 class DownloadsRepository(
     private val downloadsStore: DownloadsStore,
+    private val workManager: WorkManager? = null,
 ) {
     private val downloadEngine = DirectFileDownloadEngine(downloadsStore)
+
+    internal companion object {
+        const val DownloadWorkerIdKey = "download_id"
+        const val DownloadWorkerTag = "eclipse_download_transfer"
+
+        fun downloadWorkName(id: String): String = "eclipse-download-${id.safeWorkNamePart()}"
+
+        fun downloadWorkTag(id: String): String = "eclipse-download-id-${id.safeWorkNamePart()}"
+    }
 
     suspend fun loadSnapshot(): Result<DownloadSnapshot> = runCatching {
         downloadsStore.read().normalized()
@@ -65,16 +88,19 @@ class DownloadsRepository(
             snapshot.copy(
                 items = listOf(queued) + snapshot.items.filterNot { it.id == key },
             ),
-        )
-
-        processQueuedRecord(queued)
+        ).let { queuedSnapshot ->
+            if (enqueueBackgroundTransfer(queued)) queuedSnapshot else processQueuedRecord(queued)
+        }
     }
 
-    suspend fun pause(id: String): Result<DownloadSnapshot> = update(id) { current ->
-        current.copy(
-            status = DownloadStatus.PAUSED,
-            progressLabel = current.progressLabel ?: "Paused before a background-capable worker picked it up.",
-        )
+    suspend fun pause(id: String): Result<DownloadSnapshot> = runCatching {
+        cancelBackgroundTransfer(id)
+        update(id) { current ->
+            current.copy(
+                status = DownloadStatus.PAUSED,
+                progressLabel = current.progressLabel ?: "Paused background transfer.",
+            )
+        }.getOrThrow()
     }
 
     suspend fun resume(id: String): Result<DownloadSnapshot> = runCatching {
@@ -94,28 +120,61 @@ class DownloadsRepository(
                         error = "Missing offline file.",
                     ),
             )
-            else -> processQueuedRecord(
-                current.copy(
+            else -> {
+                val queued = current.copy(
                     status = DownloadStatus.QUEUED,
                     progressPercent = 0f,
                     progressLabel = "Retrying the captured direct source.",
                     error = null,
-                ),
-            )
+                )
+                val queuedSnapshot = writeRecord(queued)
+                if (enqueueBackgroundTransfer(queued)) queuedSnapshot else processQueuedRecord(queued)
+            }
         }
     }
 
-    suspend fun markComplete(id: String): Result<DownloadSnapshot> = update(id) { current ->
-        current.copy(
-            status = DownloadStatus.COMPLETED,
-            progressPercent = 1f,
-            progressLabel = current.localUri?.let { "Offline file is available in Android app storage." }
-                ?: "Marked complete manually.",
-            error = null,
+    suspend fun resumeInterruptedTransfers(): Result<DownloadResumeResult> = runCatching {
+        val snapshot = downloadsStore.read().normalized()
+        val interrupted = snapshot.items.filter { record ->
+            (record.status == DownloadStatus.QUEUED || record.status == DownloadStatus.DOWNLOADING) &&
+                !record.sourceUri.isNullOrBlank()
+        }
+        if (interrupted.isEmpty()) return@runCatching DownloadResumeResult(snapshot, resumedTransfers = 0)
+
+        var latest = snapshot
+        interrupted.forEach { record ->
+            val queued = record.copy(
+                status = DownloadStatus.QUEUED,
+                progressPercent = 0f,
+                progressLabel = "Resuming interrupted Android background transfer.",
+                error = null,
+            )
+            latest = writeRecord(queued)
+            if (!enqueueBackgroundTransfer(queued)) {
+                latest = processQueuedRecord(queued)
+            }
+        }
+        DownloadResumeResult(
+            snapshot = latest,
+            resumedTransfers = interrupted.size,
         )
     }
 
+    suspend fun markComplete(id: String): Result<DownloadSnapshot> = runCatching {
+        cancelBackgroundTransfer(id)
+        update(id) { current ->
+            current.copy(
+                status = DownloadStatus.COMPLETED,
+                progressPercent = 1f,
+                progressLabel = current.localUri?.let { "Offline file is available in Android app storage." }
+                    ?: "Marked complete manually.",
+                error = null,
+            )
+        }.getOrThrow()
+    }
+
     suspend fun remove(id: String): Result<DownloadSnapshot> = runCatching {
+        cancelBackgroundTransfer(id)
         val snapshot = downloadsStore.read()
         snapshot.items.firstOrNull { it.id == id }?.let { record ->
             deleteDownloadedFiles(record)
@@ -159,18 +218,23 @@ class DownloadsRepository(
         snapshot.items
             .filter { it.status == DownloadStatus.COMPLETED }
             .forEach(::deleteDownloadedFiles)
+        snapshot.items
+            .filter { it.status == DownloadStatus.COMPLETED }
+            .forEach { record -> cancelBackgroundTransfer(record.id) }
         writeSnapshot(snapshot.copy(items = snapshot.items.filterNot { it.status == DownloadStatus.COMPLETED }))
     }
 
     suspend fun clearTarget(target: DetailTarget): Result<DownloadSnapshot> = runCatching {
         val snapshot = downloadsStore.read()
         val removed = snapshot.items.filter { it.detailTarget == target }
+        removed.forEach { record -> cancelBackgroundTransfer(record.id) }
         removed.forEach(::deleteDownloadedFiles)
         writeSnapshot(snapshot.copy(items = snapshot.items - removed.toSet()))
     }
 
     suspend fun clearAll(): Result<DownloadSnapshot> = runCatching {
         val snapshot = downloadsStore.read()
+        snapshot.items.forEach { record -> cancelBackgroundTransfer(record.id) }
         snapshot.items.forEach(::deleteDownloadedFiles)
         writeSnapshot(snapshot.copy(items = emptyList()))
     }
@@ -267,9 +331,62 @@ class DownloadsRepository(
         return normalized
     }
 
+    internal suspend fun processQueuedDownload(id: String): Result<DownloadSnapshot> = runCatching {
+        val snapshot = downloadsStore.read().normalized()
+        val current = snapshot.items.firstOrNull { it.id == id }
+            ?: error("Download was not found.")
+        if (current.status == DownloadStatus.PAUSED || current.status == DownloadStatus.COMPLETED) {
+            return@runCatching snapshot
+        }
+        processQueuedRecord(
+            current.copy(
+                status = DownloadStatus.QUEUED,
+                progressLabel = current.progressLabel ?: "Running Android background transfer.",
+                error = null,
+            ),
+        )
+    }
+
+    private fun enqueueBackgroundTransfer(record: DownloadRecord): Boolean {
+        val manager = workManager ?: return false
+        val sourceKind = classifyDownloadSource(record.sourceUri)
+        if (sourceKind != DownloadSourceKind.DIRECT_HTTP && sourceKind != DownloadSourceKind.HLS_PLAYLIST) {
+            return false
+        }
+
+        val request = OneTimeWorkRequestBuilder<DownloadWorker>()
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .setInputData(
+                Data.Builder()
+                    .putString(DownloadWorkerIdKey, record.id)
+                    .build(),
+            )
+            .addTag(DownloadWorkerTag)
+            .addTag(downloadWorkTag(record.id))
+            .build()
+
+        manager.enqueueUniqueWork(
+            downloadWorkName(record.id),
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
+        return true
+    }
+
+    private fun cancelBackgroundTransfer(id: String) {
+        workManager?.cancelUniqueWork(downloadWorkName(id))
+    }
+
     private suspend fun processQueuedRecord(
         record: DownloadRecord,
     ): DownloadSnapshot {
+        if (record.status == DownloadStatus.PAUSED) {
+            return writeRecord(record)
+        }
         val sourceUri = record.sourceUri
         return when (classifyDownloadSource(sourceUri)) {
             DownloadSourceKind.WAITING_FOR_SOURCE -> writeRecord(
@@ -400,6 +517,7 @@ private class DirectFileDownloadEngine(
                     outputFile.outputStream().use { output ->
                         val buffer = ByteArray(BufferSize)
                         while (true) {
+                            coroutineContext.ensureActive()
                             val read = input.read(buffer)
                             if (read < 0) break
                             output.write(buffer, 0, read)
@@ -522,7 +640,7 @@ private class HlsPlaylistDownloader(
     private val headers: Map<String, String>,
     private val outputFile: File,
 ) {
-    fun download(playlistUrl: URL): HlsDownloadResult {
+    suspend fun download(playlistUrl: URL): HlsDownloadResult {
         val firstPlaylist = fetchText(playlistUrl)
         val mediaPlaylistUrl: URL
         val mediaPlaylist: String
@@ -556,12 +674,14 @@ private class HlsPlaylistDownloader(
         var downloadedBytes = 0L
         outputFile.outputStream().use { output ->
             parsed.initSegmentUrl?.let { initUrl ->
+                coroutineContext.ensureActive()
                 val initBytes = fetchBytes(initUrl)
                 output.write(initBytes)
                 downloadedBytes += initBytes.size
             }
 
             parsed.segments.forEach { segment ->
+                coroutineContext.ensureActive()
                 val rawBytes = fetchBytes(segment.url)
                 val segmentBytes = if (decryptionKey != null) {
                     decryptAes128(
@@ -787,6 +907,11 @@ private fun String.fileExtension(default: String): String {
 private fun String.safeFileStem(): String = replace(Regex("[^A-Za-z0-9._-]+"), "_")
     .trim('_')
     .ifBlank { "download_${System.currentTimeMillis()}" }
+
+private fun String.safeWorkNamePart(): String = replace(Regex("[^A-Za-z0-9._-]+"), "_")
+    .trim('_')
+    .take(120)
+    .ifBlank { hashCode().toString() }
 
 private fun String.parseAttribute(key: String): String? {
     val prefix = "$key="

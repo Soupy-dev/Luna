@@ -227,7 +227,9 @@ class StreamResolutionRepository(
 
                 is DetailTarget.TmdbShow -> {
                     val show = tmdbService.tvShowDetail(tmdbTarget.id).orThrow()
-                    val selectedEpisode = episode ?: firstPlayableEpisode(tmdbTarget.id, match.tmdbSeasonNumber)
+                    val selectedEpisode = episode
+                        ?: match.firstMappedEpisodeSelection(media.id)
+                        ?: firstPlayableEpisode(tmdbTarget.id, match.tmdbSeasonNumber)
                     StremioRequest(
                         type = "series",
                         tmdbId = tmdbTarget.id,
@@ -267,6 +269,20 @@ class StreamResolutionRepository(
             label = "S${firstSeason.seasonNumber}E${firstEpisode.episodeNumber}",
         )
     }
+}
+
+private fun AnimeTmdbMatch.firstMappedEpisodeSelection(anilistMediaId: Int): StreamEpisodeSelection? {
+    val mapping = episodeMappings
+        .firstOrNull { episode -> episode.anilistMediaId == anilistMediaId && episode.localEpisodeNumber > 0 }
+        ?: return null
+    return StreamEpisodeSelection(
+        seasonNumber = mapping.tmdbSeasonNumber,
+        episodeNumber = mapping.tmdbEpisodeNumber,
+        label = "S${mapping.localSeasonNumber}E${mapping.localEpisodeNumber}",
+        localSeasonNumber = mapping.localSeasonNumber,
+        localEpisodeNumber = mapping.localEpisodeNumber,
+        anilistMediaId = mapping.anilistMediaId,
+    )
 }
 
 private data class StremioRequest(
