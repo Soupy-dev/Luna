@@ -9,6 +9,7 @@ import dev.soupy.eclipse.android.core.model.PlayerSource
 import dev.soupy.eclipse.android.core.model.SubtitleTrack
 import dev.soupy.eclipse.android.data.DownloadCleanupResult
 import dev.soupy.eclipse.android.data.DownloadDraft
+import dev.soupy.eclipse.android.data.DownloadVerificationResult
 import dev.soupy.eclipse.android.data.DownloadsRepository
 import dev.soupy.eclipse.android.feature.downloads.DownloadMetric
 import dev.soupy.eclipse.android.feature.downloads.DownloadRow
@@ -62,7 +63,7 @@ class AndroidDownloadsViewModel(
     }
 
     fun resume(id: String) = mutate(
-        successMessage = "Resumed queued download draft.",
+        successMessage = "Retried or verified download.",
     ) {
         repository.resume(id)
     }
@@ -113,6 +114,12 @@ class AndroidDownloadsViewModel(
         repository.remove(id)
     }
 
+    fun removeLocalFile(id: String) = mutate(
+        successMessage = "Removed local offline file and kept queue metadata.",
+    ) {
+        repository.removeLocalFile(id)
+    }
+
     fun clearCompleted() = mutate(
         successMessage = "Cleared completed downloads.",
     ) {
@@ -150,6 +157,25 @@ class AndroidDownloadsViewModel(
         }
     }
 
+    fun verifyFiles() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(errorMessage = null)
+            repository.verifyLocalFiles()
+                .onSuccess { result ->
+                    _state.value = result.snapshot.toUiState(
+                        noticeMessage = result.verificationMessage(),
+                        playerSource = _state.value.playerSource,
+                    )
+                }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        errorMessage = error.message ?: "Could not verify offline files.",
+                    )
+                }
+        }
+    }
+
     private fun mutate(
         successMessage: String,
         action: suspend () -> Result<DownloadSnapshot>,
@@ -182,6 +208,8 @@ private fun DownloadSnapshot.toUiState(
     val pausedCount = items.count { it.status == DownloadStatus.PAUSED }
     val downloadingCount = items.count { it.status == DownloadStatus.DOWNLOADING }
     val completedCount = items.count { it.status == DownloadStatus.COMPLETED }
+    val storedBytes = items.sumOf { it.downloadedBytes.coerceAtLeast(0L) }
+    val totalBytes = items.sumOf { it.totalBytes.coerceAtLeast(it.downloadedBytes) }
     val targetCounts = items
         .groupingBy { it.detailTarget }
         .eachCount()
@@ -226,6 +254,15 @@ private fun DownloadSnapshot.toUiState(
                 supportingText = "Held until you resume the same draft.",
             ),
             DownloadMetric(
+                label = "Stored",
+                value = storedBytes.toByteCountLabel(),
+                supportingText = if (totalBytes > 0) {
+                    "${completedCount} done of ${totalBytes.toByteCountLabel()} tracked bytes."
+                } else {
+                    "$completedCount completed offline files."
+                },
+            ),
+            DownloadMetric(
                 label = "Done",
                 value = completedCount.toString(),
                 supportingText = "Offline files with local metadata.",
@@ -248,6 +285,7 @@ private fun DownloadSnapshot.toUiState(
                 },
                 progressPercent = record.progressPercent,
                 progressLabel = record.progressLabel ?: record.localUri?.let { "Stored locally as ${record.localFileName}" },
+                bytesLabel = record.bytesLabel(),
                 sourceLabel = record.sourceLabel,
                 hasDirectSource = !record.sourceUri.isNullOrBlank(),
                 subtitleCount = record.subtitleTracks.size,
@@ -256,6 +294,7 @@ private fun DownloadSnapshot.toUiState(
                 canResume = record.status == DownloadStatus.PAUSED || record.status == DownloadStatus.FAILED,
                 canMarkComplete = record.status != DownloadStatus.COMPLETED,
                 canPlayOffline = record.status == DownloadStatus.COMPLETED && !record.localUri.isNullOrBlank(),
+                canRemoveLocalFile = record.status == DownloadStatus.COMPLETED && !record.localFileName.isNullOrBlank(),
                 removeTargetLabel = if ((targetCounts[record.detailTarget] ?: 0) > 1) {
                     record.detailTarget.removeTargetLabel()
                 } else {
@@ -290,6 +329,23 @@ private fun DownloadCleanupResult.cleanupMessage(): String =
     } else {
         "Removed $deletedFiles orphaned download file${if (deletedFiles == 1) "" else "s"} (${deletedBytes.toByteCountLabel()})."
     }
+
+private fun DownloadVerificationResult.verificationMessage(): String =
+    when {
+        verifiedFiles == 0 && missingFiles == 0 -> "No local offline files needed verification."
+        missingFiles == 0 -> "Verified $verifiedFiles offline file${if (verifiedFiles == 1) "" else "s"}."
+        else -> "Verified $verifiedFiles offline file${if (verifiedFiles == 1) "" else "s"}; $missingFiles missing file${if (missingFiles == 1) "" else "s"} need retry."
+    }
+
+private fun dev.soupy.eclipse.android.core.model.DownloadRecord.bytesLabel(): String? {
+    val downloaded = downloadedBytes.takeIf { it > 0 } ?: return null
+    val total = totalBytes.takeIf { it > downloaded }
+    return if (total != null) {
+        "${downloaded.toByteCountLabel()} / ${total.toByteCountLabel()}"
+    } else {
+        downloaded.toByteCountLabel()
+    }
+}
 
 private fun Long.toByteCountLabel(): String {
     if (this < 1_000) return "$this B"

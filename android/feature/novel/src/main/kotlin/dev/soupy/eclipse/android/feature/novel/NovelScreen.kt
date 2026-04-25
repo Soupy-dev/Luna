@@ -2,6 +2,8 @@ package dev.soupy.eclipse.android.feature.novel
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -48,6 +50,7 @@ data class NovelScreenState(
     val catalogs: List<NovelCatalogSectionRow> = emptyList(),
     val recent: List<NovelProgressRow> = emptyList(),
     val modules: List<NovelModuleRow> = emptyList(),
+    val reader: NovelReaderPanelRow? = null,
 )
 
 data class NovelCatalogSectionRow(
@@ -65,6 +68,9 @@ data class NovelCatalogItemRow(
     val description: String? = null,
     val format: String? = null,
     val totalChapters: Int? = null,
+    val moduleId: String? = null,
+    val contentParams: String? = null,
+    val sourceName: String? = null,
     val isSaved: Boolean = false,
     val isFavorite: Boolean = false,
     val readChapterCount: Int = 0,
@@ -78,6 +84,9 @@ data class NovelProgressRow(
     val title: String,
     val subtitle: String,
     val coverUrl: String? = null,
+    val moduleId: String? = null,
+    val contentParams: String? = null,
+    val sourceName: String? = null,
     val readChapterCount: Int = 0,
     val unreadChapterCount: Int? = null,
 )
@@ -89,6 +98,37 @@ data class NovelModuleRow(
     val isActive: Boolean,
 )
 
+data class NovelReaderPanelRow(
+    val aniListId: Int,
+    val title: String,
+    val coverUrl: String? = null,
+    val format: String? = null,
+    val totalChapters: Int? = null,
+    val moduleId: String? = null,
+    val contentParams: String? = null,
+    val sourceName: String? = null,
+    val readChapterCount: Int = 0,
+    val unreadChapterCount: Int? = null,
+    val lastReadChapter: String? = null,
+    val currentChapter: Int = 1,
+    val chapters: List<NovelReaderChapterRow> = emptyList(),
+    val isLoadingChapters: Boolean = false,
+    val isLoadingContent: Boolean = false,
+    val contentMessage: String? = null,
+    val contentError: String? = null,
+    val textContent: String? = null,
+)
+
+data class NovelReaderChapterRow(
+    val number: Int,
+    val title: String? = null,
+    val params: String? = null,
+    val sourceName: String? = null,
+    val isRead: Boolean,
+    val isCurrent: Boolean,
+)
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NovelRoute(
     state: NovelScreenState,
@@ -99,6 +139,10 @@ fun NovelRoute(
     onRemoveItem: (Int) -> Unit,
     onReadNext: (Int) -> Unit,
     onUnreadLast: (Int) -> Unit,
+    onReadPrevious: (Int) -> Unit,
+    onOpenReader: (Int) -> Unit,
+    onCloseReader: () -> Unit,
+    onReadChapter: (Int, Int) -> Unit,
     onToggleFavorite: (Int) -> Unit,
     onClearProgress: (String) -> Unit,
     onAddModule: (String) -> Unit,
@@ -163,6 +207,19 @@ fun NovelRoute(
                         }
                     }
                 }
+            }
+        }
+
+        state.reader?.let { reader ->
+            item {
+                NovelReaderPanel(
+                    reader = reader,
+                    onClose = onCloseReader,
+                    onReadChapter = { chapter -> onReadChapter(reader.aniListId, chapter) },
+                    onReadNext = { onReadNext(reader.aniListId) },
+                    onReadPrevious = { onReadPrevious(reader.aniListId) },
+                    onUnreadLast = { onUnreadLast(reader.aniListId) },
+                )
             }
         }
 
@@ -251,6 +308,7 @@ fun NovelRoute(
                     item = item,
                     onSave = { onSaveItem(item.id) },
                     onRemove = { onRemoveItem(item.aniListId) },
+                    onOpenReader = { onOpenReader(item.aniListId) },
                     onReadNext = { onReadNext(item.aniListId) },
                     onUnreadLast = { onUnreadLast(item.aniListId) },
                     onToggleFavorite = { onToggleFavorite(item.aniListId) },
@@ -270,6 +328,7 @@ fun NovelRoute(
                     item = item,
                     onSave = { onSaveItem(item.id) },
                     onRemove = { onRemoveItem(item.aniListId) },
+                    onOpenReader = { onOpenReader(item.aniListId) },
                     onReadNext = { onReadNext(item.aniListId) },
                     onUnreadLast = { onUnreadLast(item.aniListId) },
                     onToggleFavorite = { onToggleFavorite(item.aniListId) },
@@ -290,6 +349,7 @@ fun NovelRoute(
                                 item = item,
                                 onSave = { onSaveItem(item.id) },
                                 onRemove = { onRemoveItem(item.aniListId) },
+                                onOpenReader = { onOpenReader(item.aniListId) },
                                 onReadNext = { onReadNext(item.aniListId) },
                                 onUnreadLast = { onUnreadLast(item.aniListId) },
                                 onToggleFavorite = { onToggleFavorite(item.aniListId) },
@@ -311,6 +371,7 @@ fun NovelRoute(
             items(state.recent, key = { it.id }) { row ->
                 NovelProgressCard(
                     row = row,
+                    onOpenReader = { row.aniListId?.let(onOpenReader) },
                     onReadNext = { row.aniListId?.let(onReadNext) },
                     onUnreadLast = { row.aniListId?.let(onUnreadLast) },
                     onClearProgress = { onClearProgress(row.id) },
@@ -364,6 +425,7 @@ private fun NovelCatalogCard(
     item: NovelCatalogItemRow,
     onSave: () -> Unit,
     onRemove: () -> Unit,
+    onOpenReader: () -> Unit,
     onReadNext: () -> Unit,
     onUnreadLast: () -> Unit,
     onToggleFavorite: () -> Unit,
@@ -412,6 +474,12 @@ private fun NovelCatalogCard(
                     Text("Remove")
                 }
                 Button(
+                    onClick = onOpenReader,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Reader")
+                }
+                Button(
                     onClick = onReadNext,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -447,6 +515,7 @@ private fun NovelItemCard(
     item: NovelCatalogItemRow,
     onSave: () -> Unit,
     onRemove: () -> Unit,
+    onOpenReader: () -> Unit,
     onReadNext: () -> Unit,
     onUnreadLast: () -> Unit,
     onToggleFavorite: () -> Unit,
@@ -493,6 +562,9 @@ private fun NovelItemCard(
                 }
                 if (item.isSaved) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(onClick = onOpenReader) {
+                            Text("Reader")
+                        }
                         Button(onClick = onReadNext) {
                             Text("Read Next")
                         }
@@ -566,6 +638,7 @@ private fun StatPanel(
 @Composable
 private fun NovelProgressCard(
     row: NovelProgressRow,
+    onOpenReader: () -> Unit,
     onReadNext: () -> Unit,
     onUnreadLast: () -> Unit,
     onClearProgress: () -> Unit,
@@ -616,6 +689,12 @@ private fun NovelProgressCard(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
+                    onClick = onOpenReader,
+                    enabled = row.aniListId != null,
+                ) {
+                    Text("Reader")
+                }
+                Button(
                     onClick = onReadNext,
                     enabled = row.aniListId != null,
                 ) {
@@ -634,6 +713,167 @@ private fun NovelProgressCard(
         }
     }
 }
+
+@Composable
+private fun NovelReaderPanel(
+    reader: NovelReaderPanelRow,
+    onClose: () -> Unit,
+    onReadChapter: (Int) -> Unit,
+    onReadNext: () -> Unit,
+    onReadPrevious: () -> Unit,
+    onUnreadLast: () -> Unit,
+) {
+    var chapterInput by rememberSaveable(reader.aniListId, reader.currentChapter) {
+        mutableStateOf(reader.currentChapter.toString())
+    }
+    val targetChapter = chapterInput.toIntOrNull()
+        ?.coerceAtLeast(1)
+        ?.let { chapter -> reader.totalChapters?.let { chapter.coerceAtMost(it) } ?: chapter }
+
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                PosterImage(
+                    imageUrl = reader.coverUrl,
+                    contentDescription = reader.title,
+                    modifier = Modifier
+                        .width(86.dp)
+                        .aspectRatio(2f / 3f),
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = reader.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = listOfNotNull(
+                            reader.format?.replace('_', ' '),
+                            reader.sourceName,
+                            reader.lastReadChapter?.let { "Last read chapter $it" },
+                            reader.totalChapters?.let { "${reader.readChapterCount}/$it read" }
+                                ?: reader.readChapterCount.takeIf { it > 0 }?.let { "$it read" },
+                            reader.unreadChapterCount?.takeIf { it > 0 }?.let { "$it unread" },
+                        ).joinToString(" - ").ifBlank { "Chapter progress" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                    Text(
+                        text = "Current chapter ${reader.currentChapter}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    if (reader.isLoadingChapters) {
+                        Text(
+                            text = "Loading module chapters...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
+                }
+            }
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                reader.chapters.forEach { chapter ->
+                    if (chapter.isCurrent) {
+                        Button(onClick = { onReadChapter(chapter.number) }) {
+                            Text(chapter.buttonLabel())
+                        }
+                    } else {
+                        OutlinedButton(onClick = { onReadChapter(chapter.number) }) {
+                            Text(if (chapter.isRead) "Read ${chapter.number}" else chapter.buttonLabel())
+                        }
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = chapterInput,
+                    onValueChange = { value -> chapterInput = value.filter(Char::isDigit).take(5) },
+                    label = { Text("Chapter") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                )
+                Button(
+                    onClick = { targetChapter?.let(onReadChapter) },
+                    enabled = targetChapter != null,
+                ) {
+                    Text("Mark Read")
+                }
+            }
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Button(onClick = { onReadChapter(reader.currentChapter) }) {
+                    Text("Mark Current Read")
+                }
+                OutlinedButton(onClick = onReadNext) {
+                    Text("Next Chapter")
+                }
+                OutlinedButton(
+                    onClick = onReadPrevious,
+                    enabled = reader.currentChapter > 1,
+                ) {
+                    Text("Previous")
+                }
+                OutlinedButton(
+                    onClick = onUnreadLast,
+                    enabled = reader.readChapterCount > 0,
+                ) {
+                    Text("Unread Last")
+                }
+                OutlinedButton(onClick = onClose) {
+                    Text("Close")
+                }
+            }
+
+            if (reader.isLoadingContent) {
+                Text(
+                    text = reader.contentMessage ?: "Loading chapter text...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+            reader.contentError?.let { error ->
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            reader.textContent?.takeIf { it.isNotBlank() }?.let { content ->
+                Text(
+                    text = content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
+                )
+            }
+        }
+    }
+}
+
+private fun NovelReaderChapterRow.buttonLabel(): String =
+    title?.takeIf { it.isNotBlank() }?.let { value ->
+        if (value.length <= 12) value else "Ch $number"
+    } ?: "Ch $number"
 
 @Composable
 private fun NovelModuleCard(

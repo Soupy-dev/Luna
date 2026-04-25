@@ -169,6 +169,20 @@ fun PosterImage(
 }
 
 @Composable
+fun ContentImage(
+    imageUrl: String,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+) {
+    AsyncImage(
+        model = imageUrl,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        contentScale = ContentScale.Fit,
+    )
+}
+
+@Composable
 fun LoadingPanel(
     title: String,
     message: String,

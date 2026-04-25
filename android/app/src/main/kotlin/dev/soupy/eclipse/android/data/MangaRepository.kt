@@ -8,6 +8,9 @@ import dev.soupy.eclipse.android.core.model.MangaLibrarySnapshot
 import dev.soupy.eclipse.android.core.model.MangaProgress
 import dev.soupy.eclipse.android.core.model.displayTitle
 import dev.soupy.eclipse.android.core.model.posterUrl
+import dev.soupy.eclipse.android.core.js.KanzenModuleRuntime
+import dev.soupy.eclipse.android.core.js.ModuleManifest
+import dev.soupy.eclipse.android.core.js.ServiceSearchResult
 import dev.soupy.eclipse.android.core.network.AniListService
 import dev.soupy.eclipse.android.core.network.EclipseHttpClient
 import dev.soupy.eclipse.android.core.network.EclipseJson
@@ -49,6 +52,9 @@ data class MangaCatalogItemSnapshot(
     val description: String? = null,
     val format: String? = null,
     val totalChapters: Int? = null,
+    val moduleId: String? = null,
+    val contentParams: String? = null,
+    val sourceName: String? = null,
     val isSaved: Boolean = false,
     val isFavorite: Boolean = false,
     val readChapterCount: Int = 0,
@@ -62,6 +68,9 @@ data class MangaLibraryItemDraft(
     val coverUrl: String? = null,
     val format: String? = null,
     val totalChapters: Int? = null,
+    val moduleId: String? = null,
+    val contentParams: String? = null,
+    val sourceName: String? = null,
 )
 
 data class MangaReadingProgressDraft(
@@ -70,6 +79,8 @@ data class MangaReadingProgressDraft(
     val coverUrl: String? = null,
     val format: String? = null,
     val totalChapters: Int? = null,
+    val moduleId: String? = null,
+    val contentParams: String? = null,
     val chapterNumber: Int,
     val isNovel: Boolean = false,
 )
@@ -95,6 +106,19 @@ data class KanzenModuleUpdateSummary(
     val checkedModules: Int,
     val updatedModules: Int,
     val failedModules: Int,
+)
+
+data class KanzenReaderChapterSnapshot(
+    val number: Int,
+    val title: String,
+    val params: String,
+    val sourceName: String? = null,
+)
+
+data class KanzenReaderContentSnapshot(
+    val chapterParams: String,
+    val imageUrls: List<String> = emptyList(),
+    val text: String? = null,
 )
 
 data class KanzenModuleDraft(
@@ -135,6 +159,7 @@ class MangaRepository(
     private val aniListService: AniListService,
     private val settingsStore: SettingsStore? = null,
     private val httpClient: EclipseHttpClient = EclipseHttpClient(),
+    private val kanzenRuntime: KanzenModuleRuntime? = null,
 ) {
     suspend fun loadOverview(): Result<MangaOverviewSnapshot> = runCatching {
         coroutineScope {
@@ -176,7 +201,7 @@ class MangaRepository(
         val trimmed = query.trim()
         if (trimmed.isBlank()) return@runCatching emptyList()
         val snapshot = mangaStore.read()
-        aniListService.searchManga(
+        val aniListResults = aniListService.searchManga(
             query = trimmed,
             page = 1,
             perPage = 24,
@@ -184,6 +209,10 @@ class MangaRepository(
             savedAniListIds = snapshot.savedAniListIds(),
             progressByAniListId = snapshot.progressByAniListId(),
             favoriteAniListIds = snapshot.favoriteAniListIds(),
+        )
+        aniListResults + snapshot.searchKanzenModules(
+            query = trimmed,
+            isNovel = false,
         )
     }
 
@@ -191,7 +220,7 @@ class MangaRepository(
         val trimmed = query.trim()
         if (trimmed.isBlank()) return@runCatching emptyList()
         val snapshot = mangaStore.read()
-        aniListService.searchNovels(
+        val aniListResults = aniListService.searchNovels(
             query = trimmed,
             page = 1,
             perPage = 24,
@@ -200,10 +229,14 @@ class MangaRepository(
             progressByAniListId = snapshot.progressByAniListId(),
             favoriteAniListIds = snapshot.favoriteAniListIds(),
         )
+        aniListResults + snapshot.searchKanzenModules(
+            query = trimmed,
+            isNovel = true,
+        )
     }
 
     suspend fun saveToLibrary(draft: MangaLibraryItemDraft): Result<MangaLibrarySnapshot> = runCatching {
-        require(draft.aniListId > 0) { "Saving manga requires an AniList id." }
+        require(draft.aniListId != 0) { "Saving manga requires a stable content id." }
         require(draft.title.isNotBlank()) { "Saving manga requires a title." }
         val snapshot = seedFromBackupIfNeeded().first
         val item = MangaLibraryItem(
@@ -212,6 +245,9 @@ class MangaRepository(
             coverUrl = draft.coverUrl,
             format = draft.format,
             totalChapters = draft.totalChapters,
+            moduleId = draft.moduleId,
+            contentParams = draft.contentParams,
+            sourceName = draft.sourceName,
             dateAdded = Instant.now().toString(),
         )
         val updated = snapshot.copy(
@@ -222,7 +258,7 @@ class MangaRepository(
     }
 
     suspend fun removeFromLibrary(aniListId: Int): Result<MangaLibrarySnapshot> = runCatching {
-        require(aniListId > 0) { "Removing manga requires an AniList id." }
+        require(aniListId != 0) { "Removing manga requires a stable content id." }
         val snapshot = mangaStore.read()
         val updated = snapshot.copy(
             collections = snapshot.collections.map { collection ->
@@ -235,8 +271,83 @@ class MangaRepository(
         updated
     }
 
+    suspend fun createCollection(name: String): Result<MangaLibrarySnapshot> = runCatching {
+        val trimmed = name.trim()
+        require(trimmed.isNotBlank()) { "Collection name is required." }
+        val snapshot = seedFromBackupIfNeeded().first
+        val existing = snapshot.collections.firstOrNull { collection ->
+            collection.name.equals(trimmed, ignoreCase = true)
+        }
+        if (existing != null) return@runCatching snapshot
+        val collection = MangaLibraryCollection(
+            id = "android-collection-${trimmed.hashCode().toUInt().toString(16)}",
+            name = trimmed,
+            description = "Created on Android",
+            items = emptyList(),
+        )
+        val updated = snapshot.copy(collections = snapshot.collections + collection)
+        mangaStore.write(updated)
+        updated
+    }
+
+    suspend fun deleteCollection(collectionId: String): Result<MangaLibrarySnapshot> = runCatching {
+        require(collectionId.isNotBlank()) { "Collection id is required." }
+        require(!collectionId.isSystemMangaCollectionId()) { "System collections cannot be deleted." }
+        val snapshot = seedFromBackupIfNeeded().first
+        val updated = snapshot.copy(
+            collections = snapshot.collections.filterNot { collection -> collection.id == collectionId },
+        )
+        mangaStore.write(updated)
+        updated
+    }
+
+    suspend fun addToCollection(
+        collectionId: String,
+        aniListId: Int,
+    ): Result<MangaLibrarySnapshot> = runCatching {
+        require(collectionId.isNotBlank()) { "Collection id is required." }
+        require(aniListId != 0) { "Adding to a collection requires a stable content id." }
+        val snapshot = seedFromBackupIfNeeded().first
+        val item = snapshot.findMangaItem(aniListId)
+            ?: error("Save this title before adding it to a collection.")
+        val target = snapshot.collections.firstOrNull { collection -> collection.id == collectionId }
+            ?: error("Collection was not found.")
+        val updated = snapshot.copy(
+            collections = snapshot.collections.map { collection ->
+                if (collection.id == target.id) {
+                    collection.copy(items = listOf(item) + collection.items.filterNot { it.aniListId == aniListId })
+                } else {
+                    collection
+                }
+            },
+        )
+        mangaStore.write(updated)
+        updated
+    }
+
+    suspend fun removeFromCollection(
+        collectionId: String,
+        aniListId: Int,
+    ): Result<MangaLibrarySnapshot> = runCatching {
+        require(collectionId.isNotBlank()) { "Collection id is required." }
+        require(!collectionId.isSystemMangaCollectionId()) { "Remove items from the library or favorites controls for system collections." }
+        require(aniListId != 0) { "Removing from a collection requires a stable content id." }
+        val snapshot = seedFromBackupIfNeeded().first
+        val updated = snapshot.copy(
+            collections = snapshot.collections.map { collection ->
+                if (collection.id == collectionId) {
+                    collection.copy(items = collection.items.filterNot { item -> item.aniListId == aniListId })
+                } else {
+                    collection
+                }
+            },
+        )
+        mangaStore.write(updated)
+        updated
+    }
+
     suspend fun markNextChapterRead(aniListId: Int): Result<MangaLibrarySnapshot> = runCatching {
-        require(aniListId > 0) { "Reading progress requires an AniList id." }
+        require(aniListId != 0) { "Reading progress requires a stable content id." }
         val snapshot = seedFromBackupIfNeeded().first
         val item = snapshot.findMangaItem(aniListId)
             ?: error("Save this title before tracking chapter progress.")
@@ -251,6 +362,8 @@ class MangaRepository(
                 coverUrl = item.coverUrl,
                 format = item.format,
                 totalChapters = item.totalChapters,
+                moduleId = item.moduleId,
+                contentParams = item.contentParams,
                 chapterNumber = nextChapter,
                 isNovel = item.isNovelItem,
             ),
@@ -260,7 +373,7 @@ class MangaRepository(
     }
 
     suspend fun markPreviousChapterUnread(aniListId: Int): Result<MangaLibrarySnapshot> = runCatching {
-        require(aniListId > 0) { "Reading progress requires an AniList id." }
+        require(aniListId != 0) { "Reading progress requires a stable content id." }
         val snapshot = seedFromBackupIfNeeded().first
         val item = snapshot.findMangaItem(aniListId)
         val existing = snapshot.progressByAniListId()[aniListId]
@@ -276,6 +389,8 @@ class MangaRepository(
                     coverUrl = existing.coverUrl ?: item?.coverUrl,
                     format = existing.format ?: item?.format,
                     totalChapters = existing.totalChapters ?: item?.totalChapters,
+                    moduleId = existing.moduleUUID ?: item?.moduleId,
+                    contentParams = existing.contentParams ?: item?.contentParams,
                     chapterNumber = previousChapter,
                     isNovel = existing.isNovel == true || item?.isNovelItem == true,
                 ),
@@ -286,7 +401,7 @@ class MangaRepository(
     }
 
     suspend fun recordReadingProgress(draft: MangaReadingProgressDraft): Result<MangaLibrarySnapshot> = runCatching {
-        require(draft.aniListId > 0) { "Reading progress requires an AniList id." }
+        require(draft.aniListId != 0) { "Reading progress requires a stable content id." }
         require(draft.chapterNumber > 0) { "Chapter number must be greater than zero." }
         val snapshot = seedFromBackupIfNeeded().first
         val updated = snapshot.writeProgressSnapshot(draft)
@@ -295,7 +410,7 @@ class MangaRepository(
     }
 
     suspend fun toggleFavorite(aniListId: Int): Result<MangaLibrarySnapshot> = runCatching {
-        require(aniListId > 0) { "Favorites require an AniList id." }
+        require(aniListId != 0) { "Favorites require a stable content id." }
         val snapshot = seedFromBackupIfNeeded().first
         val item = snapshot.findMangaItem(aniListId)
             ?: error("Save this title before favoriting it.")
@@ -433,6 +548,117 @@ class MangaRepository(
             isNovel = isNovel,
             onlyDue = false,
         )
+    }
+
+    suspend fun loadKanzenReaderChapters(
+        moduleId: String?,
+        contentParams: String?,
+        isNovel: Boolean,
+    ): Result<List<KanzenReaderChapterSnapshot>> = runCatching {
+        val runtime = kanzenRuntime ?: error("Kanzen runtime is not available on this device.")
+        require(!moduleId.isNullOrBlank() && moduleId != "anilist") { "This title is not backed by a Kanzen module." }
+        require(!contentParams.isNullOrBlank()) { "This title does not have module content parameters." }
+        val module = mangaStore.read().modules.firstOrNull { record ->
+            record.id == moduleId && record.isActive && record.isNovel == isNovel
+        } ?: error("Kanzen module is not installed or active.")
+        val manifest = module.loadIntoRuntime(runtime)
+        runtime.chapters(
+            module = manifest,
+            params = JsonPrimitive(contentParams),
+        ).getOrThrow()
+            .mapIndexed { index, chapter ->
+                KanzenReaderChapterSnapshot(
+                    number = chapter.episodeNumber ?: index + 1,
+                    title = chapter.title.ifBlank { "Chapter ${chapter.episodeNumber ?: index + 1}" },
+                    params = chapter.href,
+                    sourceName = chapter.metadata.string("scanlation_group")
+                        ?: chapter.metadata.string("sourceName")
+                        ?: module.displayName,
+                )
+            }
+            .distinctBy { chapter -> chapter.params }
+    }
+
+    suspend fun loadKanzenReaderContent(
+        moduleId: String?,
+        chapterParams: String?,
+        isNovel: Boolean,
+    ): Result<KanzenReaderContentSnapshot> = runCatching {
+        val runtime = kanzenRuntime ?: error("Kanzen runtime is not available on this device.")
+        require(!moduleId.isNullOrBlank() && moduleId != "anilist") { "This title is not backed by a Kanzen module." }
+        require(!chapterParams.isNullOrBlank()) { "Choose a module chapter first." }
+        val module = mangaStore.read().modules.firstOrNull { record ->
+            record.id == moduleId && record.isActive && record.isNovel == isNovel
+        } ?: error("Kanzen module is not installed or active.")
+        val manifest = module.loadIntoRuntime(runtime)
+        val params = JsonPrimitive(chapterParams)
+        if (isNovel) {
+            KanzenReaderContentSnapshot(
+                chapterParams = chapterParams,
+                text = runtime.text(manifest, params).getOrThrow()
+                    .takeIf { text -> text.isNotBlank() && text != "undefined" },
+            )
+        } else {
+            KanzenReaderContentSnapshot(
+                chapterParams = chapterParams,
+                imageUrls = runtime.images(manifest, params).getOrThrow()
+                    .filter(String::isNotBlank),
+            )
+        }
+    }
+
+    private suspend fun MangaLibrarySnapshot.searchKanzenModules(
+        query: String,
+        isNovel: Boolean,
+    ): List<MangaCatalogItemSnapshot> {
+        val runtime = kanzenRuntime ?: return emptyList()
+        val savedIds = savedAniListIds()
+        val progress = progressByAniListId()
+        val favorites = favoriteAniListIds()
+        val activeModules = modules.filter { module ->
+            module.isActive &&
+                module.isNovel == isNovel &&
+                !module.scriptUrl.isNullOrBlank()
+        }
+        if (activeModules.isEmpty()) return emptyList()
+
+        return coroutineScope {
+            activeModules.map { module ->
+                async {
+                    runCatching {
+                        val runtimeManifest = module.loadIntoRuntime(runtime)
+                        runtime.search(
+                            module = runtimeManifest,
+                            query = query,
+                            page = 0,
+                        ).getOrThrow()
+                            .map { result ->
+                                result.toKanzenCatalogItem(
+                                    module = module,
+                                    savedAniListIds = savedIds,
+                                    progressByAniListId = progress,
+                                    favoriteAniListIds = favorites,
+                                    isNovel = isNovel,
+                                )
+                            }
+                    }.getOrDefault(emptyList())
+                }
+            }.flatMap { deferred -> deferred.await() }
+                .distinctBy { item -> item.aniListId }
+                .take(24)
+        }
+    }
+
+    private suspend fun KanzenModuleRecord.loadIntoRuntime(runtime: KanzenModuleRuntime): ModuleManifest {
+        require(!scriptUrl.isNullOrBlank()) { "Kanzen module ${displayName} does not have a script URL." }
+        val runtimeManifest = toRuntimeManifest()
+        val script = httpClient.get(scriptUrl.orEmpty()).orThrow()
+        runtime.load(
+            module = runtimeManifest,
+            script = script,
+            isNovel = isNovel,
+        ).getOrThrow()
+        return runtimeManifest
     }
 
     private suspend fun seedFromBackupIfNeeded(): Pair<MangaLibrarySnapshot, Boolean> {
@@ -607,6 +833,51 @@ private fun MangaLibrarySnapshot.toOverview(
 private val MangaProgress.isNovelProgress: Boolean
     get() = isNovel == true || format.equals("NOVEL", ignoreCase = true) || format.equals("LIGHT_NOVEL", ignoreCase = true)
 
+private fun KanzenModuleRecord.toRuntimeManifest(): ModuleManifest = ModuleManifest(
+    id = id.ifBlank { moduleUrl ?: scriptUrl ?: displayName },
+    name = displayName,
+    version = version,
+    entrypoint = scriptUrl,
+)
+
+private fun ServiceSearchResult.toKanzenCatalogItem(
+    module: KanzenModuleRecord,
+    savedAniListIds: Set<Int>,
+    progressByAniListId: Map<Int, MangaProgress>,
+    favoriteAniListIds: Set<Int>,
+    isNovel: Boolean,
+): MangaCatalogItemSnapshot {
+    val stableId = module.stableContentId(href)
+    val progress = progressByAniListId[stableId]
+    val readCount = progress?.readChapterNumbers?.size ?: 0
+    return MangaCatalogItemSnapshot(
+        id = "kanzen-${module.id.toKanzenSearchIdStem()}-${stableId.toString().removePrefix("-")}",
+        aniListId = stableId,
+        title = title,
+        subtitle = listOfNotNull(
+            module.displayName,
+            subtitle,
+            if (isNovel) "Novel module" else "Manga module",
+        ).joinToString(" - "),
+        coverUrl = image,
+        description = subtitle,
+        format = if (isNovel) "NOVEL" else "MANGA",
+        moduleId = module.id,
+        contentParams = href,
+        sourceName = module.displayName,
+        isSaved = stableId in savedAniListIds,
+        isFavorite = stableId in favoriteAniListIds,
+        readChapterCount = readCount,
+        unreadChapterCount = progress?.totalChapters?.let { (it - readCount).coerceAtLeast(0) },
+        lastReadChapter = progress?.lastReadChapter,
+    )
+}
+
+private fun KanzenModuleRecord.stableContentId(contentParams: String): Int {
+    val positive = "$id:$contentParams".hashCode() and Int.MAX_VALUE
+    return -positive.coerceAtLeast(1)
+}
+
 private fun KanzenModuleRecord.updateUrlOrNull(): String? =
     moduleUrl
         ?: moduleData.jsonObjectOrNull()?.string("moduleURL")
@@ -713,12 +984,17 @@ private fun MangaLibrarySnapshot.writeProgressSnapshot(draft: MangaReadingProgre
         coverUrl = draft.coverUrl,
         format = draft.format,
         totalChapters = draft.totalChapters,
-        moduleUUID = "anilist",
-        contentParams = "anilist:${draft.aniListId}",
+        moduleUUID = draft.moduleId ?: "anilist",
+        contentParams = draft.contentParams ?: "anilist:${draft.aniListId}",
         isNovel = draft.isNovel,
     )
     return copy(readingProgress = readingProgress + (draft.aniListId.mangaProgressId() to progress))
 }
+
+private fun String.toKanzenSearchIdStem(): String =
+    replace(Regex("[^A-Za-z0-9._-]+"), "_")
+        .trim('_')
+        .ifBlank { "module" }
 
 private fun MangaProgress.lastReadChapterNumber(): Int =
     lastReadChapter?.toIntOrNull()
@@ -726,6 +1002,10 @@ private fun MangaProgress.lastReadChapterNumber(): Int =
         ?: 0
 
 private fun Int.mangaProgressId(): String = "anilist-manga:$this"
+
+private fun String.isSystemMangaCollectionId(): Boolean =
+    equals(DefaultMangaCollectionId, ignoreCase = true) ||
+        equals(FavoritesCollectionId, ignoreCase = true)
 
 private fun AniListMangaLibraryImportDraft.toMangaLibraryItem(): MangaLibraryItem {
     val updatedAt = updatedAtEpochSeconds?.takeIf { it > 0 }?.let { Instant.ofEpochSecond(it).toString() }

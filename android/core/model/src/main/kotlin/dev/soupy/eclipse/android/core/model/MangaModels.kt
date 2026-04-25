@@ -13,6 +13,9 @@ data class MangaLibraryItem(
     val format: String? = null,
     val totalChapters: Int? = null,
     val dateAdded: String? = null,
+    val moduleId: String? = null,
+    val contentParams: String? = null,
+    val sourceName: String? = null,
 )
 
 @Serializable

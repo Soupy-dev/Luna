@@ -1,5 +1,6 @@
 package dev.soupy.eclipse.android.core.js
 
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 interface JsEngine {
@@ -22,10 +23,10 @@ interface ServiceRuntime {
 interface KanzenModuleRuntime {
     suspend fun load(module: ModuleManifest, script: String, isNovel: Boolean = false): Result<Unit>
     suspend fun search(module: ModuleManifest, query: String, page: Int = 0): Result<List<ServiceSearchResult>>
-    suspend fun details(module: ModuleManifest, params: JsonObject): Result<JsonObject>
-    suspend fun chapters(module: ModuleManifest, params: JsonObject): Result<List<ServiceEpisodeLink>>
-    suspend fun images(module: ModuleManifest, params: JsonObject): Result<List<String>>
-    suspend fun text(module: ModuleManifest, params: JsonObject): Result<String>
+    suspend fun details(module: ModuleManifest, params: JsonElement): Result<JsonObject>
+    suspend fun chapters(module: ModuleManifest, params: JsonElement): Result<List<ServiceEpisodeLink>>
+    suspend fun images(module: ModuleManifest, params: JsonElement): Result<List<String>>
+    suspend fun text(module: ModuleManifest, params: JsonElement): Result<String>
 }
 
 class NoopJsEngine : JsEngine {

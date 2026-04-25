@@ -92,6 +92,10 @@ class StremioModelsTest {
             title = "Movie 1080p",
             url = "magnet:?xt=urn:btih:ABC123",
         )
+        val torrentFileStream = StremioStream(
+            title = "Movie 1080p",
+            url = "https://cdn.example/movie.torrent?token=abc",
+        )
         val directStream = StremioStream(
             title = "Movie 1080p",
             url = "https://cdn.example/movie.mkv",
@@ -99,6 +103,7 @@ class StremioModelsTest {
 
         assertTrue(infoHashStream.isTorrentLike)
         assertTrue(magnetStream.isTorrentLike)
+        assertTrue(torrentFileStream.isTorrentLike)
         assertTrue(!directStream.isTorrentLike)
     }
 }

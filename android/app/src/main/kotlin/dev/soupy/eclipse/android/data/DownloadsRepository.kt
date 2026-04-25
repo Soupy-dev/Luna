@@ -38,6 +38,12 @@ data class DownloadCleanupResult(
     val deletedBytes: Long,
 )
 
+data class DownloadVerificationResult(
+    val snapshot: DownloadSnapshot,
+    val verifiedFiles: Int,
+    val missingFiles: Int,
+)
+
 class DownloadsRepository(
     private val downloadsStore: DownloadsStore,
 ) {
@@ -55,48 +61,13 @@ class DownloadsRepository(
             id = key,
             existing = existing,
         )
-        val withQueued = writeSnapshot(
+        writeSnapshot(
             snapshot.copy(
                 items = listOf(queued) + snapshot.items.filterNot { it.id == key },
             ),
         )
 
-        val sourceUri = queued.sourceUri
-        when {
-            sourceUri == null -> withQueued
-            sourceUri.isTorrentLikeUri() -> writeRecord(
-                queued.copy(
-                    status = DownloadStatus.FAILED,
-                    progressLabel = "Torrent and magnet sources are blocked on Android.",
-                    error = "Rejected torrent-like source URI: $sourceUri",
-                ),
-            )
-            !sourceUri.isDirectHttpUrl() -> writeRecord(
-                queued.copy(
-                    status = DownloadStatus.FAILED,
-                    progressLabel = "Only direct HTTP(S) streams can be downloaded by Android right now.",
-                    error = "Unsupported source URI: $sourceUri",
-                ),
-            )
-            sourceUri.isHlsPlaylist() -> {
-                writeRecord(
-                    queued.copy(
-                        status = DownloadStatus.DOWNLOADING,
-                        progressLabel = "Packaging HLS playlist segments for offline playback.",
-                    ),
-                )
-                writeRecord(downloadEngine.downloadHls(queued))
-            }
-            else -> {
-                writeRecord(
-                    queued.copy(
-                        status = DownloadStatus.DOWNLOADING,
-                        progressLabel = "Downloading direct stream into Android app storage.",
-                    ),
-                )
-                writeRecord(downloadEngine.download(queued))
-            }
-        }
+        processQueuedRecord(queued)
     }
 
     suspend fun pause(id: String): Result<DownloadSnapshot> = update(id) { current ->
@@ -106,13 +77,32 @@ class DownloadsRepository(
         )
     }
 
-    suspend fun resume(id: String): Result<DownloadSnapshot> = update(id) { current ->
-        current.copy(
-            status = DownloadStatus.QUEUED,
-            progressLabel = current.localUri?.let { "Queued to verify the existing offline file." }
-                ?: "Queued to retry the direct download.",
-            error = null,
-        )
+    suspend fun resume(id: String): Result<DownloadSnapshot> = runCatching {
+        val snapshot = downloadsStore.read()
+        val current = snapshot.items.firstOrNull { it.id == id }
+            ?: error("Download was not found.")
+        when {
+            current.hasExistingLocalFile() -> writeRecord(
+                current.verifiedLocalRecord()
+                    ?: current.copy(
+                        status = DownloadStatus.FAILED,
+                        progressPercent = 0f,
+                        progressLabel = "The offline file is missing. Retry the source download.",
+                        localUri = null,
+                        localFileName = null,
+                        subtitleFileNames = emptyList(),
+                        error = "Missing offline file.",
+                    ),
+            )
+            else -> processQueuedRecord(
+                current.copy(
+                    status = DownloadStatus.QUEUED,
+                    progressPercent = 0f,
+                    progressLabel = "Retrying the captured direct source.",
+                    error = null,
+                ),
+            )
+        }
     }
 
     suspend fun markComplete(id: String): Result<DownloadSnapshot> = update(id) { current ->
@@ -131,6 +121,37 @@ class DownloadsRepository(
             deleteDownloadedFiles(record)
         }
         writeSnapshot(snapshot.copy(items = snapshot.items.filterNot { it.id == id }))
+    }
+
+    suspend fun removeLocalFile(id: String): Result<DownloadSnapshot> = runCatching {
+        val snapshot = downloadsStore.read()
+        val current = snapshot.items.firstOrNull { it.id == id }
+            ?: error("Download was not found.")
+        deleteDownloadedFiles(current)
+        val sourceKind = classifyDownloadSource(current.sourceUri)
+        val canRetrySource = sourceKind == DownloadSourceKind.DIRECT_HTTP || sourceKind == DownloadSourceKind.HLS_PLAYLIST
+        writeRecord(
+            current.copy(
+                status = if (canRetrySource) DownloadStatus.QUEUED else DownloadStatus.FAILED,
+                progressPercent = 0f,
+                progressLabel = when {
+                    canRetrySource -> "Removed local files. The captured source can be retried."
+                    sourceKind == DownloadSourceKind.BLOCKED_TORRENT ->
+                        "Removed local files. Torrent and magnet sources are blocked on Android."
+                    else -> "Removed local files. Resolve this title again to capture a new direct source."
+                },
+                downloadedBytes = 0,
+                totalBytes = current.totalBytes.takeIf { it > 0 } ?: 0,
+                localFileName = null,
+                localUri = null,
+                subtitleFileNames = emptyList(),
+                error = when {
+                    canRetrySource -> null
+                    sourceKind == DownloadSourceKind.BLOCKED_TORRENT -> "Blocked torrent-like source cannot be retried."
+                    else -> "No supported direct HTTP(S) source remains for retry."
+                },
+            ),
+        )
     }
 
     suspend fun clearCompleted(): Result<DownloadSnapshot> = runCatching {
@@ -181,6 +202,40 @@ class DownloadsRepository(
         )
     }
 
+    suspend fun verifyLocalFiles(): Result<DownloadVerificationResult> = runCatching {
+        val snapshot = downloadsStore.read()
+        var verifiedFiles = 0
+        var missingFiles = 0
+        val updated = snapshot.items.map { record ->
+            val localReference = record.localFileName ?: record.localUri
+            if (!record.hasExistingLocalFile()) {
+                record
+            } else {
+                val verified = record.verifiedLocalRecord()
+                if (verified != null) {
+                    verifiedFiles += 1
+                    verified
+                } else {
+                    missingFiles += 1
+                    record.copy(
+                        status = DownloadStatus.FAILED,
+                        progressPercent = 0f,
+                        progressLabel = "Offline file is missing from Android app storage.",
+                        localFileName = null,
+                        localUri = null,
+                        subtitleFileNames = emptyList(),
+                        error = "Missing local file: $localReference",
+                    )
+                }
+            }
+        }
+        DownloadVerificationResult(
+            snapshot = writeSnapshot(snapshot.copy(items = updated)),
+            verifiedFiles = verifiedFiles,
+            missingFiles = missingFiles,
+        )
+    }
+
     private suspend fun update(
         id: String,
         transform: (DownloadRecord) -> DownloadRecord,
@@ -212,9 +267,56 @@ class DownloadsRepository(
         return normalized
     }
 
+    private suspend fun processQueuedRecord(
+        record: DownloadRecord,
+    ): DownloadSnapshot {
+        val sourceUri = record.sourceUri
+        return when (classifyDownloadSource(sourceUri)) {
+            DownloadSourceKind.WAITING_FOR_SOURCE -> writeRecord(
+                record.copy(
+                    status = DownloadStatus.QUEUED,
+                    progressLabel = record.progressLabel
+                        ?: "Queued until a playable direct source is captured from a detail page.",
+                ),
+            )
+            DownloadSourceKind.BLOCKED_TORRENT -> writeRecord(
+                record.copy(
+                    status = DownloadStatus.FAILED,
+                    progressLabel = "Torrent and magnet sources are blocked on Android.",
+                    error = "Rejected torrent-like source URI: $sourceUri",
+                ),
+            )
+            DownloadSourceKind.UNSUPPORTED_SOURCE -> writeRecord(
+                record.copy(
+                    status = DownloadStatus.FAILED,
+                    progressLabel = "Only direct HTTP(S) streams can be downloaded by Android right now.",
+                    error = "Unsupported source URI: $sourceUri",
+                ),
+            )
+            DownloadSourceKind.HLS_PLAYLIST -> {
+                writeRecord(
+                    record.copy(
+                        status = DownloadStatus.DOWNLOADING,
+                        progressLabel = "Packaging HLS playlist segments for offline playback.",
+                    ),
+                )
+                writeRecord(downloadEngine.downloadHls(record))
+            }
+            DownloadSourceKind.DIRECT_HTTP -> {
+                writeRecord(
+                    record.copy(
+                        status = DownloadStatus.DOWNLOADING,
+                        progressLabel = "Downloading direct stream into Android app storage.",
+                    ),
+                )
+                writeRecord(downloadEngine.download(record))
+            }
+        }
+    }
+
     private fun deleteDownloadedFiles(record: DownloadRecord) {
         val directory = downloadsStore.downloadsDirectory().canonicalFile
-        listOfNotNull(record.localFileName)
+        listOfNotNull(record.localDownloadedFile()?.name)
             .plus(record.subtitleFileNames)
             .forEach { name ->
                 File(directory, name)
@@ -222,6 +324,44 @@ class DownloadsRepository(
                     .takeIf { file -> file.isInside(directory) && file.exists() }
                     ?.delete()
             }
+    }
+
+    private fun DownloadRecord.hasExistingLocalFile(): Boolean =
+        !localFileName.isNullOrBlank() || !localUri.isNullOrBlank()
+
+    private fun DownloadRecord.verifiedLocalRecord(): DownloadRecord? {
+        val directory = downloadsStore.downloadsDirectory().canonicalFile
+        val canonical = localDownloadedFile() ?: return null
+        if (!canonical.isInside(directory) || !canonical.exists() || !canonical.isFile) return null
+        val subtitleFiles = subtitleFileNames.filter { name ->
+            File(directory, name).canonicalFile.let { subtitle ->
+                subtitle.isInside(directory) && subtitle.exists() && subtitle.isFile
+            }
+        }
+        val byteCount = canonical.length()
+        return copy(
+            status = DownloadStatus.COMPLETED,
+            progressPercent = 1f,
+            progressLabel = "Verified offline file (${byteCount.toByteCountLabel()}) in Android app storage.",
+            downloadedBytes = byteCount,
+            totalBytes = totalBytes.takeIf { it > 0 } ?: byteCount,
+            localFileName = canonical.name,
+            localUri = canonical.toURI().toString(),
+            subtitleFileNames = subtitleFiles,
+            error = null,
+        )
+    }
+
+    private fun DownloadRecord.localDownloadedFile(): File? {
+        val directory = downloadsStore.downloadsDirectory().canonicalFile
+        val file = localFileName
+            ?.takeIf { it.isNotBlank() }
+            ?.let { name -> File(directory, name) }
+            ?: localUri
+                ?.takeIf { it.isNotBlank() }
+                ?.let { uri -> runCatching { File(java.net.URI(uri)) }.getOrNull() }
+            ?: return null
+        return file.canonicalFile.takeIf { it.isInside(directory) }
     }
 }
 
@@ -588,7 +728,7 @@ private fun DownloadDraft.toRecord(
 
 private fun List<SubtitleTrack>.downloadSubtitles(directory: File, downloadId: String): List<String> =
     mapIndexedNotNull { index, subtitle ->
-        val subtitleUri = subtitle.uri?.takeIf { it.isDirectHttpUrl() } ?: return@mapIndexedNotNull null
+        val subtitleUri = subtitle.uri?.takeIf { it.isDirectHttpDownloadUrl() } ?: return@mapIndexedNotNull null
         runCatching {
             val extension = subtitleUri.fileExtension(default = "vtt")
             val file = File(directory, "${downloadId.safeFileStem()}_sub_${index + 1}.$extension")
@@ -635,19 +775,6 @@ private fun DetailTarget.downloadKey(suffix: String?): String {
 
 private fun File.isInside(root: File): Boolean =
     path == root.path || path.startsWith(root.path + File.separator)
-
-private fun String.isDirectHttpUrl(): Boolean =
-    startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)
-
-private fun String.isTorrentLikeUri(): Boolean {
-    val clean = trim()
-    return clean.startsWith("magnet:", ignoreCase = true) ||
-        clean.contains("btih:", ignoreCase = true) ||
-        clean.substringBefore('?').substringBefore('#').endsWith(".torrent", ignoreCase = true)
-}
-
-private fun String.isHlsPlaylist(): Boolean =
-    substringBefore('?').endsWith(".m3u8", ignoreCase = true)
 
 private fun String.fileExtension(default: String): String {
     val cleanPath = substringBefore('?').substringBefore('#')

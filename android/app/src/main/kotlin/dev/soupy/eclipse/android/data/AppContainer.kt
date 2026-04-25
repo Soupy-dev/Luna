@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import dev.soupy.eclipse.android.BuildConfig
+import dev.soupy.eclipse.android.core.js.WebViewKanzenModuleRuntime
 import dev.soupy.eclipse.android.core.network.EclipseJson
 import dev.soupy.eclipse.android.core.network.AniListService
 import dev.soupy.eclipse.android.core.network.AniSkipService
@@ -37,6 +38,7 @@ class EclipseAppContainer(
     val aniSkipService: AniSkipService = AniSkipService()
     val introDbService: IntroDbService = IntroDbService()
     val stremioService: StremioService = StremioService()
+    val kanzenModuleRuntime: WebViewKanzenModuleRuntime = WebViewKanzenModuleRuntime(context)
     val settingsStore: SettingsStore = SettingsStore(context)
     private val libraryStore: LibraryStore = LibraryStore(
         context = context,
@@ -179,6 +181,7 @@ class EclipseAppContainer(
         backupFileStore = backupFileStore,
         aniListService = aniListService,
         settingsStore = settingsStore,
+        kanzenRuntime = kanzenModuleRuntime,
     )
 }
 

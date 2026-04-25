@@ -4,15 +4,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.soupy.eclipse.android.core.model.MangaProgress
 import dev.soupy.eclipse.android.data.KanzenModuleDraft
+import dev.soupy.eclipse.android.data.KanzenReaderChapterSnapshot
+import dev.soupy.eclipse.android.data.KanzenReaderContentSnapshot
 import dev.soupy.eclipse.android.data.MangaCatalogItemSnapshot
 import dev.soupy.eclipse.android.data.MangaLibraryItemDraft
 import dev.soupy.eclipse.android.data.MangaOverviewSnapshot
+import dev.soupy.eclipse.android.data.MangaReadingProgressDraft
 import dev.soupy.eclipse.android.data.MangaRepository
 import dev.soupy.eclipse.android.feature.manga.MangaCatalogItemRow
 import dev.soupy.eclipse.android.feature.manga.MangaCatalogSectionRow
 import dev.soupy.eclipse.android.feature.manga.MangaCollectionRow
 import dev.soupy.eclipse.android.feature.manga.MangaModuleRow
 import dev.soupy.eclipse.android.feature.manga.MangaProgressRow
+import dev.soupy.eclipse.android.feature.manga.MangaReaderChapterRow
+import dev.soupy.eclipse.android.feature.manga.MangaReaderPanelRow
 import dev.soupy.eclipse.android.feature.manga.MangaScreenState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -116,6 +121,16 @@ class AndroidMangaViewModel(
     }
 
     fun readNextChapter(aniListId: Int) {
+        val reader = _state.value.activeReaderPanelFor(aniListId)
+        val nextRuntimeChapter = reader
+            ?.takeIf { it.isKanzenBacked }
+            ?.chapters
+            ?.filter { chapter -> chapter.number > reader.currentChapter }
+            ?.minByOrNull { chapter -> chapter.number }
+        if (nextRuntimeChapter != null) {
+            readChapter(aniListId, nextRuntimeChapter.number)
+            return
+        }
         viewModelScope.launch {
             repository.markNextChapterRead(aniListId)
                 .onSuccess {
@@ -126,6 +141,33 @@ class AndroidMangaViewModel(
                         it.copy(errorMessage = error.message ?: "Could not update reading progress.")
                     }
                 }
+        }
+    }
+
+    fun readPreviousChapter(aniListId: Int) {
+        val reader = _state.value.activeReaderPanelFor(aniListId) ?: return
+        val previousRuntimeChapter = reader.chapters
+            .filter { chapter -> chapter.number < reader.currentChapter }
+            .maxByOrNull { chapter -> chapter.number }
+        val previousParams = previousRuntimeChapter?.params
+        if (reader.isKanzenBacked && !previousParams.isNullOrBlank()) {
+            loadKanzenChapterContent(
+                aniListId = aniListId,
+                chapterNumber = previousRuntimeChapter.number,
+                chapterParams = previousParams,
+            )
+            return
+        }
+        val previousChapter = previousRuntimeChapter?.number ?: (reader.currentChapter - 1).coerceAtLeast(1)
+        _state.update {
+            it.updateReader(aniListId) { current ->
+                current.copy(
+                    currentChapter = previousChapter,
+                    chapters = current.chapters.map { chapter ->
+                        chapter.copy(isCurrent = chapter.number == previousChapter)
+                    },
+                )
+            }
         }
     }
 
@@ -140,6 +182,98 @@ class AndroidMangaViewModel(
                         it.copy(errorMessage = error.message ?: "Could not update reading progress.")
                     }
                 }
+        }
+    }
+
+    fun openReader(aniListId: Int) {
+        val reader = _state.value.readerPanelFor(aniListId)
+        _state.update {
+            if (reader != null) {
+                val nextReader = if (reader.isKanzenBacked) {
+                    reader.copy(isLoadingChapters = true, contentError = null)
+                } else {
+                    reader
+                }
+                it.copy(reader = nextReader, noticeMessage = "Opened manga reader progress for ${reader.title}.", errorMessage = null)
+            } else {
+                it.copy(errorMessage = "Save this manga before opening reader progress.")
+            }
+        }
+        if (reader?.isKanzenBacked == true) {
+            loadKanzenReaderChapters(reader)
+        }
+    }
+
+    fun closeReader() {
+        _state.update { it.copy(reader = null) }
+    }
+
+    fun readChapter(
+        aniListId: Int,
+        chapterNumber: Int,
+    ) {
+        val item = _state.value.activeReaderPanelFor(aniListId) ?: return
+        val selectedChapter = item.chapters.firstOrNull { chapter -> chapter.number == chapterNumber }
+        viewModelScope.launch {
+            val content = if (item.isKanzenBacked && !selectedChapter?.params.isNullOrBlank()) {
+                _state.update {
+                    it.updateReader(aniListId) { reader ->
+                        reader.copy(
+                            currentChapter = chapterNumber,
+                            isLoadingContent = true,
+                            contentMessage = "Loading manga chapter $chapterNumber pages...",
+                            contentError = null,
+                            pageImageUrls = emptyList(),
+                        )
+                    }
+                }
+                repository.loadKanzenReaderContent(
+                    moduleId = item.moduleId,
+                    chapterParams = selectedChapter.params,
+                    isNovel = false,
+                ).getOrElse { error ->
+                    _state.update {
+                        it.updateReader(aniListId) { reader ->
+                            reader.copy(
+                                isLoadingContent = false,
+                                contentError = error.message ?: "Could not load module chapter pages.",
+                            )
+                        }
+                    }
+                    null
+                }
+            } else {
+                null
+            }
+            repository.recordReadingProgress(
+                MangaReadingProgressDraft(
+                    aniListId = aniListId,
+                    title = item.title,
+                    coverUrl = item.coverUrl,
+                    format = item.format,
+                    totalChapters = item.totalChapters,
+                    moduleId = item.moduleId,
+                    contentParams = item.contentParams,
+                    chapterNumber = chapterNumber,
+                    isNovel = false,
+                ),
+            ).onSuccess {
+                reloadAfterModuleMutation("Marked manga chapter $chapterNumber as read.")
+                content?.let { loaded ->
+                    _state.update {
+                        it.updateReader(aniListId) { reader ->
+                            reader.withKanzenContent(
+                                chapterNumber = chapterNumber,
+                                content = loaded,
+                            )
+                        }
+                    }
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(errorMessage = error.message ?: "Could not update manga reader progress.")
+                }
+            }
         }
     }
 
@@ -166,6 +300,68 @@ class AndroidMangaViewModel(
                 .onFailure { error ->
                     _state.update {
                         it.copy(errorMessage = error.message ?: "Could not reset reading progress.")
+                    }
+                }
+        }
+    }
+
+    fun createCollection(name: String) {
+        viewModelScope.launch {
+            repository.createCollection(name)
+                .onSuccess {
+                    reloadAfterModuleMutation("Created manga collection.")
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(errorMessage = error.message ?: "Could not create manga collection.")
+                    }
+                }
+        }
+    }
+
+    fun deleteCollection(collectionId: String) {
+        viewModelScope.launch {
+            repository.deleteCollection(collectionId)
+                .onSuccess {
+                    reloadAfterModuleMutation("Deleted manga collection.")
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(errorMessage = error.message ?: "Could not delete manga collection.")
+                    }
+                }
+        }
+    }
+
+    fun addItemToCollection(
+        collectionId: String,
+        aniListId: Int,
+    ) {
+        viewModelScope.launch {
+            repository.addToCollection(collectionId, aniListId)
+                .onSuccess {
+                    reloadAfterModuleMutation("Added manga to collection.")
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(errorMessage = error.message ?: "Could not add manga to collection.")
+                    }
+                }
+        }
+    }
+
+    fun removeItemFromCollection(
+        collectionId: String,
+        aniListId: Int,
+    ) {
+        viewModelScope.launch {
+            repository.removeFromCollection(collectionId, aniListId)
+                .onSuccess {
+                    reloadAfterModuleMutation("Removed manga from collection.")
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(errorMessage = error.message ?: "Could not remove manga from collection.")
                     }
                 }
         }
@@ -282,7 +478,7 @@ class AndroidMangaViewModel(
             .flatMap { collection -> collection.items }
             .map { item -> item.aniListId }
             .toSet()
-        _state.value = MangaScreenState(
+        val nextState = MangaScreenState(
             isLoading = false,
             query = previous.query,
             isSearching = false,
@@ -312,6 +508,9 @@ class AndroidMangaViewModel(
                         coverUrl = item.coverUrl,
                         format = item.format,
                         totalChapters = item.totalChapters,
+                        moduleId = item.moduleId,
+                        contentParams = item.contentParams,
+                        sourceName = item.sourceName,
                         isSaved = true,
                         isFavorite = item.aniListId in snapshot.favoriteAniListIds,
                         readChapterCount = readCount,
@@ -334,6 +533,8 @@ class AndroidMangaViewModel(
                         "${collection.items.size} saved",
                         collection.description,
                     ).joinToString(" - "),
+                    itemIds = collection.items.map { item -> item.aniListId }.toSet(),
+                    isEditable = !collection.isSystemCollection,
                 )
             },
             recent = snapshot.recentProgress.map { (id, progress) ->
@@ -348,6 +549,8 @@ class AndroidMangaViewModel(
                         progress.format,
                     ).joinToString(" - "),
                     coverUrl = progress.coverUrl,
+                    moduleId = progress.moduleUUID,
+                    contentParams = progress.contentParams,
                     readChapterCount = readCount,
                     unreadChapterCount = progress.totalChapters?.let { (it - readCount).coerceAtLeast(0) },
                 )
@@ -365,6 +568,84 @@ class AndroidMangaViewModel(
                 )
             },
         )
+        _state.value = nextState.copy(
+            reader = previous.reader?.let { reader ->
+                nextState.readerPanelFor(reader.aniListId)?.mergeRuntimeState(reader)
+            },
+        )
+    }
+
+    private fun loadKanzenReaderChapters(reader: MangaReaderPanelRow) {
+        viewModelScope.launch {
+            repository.loadKanzenReaderChapters(
+                moduleId = reader.moduleId,
+                contentParams = reader.contentParams,
+                isNovel = false,
+            ).onSuccess { chapters ->
+                _state.update {
+                    it.updateReader(reader.aniListId) { current ->
+                        current.withKanzenChapters(chapters)
+                    }
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.updateReader(reader.aniListId) { current ->
+                        current.copy(
+                            isLoadingChapters = false,
+                            contentError = error.message ?: "Could not load Kanzen module chapters.",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun loadKanzenChapterContent(
+        aniListId: Int,
+        chapterNumber: Int,
+        chapterParams: String?,
+    ) {
+        viewModelScope.launch {
+            _state.update {
+                it.updateReader(aniListId) { reader ->
+                    reader.copy(
+                        currentChapter = chapterNumber,
+                        isLoadingContent = true,
+                        contentMessage = "Loading manga chapter $chapterNumber pages...",
+                        contentError = null,
+                        pageImageUrls = emptyList(),
+                        chapters = reader.chapters.map { chapter ->
+                            chapter.copy(isCurrent = chapter.number == chapterNumber)
+                        },
+                    )
+                }
+            }
+            val moduleId = _state.value.reader?.moduleId
+            repository.loadKanzenReaderContent(
+                moduleId = moduleId,
+                chapterParams = chapterParams,
+                isNovel = false,
+            ).onSuccess { content ->
+                _state.update {
+                    it.updateReader(aniListId) { reader ->
+                        reader.withKanzenContent(
+                            chapterNumber = chapterNumber,
+                            content = content,
+                            markRead = false,
+                        )
+                    }
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.updateReader(aniListId) { reader ->
+                        reader.copy(
+                            isLoadingContent = false,
+                            contentError = error.message ?: "Could not load module chapter pages.",
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -377,6 +658,9 @@ private fun MangaCatalogItemSnapshot.toRow(): MangaCatalogItemRow = MangaCatalog
     description = description,
     format = format,
     totalChapters = totalChapters,
+    moduleId = moduleId,
+    contentParams = contentParams,
+    sourceName = sourceName,
     isSaved = isSaved,
     isFavorite = isFavorite,
     readChapterCount = readChapterCount,
@@ -390,6 +674,9 @@ private fun MangaCatalogItemRow.toDraft(): MangaLibraryItemDraft = MangaLibraryI
     coverUrl = coverUrl,
     format = format,
     totalChapters = totalChapters,
+    moduleId = moduleId,
+    contentParams = contentParams,
+    sourceName = sourceName,
 )
 
 private fun MangaProgress.aniListIdFromProgressId(id: String): Int? =
@@ -402,6 +689,180 @@ private fun MangaScreenState.findCatalogItem(itemId: String): MangaCatalogItemRo
         ?: catalogs.asSequence()
             .flatMap { section -> section.items.asSequence() }
             .firstOrNull { it.id == itemId }
+        ?: savedItems.firstOrNull { it.id == itemId }
+
+private fun MangaScreenState.activeReaderPanelFor(aniListId: Int): MangaReaderPanelRow? =
+    reader?.takeIf { it.aniListId == aniListId }
+        ?: readerPanelFor(aniListId)
+
+private fun MangaScreenState.readerPanelFor(aniListId: Int): MangaReaderPanelRow? =
+    savedItems.firstOrNull { it.aniListId == aniListId }
+        ?.toReaderPanel()
+        ?: searchResults.firstOrNull { it.aniListId == aniListId && it.isSaved }
+            ?.toReaderPanel()
+        ?: catalogs.asSequence()
+            .flatMap { section -> section.items.asSequence() }
+            .firstOrNull { it.aniListId == aniListId && it.isSaved }
+            ?.toReaderPanel()
+        ?: recent.firstOrNull { it.aniListId == aniListId }
+            ?.toReaderPanel()
+
+private fun MangaCatalogItemRow.toReaderPanel(): MangaReaderPanelRow {
+    val readCount = readChapterCount.coerceAtLeast(lastReadChapter?.toIntOrNull() ?: 0)
+    val current = ((lastReadChapter?.toIntOrNull() ?: readCount) + 1)
+        .coerceAtLeast(1)
+        .coerceAtMost(totalChapters ?: Int.MAX_VALUE)
+    return MangaReaderPanelRow(
+        aniListId = aniListId,
+        title = title,
+        coverUrl = coverUrl,
+        format = format,
+        totalChapters = totalChapters,
+        moduleId = moduleId,
+        contentParams = contentParams,
+        sourceName = sourceName,
+        readChapterCount = readCount,
+        unreadChapterCount = totalChapters?.let { (it - readCount).coerceAtLeast(0) },
+        lastReadChapter = lastReadChapter,
+        currentChapter = current,
+        chapters = chapterWindow(
+            currentChapter = current,
+            totalChapters = totalChapters,
+            readChapterCount = readCount,
+        ),
+    )
+}
+
+private fun MangaProgressRow.toReaderPanel(): MangaReaderPanelRow {
+    val current = (readChapterCount + 1)
+        .coerceAtLeast(1)
+        .coerceAtMost(unreadChapterCount?.let { readChapterCount + it } ?: Int.MAX_VALUE)
+    val total = unreadChapterCount?.let { readChapterCount + it }
+    return MangaReaderPanelRow(
+        aniListId = aniListId ?: return MangaReaderPanelRow(
+            aniListId = 0,
+            title = title,
+            coverUrl = coverUrl,
+        ),
+        title = title,
+        coverUrl = coverUrl,
+        moduleId = moduleId,
+        contentParams = contentParams,
+        sourceName = sourceName,
+        totalChapters = total,
+        readChapterCount = readChapterCount,
+        unreadChapterCount = unreadChapterCount,
+        currentChapter = current,
+        chapters = chapterWindow(
+            currentChapter = current,
+            totalChapters = total,
+            readChapterCount = readChapterCount,
+        ),
+    )
+}
+
+private fun chapterWindow(
+    currentChapter: Int,
+    totalChapters: Int?,
+    readChapterCount: Int,
+): List<MangaReaderChapterRow> {
+    val lastChapter = totalChapters?.takeIf { it > 0 }
+    val start = (currentChapter - 6).coerceAtLeast(1)
+    val end = if (lastChapter != null) {
+        (start + 17).coerceAtMost(lastChapter)
+    } else {
+        start + 17
+    }
+    return (start..end).map { chapter ->
+        MangaReaderChapterRow(
+            number = chapter,
+            isRead = chapter <= readChapterCount,
+            isCurrent = chapter == currentChapter,
+        )
+    }
+}
+
+private val MangaReaderPanelRow.isKanzenBacked: Boolean
+    get() = !moduleId.isNullOrBlank() && moduleId != "anilist" && !contentParams.isNullOrBlank()
+
+private fun MangaReaderPanelRow.withKanzenChapters(chapters: List<KanzenReaderChapterSnapshot>): MangaReaderPanelRow {
+    if (chapters.isEmpty()) {
+        return copy(
+            isLoadingChapters = false,
+            contentError = "No module chapters were returned for this manga.",
+        )
+    }
+    val nextChapter = chapters.firstOrNull { chapter -> chapter.number > readChapterCount }?.number
+        ?: chapters.first().number
+    return copy(
+        totalChapters = chapters.size,
+        unreadChapterCount = (chapters.size - readChapterCount).coerceAtLeast(0),
+        currentChapter = nextChapter,
+        isLoadingChapters = false,
+        contentError = null,
+        chapters = chapters.map { chapter ->
+            MangaReaderChapterRow(
+                number = chapter.number,
+                title = chapter.title,
+                params = chapter.params,
+                sourceName = chapter.sourceName,
+                isRead = chapter.number <= readChapterCount,
+                isCurrent = chapter.number == nextChapter,
+            )
+        },
+    )
+}
+
+private fun MangaReaderPanelRow.withKanzenContent(
+    chapterNumber: Int,
+    content: KanzenReaderContentSnapshot,
+    markRead: Boolean = true,
+): MangaReaderPanelRow = copy(
+    currentChapter = chapterNumber,
+    isLoadingContent = false,
+    contentMessage = content.imageUrls.takeIf { it.isNotEmpty() }?.let { "${it.size} pages loaded." },
+    contentError = if (content.imageUrls.isEmpty()) "No page images were returned for this chapter." else null,
+    pageImageUrls = content.imageUrls,
+    chapters = chapters.map { chapter ->
+        chapter.copy(
+            isCurrent = chapter.number == chapterNumber,
+            isRead = chapter.isRead || (markRead && chapter.number <= chapterNumber),
+        )
+    },
+)
+
+private fun MangaReaderPanelRow.mergeRuntimeState(previous: MangaReaderPanelRow): MangaReaderPanelRow {
+    val runtimeChapters = previous.chapters.takeIf { rows -> rows.any { row -> row.params != null } } ?: chapters
+    return copy(
+        currentChapter = previous.currentChapter,
+        chapters = runtimeChapters.map { chapter ->
+            chapter.copy(
+                isRead = chapter.number <= readChapterCount || chapter.isRead,
+                isCurrent = chapter.number == previous.currentChapter,
+            )
+        },
+        isLoadingChapters = previous.isLoadingChapters,
+        isLoadingContent = previous.isLoadingContent,
+        contentMessage = previous.contentMessage,
+        contentError = previous.contentError,
+        pageImageUrls = previous.pageImageUrls,
+    )
+}
+
+private fun MangaScreenState.updateReader(
+    aniListId: Int,
+    transform: (MangaReaderPanelRow) -> MangaReaderPanelRow,
+): MangaScreenState = copy(
+    reader = reader?.let { current ->
+        if (current.aniListId == aniListId) transform(current) else current
+    },
+)
+
+private val dev.soupy.eclipse.android.core.model.MangaLibraryCollection.isSystemCollection: Boolean
+    get() = id.equals("android-library", ignoreCase = true) ||
+        id.equals("android-favorites", ignoreCase = true) ||
+        name.equals("Library", ignoreCase = true) ||
+        name.equals("Favorites", ignoreCase = true)
 
 private fun MangaScreenState.withSavedFlag(
     aniListId: Int,

@@ -107,7 +107,10 @@ val StremioStream.isTorrentLike: Boolean
     get() = !infoHash.isNullOrBlank() ||
         url?.startsWith("magnet:", ignoreCase = true) == true ||
         url?.contains("btih:", ignoreCase = true) == true ||
-        url?.endsWith(".torrent", ignoreCase = true) == true
+        url
+            ?.substringBefore('?')
+            ?.substringBefore('#')
+            ?.endsWith(".torrent", ignoreCase = true) == true
 
 fun StremioManifest.buildContentId(request: StremioContentIdRequest): String? {
     val prefixes = idPrefixes.ifEmpty {

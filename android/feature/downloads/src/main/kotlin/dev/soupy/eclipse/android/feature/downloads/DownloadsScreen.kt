@@ -52,6 +52,7 @@ data class DownloadRow(
     val statusLabel: String,
     val progressPercent: Float = 0f,
     val progressLabel: String? = null,
+    val bytesLabel: String? = null,
     val sourceLabel: String? = null,
     val hasDirectSource: Boolean = false,
     val subtitleCount: Int = 0,
@@ -60,6 +61,7 @@ data class DownloadRow(
     val canResume: Boolean = false,
     val canMarkComplete: Boolean = false,
     val canPlayOffline: Boolean = false,
+    val canRemoveLocalFile: Boolean = false,
     val removeTargetLabel: String? = null,
 )
 
@@ -86,11 +88,13 @@ fun DownloadsRoute(
     onResume: (String) -> Unit,
     onPlayOffline: (String) -> Unit,
     onMarkComplete: (String) -> Unit,
+    onRemoveLocalFile: (String) -> Unit,
     onRemove: (String) -> Unit,
     onClearCompleted: () -> Unit,
     onClearTarget: (DetailTarget) -> Unit,
     onClearAll: () -> Unit,
     onCleanupOrphans: () -> Unit,
+    onVerifyFiles: () -> Unit,
     preferredPlayer: InAppPlayer = InAppPlayer.NORMAL,
     playbackSettings: PlaybackSettingsSnapshot = PlaybackSettingsSnapshot(),
 ) {
@@ -187,6 +191,9 @@ fun DownloadsRoute(
                         OutlinedButton(onClick = onCleanupOrphans) {
                             Text("Clean Orphans")
                         }
+                        OutlinedButton(onClick = onVerifyFiles) {
+                            Text("Verify Files")
+                        }
                     }
                 }
             }
@@ -198,6 +205,7 @@ fun DownloadsRoute(
                     onResume = { onResume(item.id) },
                     onPlayOffline = { onPlayOffline(item.id) },
                     onMarkComplete = { onMarkComplete(item.id) },
+                    onRemoveLocalFile = { onRemoveLocalFile(item.id) },
                     onRemove = { onRemove(item.id) },
                     onClearTarget = { onClearTarget(item.detailTarget) },
                 )
@@ -273,6 +281,7 @@ private fun DownloadCard(
     onResume: () -> Unit,
     onPlayOffline: () -> Unit,
     onMarkComplete: () -> Unit,
+    onRemoveLocalFile: () -> Unit,
     onRemove: () -> Unit,
     onClearTarget: () -> Unit,
 ) {
@@ -353,6 +362,13 @@ private fun DownloadCard(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.74f),
                 )
             }
+            item.bytesLabel?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+                )
+            }
 
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -379,6 +395,11 @@ private fun DownloadCard(
                 if (item.canMarkComplete) {
                     OutlinedButton(onClick = onMarkComplete) {
                         Text("Complete")
+                    }
+                }
+                if (item.canRemoveLocalFile) {
+                    OutlinedButton(onClick = onRemoveLocalFile) {
+                        Text("Remove File")
                     }
                 }
                 OutlinedButton(onClick = onRemove) {
