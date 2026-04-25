@@ -29,6 +29,7 @@ import dev.soupy.eclipse.android.core.model.PlayerSource
 import dev.soupy.eclipse.android.core.model.SkipSegment
 import dev.soupy.eclipse.android.feature.detail.DetailCastRow
 import dev.soupy.eclipse.android.feature.detail.DetailEpisodeRow
+import dev.soupy.eclipse.android.feature.detail.DetailFactRow
 import dev.soupy.eclipse.android.feature.detail.DetailScreenState
 import dev.soupy.eclipse.android.feature.detail.DetailStreamRow
 import dev.soupy.eclipse.android.core.network.AniSkipService
@@ -680,6 +681,12 @@ private fun DetailContent.toUiState(userRating: Int?): DetailScreenState = Detai
     posterUrl = posterUrl,
     backdropUrl = backdropUrl,
     metadataChips = metadataChips,
+    detailFacts = detailFacts.map {
+        DetailFactRow(
+            label = it.label,
+            value = it.value,
+        )
+    },
     contentRating = contentRating,
     userRating = userRating,
     cast = cast.map {

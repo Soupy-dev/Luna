@@ -150,11 +150,11 @@ private fun LibrarySnapshot.toUiState(): LibraryScreenState {
         ?: savedItems.firstOrNull()?.imageUrl
     val heroSupportingText = when {
         continueWatching.isNotEmpty() ->
-            "Direct Android playback now updates resume state automatically for supported streams, and completed sessions fall back out of Continue Watching."
+            "Playback updates resume state automatically for supported streams."
         savedItems.isNotEmpty() ->
-            "Saved titles now survive app restarts and are ready to become part of full backup parity."
+            "Saved titles stay available across app restarts."
         else ->
-            "Saved titles, collections, and continue watching are backed by Android-side storage."
+            "Saved titles, collections, and continue watching will appear here."
     }
 
     return LibraryScreenState(

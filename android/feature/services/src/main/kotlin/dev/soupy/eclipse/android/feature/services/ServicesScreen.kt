@@ -119,7 +119,7 @@ fun ServicesRoute(
                 title = "Services",
                 subtitle = "Runtime sources and addons",
                 imageUrl = null,
-                supportingText = "Android now has real source management here: Room-backed services, Stremio addon import, ordering, and Auto Mode source selection. Auto Mode may not always be accurate.",
+                supportingText = "Manage sources, addon imports, ordering, and Auto Mode source selection.",
             )
         }
 
@@ -127,7 +127,7 @@ fun ServicesRoute(
             item {
                 LoadingPanel(
                     title = "Loading sources",
-                    message = "Hydrating Android-side services, addons, and Auto Mode selection.",
+                    message = "Fetching sources and addons.",
                 )
             }
         }

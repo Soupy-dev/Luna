@@ -108,7 +108,7 @@ fun LibraryRoute(
             item {
                 LoadingPanel(
                     title = "Loading library",
-                    message = "Hydrating saved titles and Android-side resume state.",
+                    message = "Fetching saved titles.",
                 )
             }
         }

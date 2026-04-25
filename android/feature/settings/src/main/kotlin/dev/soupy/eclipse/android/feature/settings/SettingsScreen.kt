@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -28,11 +29,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import dev.soupy.eclipse.android.core.design.GlassPanel
-import dev.soupy.eclipse.android.core.design.HeroBackdrop
 import dev.soupy.eclipse.android.core.design.SectionHeading
 import dev.soupy.eclipse.android.core.model.InAppPlayer
 import dev.soupy.eclipse.android.core.model.SimilarityAlgorithm
@@ -167,9 +168,20 @@ private val ReaderColorPresets = listOf(
     "Dark",
 )
 
+private enum class SettingsSection(val label: String) {
+    BASIC("Basic"),
+    DISCOVERY("Discovery"),
+    PLAYBACK("Playback"),
+    READER("Reader"),
+    TRACKERS("Trackers"),
+    CATALOGS("Catalogs"),
+    DATA("Data"),
+}
+
 @Composable
 fun SettingsRoute(
     state: SettingsScreenState,
+    onClose: () -> Unit,
     onAccentColorChanged: (String) -> Unit,
     onTmdbLanguageChanged: (String) -> Unit,
     onAppearanceChanged: (String) -> Unit,
@@ -244,6 +256,7 @@ fun SettingsRoute(
     var trackerService by rememberSaveable { mutableStateOf("AniList") }
     var trackerUsername by rememberSaveable { mutableStateOf("") }
     var trackerToken by rememberSaveable { mutableStateOf("") }
+    var selectedSection by rememberSaveable { mutableStateOf(SettingsSection.BASIC) }
 
     LazyColumn(
         modifier = Modifier
@@ -253,20 +266,43 @@ fun SettingsRoute(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
     ) {
         item {
-            HeroBackdrop(
-                title = "Settings",
-                subtitle = "Playback and discovery",
-                imageUrl = null,
-                supportingText = "Android settings are now backed by DataStore. The auto mode warning is explicit here too: it may not always be accurate.",
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Settings",
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = selectedSection.label,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+                Button(onClick = onClose) {
+                    Text("Done")
+                }
+            }
         }
 
         item {
-            SectionHeading(
-                title = "Interface",
-                subtitle = "Appearance, metadata language, and Android tab visibility.",
+            SettingsSectionPicker(
+                selected = selectedSection,
+                onSelected = { selectedSection = it },
             )
         }
+
+        if (selectedSection == SettingsSection.BASIC) {
+            item {
+                SectionHeading(
+                    title = "Basic",
+                    subtitle = "Language, appearance, layout, updates, and app mode.",
+                )
+            }
 
         item {
             AppearanceSettingsCard(
@@ -291,13 +327,6 @@ fun SettingsRoute(
         }
 
         item {
-            SectionHeading(
-                title = "Updates",
-                subtitle = "GitHub release checks and service refresh cadence.",
-            )
-        }
-
-        item {
             UpdatesCard(
                 state = state,
                 onAutoUpdateServicesChanged = onAutoUpdateServicesChanged,
@@ -305,7 +334,9 @@ fun SettingsRoute(
                 onCheckGitHubRelease = onCheckGitHubRelease,
             )
         }
+        }
 
+        if (selectedSection == SettingsSection.DISCOVERY) {
         item {
             SectionHeading(
                 title = "Discovery",
@@ -364,7 +395,9 @@ fun SettingsRoute(
                 onSelected = onSimilarityAlgorithmChanged,
             )
         }
+        }
 
+        if (selectedSection == SettingsSection.PLAYBACK) {
         item {
             SectionHeading(
                 title = "Playback",
@@ -472,7 +505,9 @@ fun SettingsRoute(
                 onValueChange = onNextEpisodeThresholdChanged,
             )
         }
+        }
 
+        if (selectedSection == SettingsSection.READER) {
         item {
             SectionHeading(
                 title = "Reader",
@@ -494,7 +529,9 @@ fun SettingsRoute(
                 onKanzenAutoUpdateModulesChanged = onKanzenAutoUpdateModulesChanged,
             )
         }
+        }
 
+        if (selectedSection == SettingsSection.TRACKERS) {
         item {
             SectionHeading(
                 title = "Trackers",
@@ -523,7 +560,9 @@ fun SettingsRoute(
                 onAniListSyncMangaProgress = onAniListSyncMangaProgress,
             )
         }
+        }
 
+        if (selectedSection == SettingsSection.CATALOGS) {
         item {
             SectionHeading(
                 title = "Catalogs",
@@ -541,7 +580,9 @@ fun SettingsRoute(
                 onMoveDown = { onMoveCatalogDown(catalog.id) },
             )
         }
+        }
 
+        if (selectedSection == SettingsSection.DATA) {
         item {
             SectionHeading(
                 title = "Storage",
@@ -594,6 +635,27 @@ fun SettingsRoute(
                     importLauncher.launch(arrayOf("application/json", "text/plain"))
                 },
             )
+        }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSectionPicker(
+    selected: SettingsSection,
+    onSelected: (SettingsSection) -> Unit,
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(SettingsSection.entries, key = { it.name }) { section ->
+            if (section == selected) {
+                Button(onClick = { onSelected(section) }) {
+                    Text(section.label)
+                }
+            } else {
+                OutlinedButton(onClick = { onSelected(section) }) {
+                    Text(section.label)
+                }
+            }
         }
     }
 }
@@ -1696,8 +1758,8 @@ private fun PlayerButtons(
             onSelected = onSelected,
         )
         PlayerButtonRow(
-            left = InAppPlayer.MPV,
-            right = InAppPlayer.EXTERNAL,
+            left = InAppPlayer.EXTERNAL,
+            right = null,
             selected = selected,
             onSelected = onSelected,
         )
@@ -1707,7 +1769,7 @@ private fun PlayerButtons(
 @Composable
 private fun PlayerButtonRow(
     left: InAppPlayer,
-    right: InAppPlayer,
+    right: InAppPlayer?,
     selected: InAppPlayer,
     onSelected: (InAppPlayer) -> Unit,
 ) {
@@ -1717,16 +1779,20 @@ private fun PlayerButtonRow(
     ) {
         PlayerChoiceButton(
             player = left,
-            selected = left == selected,
+            selected = left == selected || selected == InAppPlayer.MPV && left == InAppPlayer.EXTERNAL,
             onSelected = onSelected,
             modifier = Modifier.weight(1f),
         )
-        PlayerChoiceButton(
-            player = right,
-            selected = right == selected,
-            onSelected = onSelected,
-            modifier = Modifier.weight(1f),
-        )
+        if (right != null) {
+            PlayerChoiceButton(
+                player = right,
+                selected = right == selected,
+                onSelected = onSelected,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            Column(modifier = Modifier.weight(1f)) {}
+        }
     }
 }
 
@@ -1740,7 +1806,7 @@ private fun PlayerChoiceButton(
     val label = when (player) {
         InAppPlayer.NORMAL -> "Normal"
         InAppPlayer.VLC -> "VLC"
-        InAppPlayer.MPV -> "mpv"
+        InAppPlayer.MPV -> "External"
         InAppPlayer.EXTERNAL -> "External"
     }
 

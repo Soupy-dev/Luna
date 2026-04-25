@@ -1,6 +1,7 @@
 package dev.soupy.eclipse.android
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesomeMotion
@@ -31,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -280,6 +282,7 @@ fun EclipseAndroidApp(
 
             Scaffold(
                 containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                contentWindowInsets = WindowInsets(0.dp),
                 floatingActionButton = {
                     if (!settingsState.showKanzen && currentRoute in setOf("home", "schedule")) {
                         FloatingActionButton(
@@ -306,10 +309,10 @@ fun EclipseAndroidApp(
                                 onClick = {
                                     navController.navigate(destination.route) {
                                         launchSingleTop = true
-                                        restoreState = true
                                         popUpTo(navController.graph.startDestinationId) {
-                                            saveState = true
+                                            saveState = false
                                         }
+                                        restoreState = false
                                     }
                                 },
                                 icon = {
@@ -484,6 +487,14 @@ fun EclipseAndroidApp(
                     composable("settings") {
                         SettingsRoute(
                             state = settingsState,
+                            onClose = {
+                                navController.navigate(if (settingsState.showKanzen) "manga" else "home") {
+                                    launchSingleTop = true
+                                    popUpTo(navController.graph.startDestinationId) {
+                                        saveState = false
+                                    }
+                                }
+                            },
                             onAccentColorChanged = settingsViewModel::setAccentColor,
                             onTmdbLanguageChanged = settingsViewModel::setTmdbLanguage,
                             onAppearanceChanged = settingsViewModel::setAppearance,

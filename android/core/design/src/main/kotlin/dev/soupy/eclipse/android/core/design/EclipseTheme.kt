@@ -131,20 +131,20 @@ fun EclipseBackground(
     }
     val baseColors = if (dark) {
         listOf(
-            Color(0xFF131318),
-            Color(0xFF1B1730),
-            Color(0xFF0F2430),
-            Color(0xFF12141C),
+            Color(0xFF08070D),
+            Color(0xFF171020),
+            Color(0xFF2A1744),
+            Color(0xFF120C1A),
         )
     } else {
         listOf(
-            Color(0xFFF9F7FF),
-            Color(0xFFE9ECFF),
-            Color(0xFFE0F6F2),
-            Color(0xFFFAFBFF),
+            Color(0xFFF8F4FF),
+            Color(0xFFEDE4FF),
+            Color(0xFFDCCBFF),
+            Color(0xFFFBF8FF),
         )
     }
-    val glow = if (dark) Color(0x66395DFF) else Color(0x55395DFF)
+    val glow = if (dark) Color(0x775B2DFF) else Color(0x55A276FF)
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -176,9 +176,9 @@ private fun String.toComposeColor(fallback: Color): Color {
     if (!value.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) return fallback
     val argb = runCatching {
         if (value.length == 6) {
-            (0xFF000000L or value.toLong(16)).toULong()
+            0xFF000000L or value.toLong(16)
         } else {
-            value.toLong(16).toULong()
+            value.toLong(16)
         }
     }.getOrNull() ?: return fallback
     return Color(argb)

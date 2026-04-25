@@ -12,7 +12,7 @@ data class AniListTitle(
 )
 
 val AniListTitle.primary: String
-    get() = userPreferred ?: english ?: romaji ?: native.orEmpty()
+    get() = english ?: userPreferred ?: romaji ?: native.orEmpty()
 
 @Serializable
 data class AniListCoverImage(

@@ -96,7 +96,7 @@ fun EclipsePlayerSurface(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = "Media3/ExoPlayer is wired here for direct playback, VLC can use the embedded LibVLC backend, and mpv/custom external players can receive direct Android handoff intents.",
+                    text = "Choose a stream to start playback.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                 )
@@ -684,7 +684,7 @@ private fun InAppPlayer.nativePackageName(): String? = when (this) {
 
 private fun InAppPlayer.externalPanelLabel(): String = when (this) {
     InAppPlayer.VLC -> "VLC"
-    InAppPlayer.MPV -> "mpv"
+    InAppPlayer.MPV -> "External Player"
     InAppPlayer.EXTERNAL -> "External Player"
     InAppPlayer.NORMAL -> "Normal Player"
 }

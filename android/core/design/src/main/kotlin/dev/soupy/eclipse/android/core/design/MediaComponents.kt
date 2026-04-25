@@ -60,78 +60,52 @@ fun MediaPosterCard(
     onClick: (ExploreMediaCard) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    GlassPanel(
+    Column(
         modifier = modifier
-            .fillMaxWidth()
             .clickable { onClick(item) },
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(0.72f)
-                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)),
-            ) {
-                PosterImage(
-                    imageUrl = item.imageUrl ?: item.backdropUrl,
-                    contentDescription = item.title,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                Box(
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(12.dp)),
+        ) {
+            PosterImage(
+                imageUrl = item.imageUrl ?: item.backdropUrl,
+                contentDescription = item.title,
+                modifier = Modifier.fillMaxSize(),
+            )
+            item.badge?.takeIf { it.isNotBlank() }?.let { badge ->
+                AssistChip(
+                    onClick = {},
+                    enabled = false,
+                    label = { Text(badge) },
+                    colors = AssistChipDefaults.assistChipColors(
+                        disabledContainerColor = Color(0xAA1E102B),
+                        disabledLabelColor = Color(0xFFEDE4FF),
+                    ),
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color(0xD911111A)),
-                            ),
-                        ),
+                        .align(Alignment.TopStart)
+                        .padding(8.dp),
                 )
-                item.badge?.takeIf { it.isNotBlank() }?.let { badge ->
-                    AssistChip(
-                        onClick = {},
-                        enabled = false,
-                        label = { Text(badge) },
-                        colors = AssistChipDefaults.assistChipColors(
-                            disabledContainerColor = Color(0xAA1E2430),
-                            disabledLabelColor = Color(0xFFEAF3FF),
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(12.dp),
-                    )
-                }
             }
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                item.subtitle?.takeIf { it.isNotBlank() }?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.tertiary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                item.overview?.takeIf { it.isNotBlank() }?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.76f),
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+        }
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        item.subtitle?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.64f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -276,63 +250,71 @@ fun HeroBackdrop(
     modifier: Modifier = Modifier,
     supportingText: String? = null,
 ) {
-    GlassPanel(
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(360.dp)
+            .clip(RoundedCornerShape(0.dp)),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(300.dp),
-        ) {
+        if (imageUrl.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(Color(0xFF130C1E), Color(0xFF2B1646), Color(0xFF0B0811)),
+                        ),
+                    ),
+            )
+        } else {
             PosterImage(
                 imageUrl = imageUrl,
                 contentDescription = title,
                 modifier = Modifier.fillMaxSize(),
             )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color(0x9911111A),
-                                Color(0xF111111A),
-                            ),
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color(0x66150C22),
+                            Color(0xF608070D),
                         ),
                     ),
-            )
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                subtitle?.takeIf { it.isNotBlank() }?.let {
-                    Text(
-                        text = it.uppercase(),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                }
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            subtitle?.takeIf { it.isNotBlank() }?.let {
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.displayMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 2,
+                    text = it.uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.displayMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            supportingText?.takeIf { it.isNotBlank() }?.let {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.82f),
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
-                supportingText?.takeIf { it.isNotBlank() }?.let {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.82f),
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
             }
         }
     }

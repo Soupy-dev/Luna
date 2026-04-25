@@ -101,9 +101,14 @@ data class TMDBTVShowDetail(
     @SerialName("poster_path") val posterPath: String? = null,
     @SerialName("backdrop_path") val backdropPath: String? = null,
     @SerialName("first_air_date") val firstAirDate: String? = null,
+    @SerialName("last_air_date") val lastAirDate: String? = null,
     @SerialName("episode_run_time") val episodeRunTime: List<Int> = emptyList(),
     val genres: List<TMDBGenre> = emptyList(),
     val seasons: List<TMDBSeason> = emptyList(),
+    @SerialName("number_of_seasons") val numberOfSeasons: Int? = null,
+    @SerialName("number_of_episodes") val numberOfEpisodes: Int? = null,
+    val status: String? = null,
+    @SerialName("origin_country") val originCountry: List<String> = emptyList(),
     @SerialName("external_ids") val externalIds: TMDBExternalIds? = null,
 )
 

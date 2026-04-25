@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -42,24 +43,9 @@ fun HomeRoute(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding(),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        contentPadding = PaddingValues(bottom = 18.dp),
     ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "HOME",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.tertiary,
-                )
-                Text(
-                    text = "Luna's browse-first Android surface is live.",
-                    style = MaterialTheme.typography.displayMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-            }
-        }
-
         state.hero?.let { hero ->
             item {
                 HeroBackdrop(
@@ -76,7 +62,8 @@ fun HomeRoute(
             item {
                 LoadingPanel(
                     title = "Loading discovery",
-                    message = "Fetching TMDB and AniList rows for the new Android home screen.",
+                    message = "Fetching rows.",
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
         }
@@ -88,22 +75,28 @@ fun HomeRoute(
                     message = error,
                     actionLabel = "Try Again",
                     onAction = onRefresh,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
         }
 
         items(state.sections, key = { it.id }) { section ->
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 SectionHeading(
                     title = section.title,
                     subtitle = section.subtitle,
                 )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(section.items, key = { it.id }) { item ->
                         MediaPosterCard(
                             item = item,
                             onClick = { onSelect(it.detailTarget) },
-                            modifier = Modifier.width(208.dp),
+                            modifier = Modifier.width(138.dp),
                         )
                     }
                 }
@@ -114,9 +107,10 @@ fun HomeRoute(
             item {
                 ErrorPanel(
                     title = "Nothing landed yet",
-                    message = "The Android home route is ready, but there were no browse sections to show.",
+                    message = "There were no browse sections to show.",
                     actionLabel = "Refresh",
                     onAction = onRefresh,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
         }

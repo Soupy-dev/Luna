@@ -66,12 +66,35 @@ The Android dependency versions in `gradle/libs.versions.toml` were chosen from 
 
 ## Running on Windows
 
-1. Open Android Studio and choose `Open`, then select the `android/` directory in this repo.
-2. Let Gradle sync. The repo already includes `gradlew.bat`, so Android Studio can use the checked-in wrapper.
-3. Create an emulator in `Device Manager`.
-   Recommended starter target: a Pixel-class phone running a recent Google Play image.
-4. Start the emulator.
-5. In Android Studio, choose the `app` run configuration and click `Run`.
+The repo includes Windows helper scripts in this directory so the Android app can be tested repeatedly from PowerShell.
+
+Check your local Android setup:
+
+`.\check-android-setup.bat`
+
+Build, install, and launch on a connected USB device:
+
+`.\run-android.bat`
+
+Install Android emulator tooling and create a reusable emulator:
+
+`.\install-emulator.bat`
+
+Build, boot that emulator, install, and launch:
+
+`.\run-android.bat -AvdName LunaPixel`
+
+The runner defaults the emulator to hardware GPU mode for smoother local testing:
+
+`.\run-android.bat -AvdName LunaPixel -GpuMode host`
+
+If the emulator graphics stack misbehaves on a driver update, use the slower compatibility renderer:
+
+`.\run-android.bat -AvdName LunaPixel -GpuMode swiftshader_indirect`
+
+The runner also disables Android system animations after boot so repeated UI testing feels snappier. Add `-KeepDeviceAnimations` if you want stock emulator animation timing.
+
+If Android Studio is preferred, open the `android/` directory, let Gradle sync, select the `app` run configuration, and click `Run`.
 
 You can also build from a terminal:
 

@@ -18,6 +18,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.input.ImeAction
@@ -28,6 +32,12 @@ import dev.soupy.eclipse.android.core.design.MediaPosterCard
 import dev.soupy.eclipse.android.core.design.SectionHeading
 import dev.soupy.eclipse.android.core.model.DetailTarget
 import dev.soupy.eclipse.android.core.model.MediaCarouselSection
+
+private enum class SearchFilter(val label: String) {
+    ALL("All"),
+    MOVIES("Movies"),
+    TV("TV Shows"),
+}
 
 data class SearchScreenState(
     val query: String = "",
@@ -53,6 +63,13 @@ fun SearchRoute(
     } else {
         state.mediaColumnsPortrait
     }.coerceIn(2, 8)
+    var selectedFilter by rememberSaveable { mutableStateOf(SearchFilter.ALL) }
+    val results = state.sections.flatMap { it.items }
+    val filteredResults = when (selectedFilter) {
+        SearchFilter.ALL -> results
+        SearchFilter.MOVIES -> results.filter { it.detailTarget is DetailTarget.TmdbMovie }
+        SearchFilter.TV -> results.filter { it.detailTarget is DetailTarget.TmdbShow }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -69,7 +86,7 @@ fun SearchRoute(
                     color = MaterialTheme.colorScheme.tertiary,
                 )
                 Text(
-                    text = "Search TMDB and AniList together.",
+                    text = "Search Movies & TV Shows",
                     style = MaterialTheme.typography.displayMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
@@ -90,8 +107,27 @@ fun SearchRoute(
                 Button(
                     onClick = onSearch,
                     enabled = state.query.isNotBlank() && !state.isSearching,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Search")
+                }
+            }
+        }
+
+        if (results.isNotEmpty()) {
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(SearchFilter.entries, key = { it.name }) { filter ->
+                        if (filter == selectedFilter) {
+                            Button(onClick = { selectedFilter = filter }) {
+                                Text(filter.label)
+                            }
+                        } else {
+                            androidx.compose.material3.OutlinedButton(onClick = { selectedFilter = filter }) {
+                                Text(filter.label)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -118,7 +154,7 @@ fun SearchRoute(
             item {
                 LoadingPanel(
                     title = "Searching",
-                    message = "Looking across TMDB and AniList without collapsing anime into a single generic flow.",
+                    message = "Looking across TMDB movies and TV shows.",
                 )
             }
         }
@@ -138,18 +174,28 @@ fun SearchRoute(
             item {
                 ErrorPanel(
                     title = "Start with a title",
-                    message = "This screen is wired for multi-page TMDB search, AniList queries, and local recent searches.",
+                    message = "Search for a movie or TV show, then filter the results like Luna on iOS.",
                 )
             }
         }
 
-        items(state.sections, key = { it.id }) { section ->
+        if (results.isNotEmpty() && filteredResults.isEmpty()) {
+            item {
+                ErrorPanel(
+                    title = "No ${selectedFilter.label.lowercase()} found",
+                    message = "Try another filter or search for something else.",
+                )
+            }
+        }
+
+        if (filteredResults.isNotEmpty()) {
+            item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SectionHeading(
-                    title = section.title,
-                    subtitle = section.subtitle,
+                    title = "Search Results",
+                    subtitle = "${filteredResults.size} ${selectedFilter.label.lowercase()} result${if (filteredResults.size == 1) "" else "s"}",
                 )
-                section.items.chunked(columnCount).forEach { rowItems ->
+                filteredResults.chunked(columnCount).forEach { rowItems ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -166,6 +212,7 @@ fun SearchRoute(
                         }
                     }
                 }
+            }
             }
         }
     }
