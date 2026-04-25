@@ -100,6 +100,7 @@ fun EclipseAndroidApp(
             trackerRepository = appContainer.trackerRepository,
             aniSkipService = appContainer.aniSkipService,
             introDbService = appContainer.introDbService,
+            settingsStore = appContainer.settingsStore,
         )
     }
     val scheduleViewModel = rememberFeatureViewModel("schedule") {
@@ -168,12 +169,16 @@ fun EclipseAndroidApp(
         vlcHeaderProxyEnabled = settingsState.vlcHeaderProxyEnabled,
         aniSkipAutoSkip = settingsState.aniSkipAutoSkip,
         skip85sEnabled = settingsState.skip85sEnabled,
+        skip85sAlwaysVisible = settingsState.skip85sAlwaysVisible,
         showNextEpisodeButton = settingsState.showNextEpisodeButton,
         nextEpisodeThreshold = settingsState.nextEpisodeThreshold,
     )
     val mangaReaderSettings = MangaReaderSettingsRow(
         readingMode = settingsState.readingMode,
         readerFontSize = settingsState.readerFontSize,
+        readerFontFamily = settingsState.readerFontFamily,
+        readerFontWeight = settingsState.readerFontWeight,
+        readerColorPreset = settingsState.readerColorPreset,
         readerLineSpacing = settingsState.readerLineSpacing,
         readerMargin = settingsState.readerMargin,
         readerTextAlignment = settingsState.readerTextAlignment,
@@ -181,6 +186,9 @@ fun EclipseAndroidApp(
     val novelReaderSettings = NovelReaderSettingsRow(
         readingMode = settingsState.readingMode,
         readerFontSize = settingsState.readerFontSize,
+        readerFontFamily = settingsState.readerFontFamily,
+        readerFontWeight = settingsState.readerFontWeight,
+        readerColorPreset = settingsState.readerColorPreset,
         readerLineSpacing = settingsState.readerLineSpacing,
         readerMargin = settingsState.readerMargin,
         readerTextAlignment = settingsState.readerTextAlignment,
@@ -198,8 +206,24 @@ fun EclipseAndroidApp(
         onTrackerCallbackConsumed()
     }
 
-    EclipseTheme {
-        EclipseBackground {
+    val visibleDestinations = remember(settingsState.showScheduleTab, settingsState.showKanzen) {
+        destinations.filter { destination ->
+            when (destination.route) {
+                "detail",
+                "services" -> false
+                "schedule" -> settingsState.showScheduleTab
+                "manga",
+                "novel" -> settingsState.showKanzen
+                else -> true
+            }
+        }
+    }
+
+    EclipseTheme(
+        accentColor = settingsState.accentColor,
+        appearance = settingsState.selectedAppearance,
+    ) {
+        EclipseBackground(appearance = settingsState.selectedAppearance) {
             val navController = rememberNavController()
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentDestination = navBackStackEntry?.destination
@@ -210,7 +234,7 @@ fun EclipseAndroidApp(
                     NavigationBar(
                         containerColor = androidx.compose.ui.graphics.Color(0xCC11111A),
                     ) {
-                        destinations.forEach { destination ->
+                        visibleDestinations.forEach { destination ->
                             val selected = currentDestination
                                 ?.hierarchy
                                 ?.any { it.route == destination.route } == true
@@ -372,6 +396,14 @@ fun EclipseAndroidApp(
                     composable("settings") {
                         SettingsRoute(
                             state = settingsState,
+                            onAccentColorChanged = settingsViewModel::setAccentColor,
+                            onTmdbLanguageChanged = settingsViewModel::setTmdbLanguage,
+                            onAppearanceChanged = settingsViewModel::setAppearance,
+                            onShowScheduleTabChanged = settingsViewModel::setShowScheduleTab,
+                            onShowKanzenChanged = settingsViewModel::setShowKanzen,
+                            onSeasonMenuChanged = settingsViewModel::setSeasonMenu,
+                            onHorizontalEpisodeListChanged = settingsViewModel::setHorizontalEpisodeList,
+                            onOpenServices = { navController.navigate("services") },
                             onAutoModeChanged = settingsViewModel::setAutoModeEnabled,
                             onShowNextEpisodeChanged = settingsViewModel::setShowNextEpisodeButton,
                             onNextEpisodeThresholdChanged = settingsViewModel::setNextEpisodeThreshold,
@@ -388,8 +420,11 @@ fun EclipseAndroidApp(
                             onSubtitleStrokeWidthChanged = settingsViewModel::setSubtitleStrokeWidth,
                             onSubtitleFontSizeChanged = settingsViewModel::setSubtitleFontSize,
                             onSubtitleVerticalOffsetChanged = settingsViewModel::setSubtitleVerticalOffset,
+                            onAniSkipEnabledChanged = settingsViewModel::setAniSkipEnabled,
+                            onIntroDbEnabledChanged = settingsViewModel::setIntroDbEnabled,
                             onAniSkipAutoSkipChanged = settingsViewModel::setAniSkipAutoSkip,
                             onSkip85sChanged = settingsViewModel::setSkip85sEnabled,
+                            onSkip85sAlwaysVisibleChanged = settingsViewModel::setSkip85sAlwaysVisible,
                             onCatalogEnabledChanged = settingsViewModel::setCatalogEnabled,
                             onMoveCatalogUp = settingsViewModel::moveCatalogUp,
                             onMoveCatalogDown = settingsViewModel::moveCatalogDown,
@@ -401,6 +436,9 @@ fun EclipseAndroidApp(
                             onClearLogs = settingsViewModel::clearLogs,
                             onReadingModeChanged = settingsViewModel::setReadingMode,
                             onReaderFontSizeChanged = settingsViewModel::setReaderFontSize,
+                            onReaderFontFamilyChanged = settingsViewModel::setReaderFontFamily,
+                            onReaderFontWeightChanged = settingsViewModel::setReaderFontWeight,
+                            onReaderColorPresetChanged = settingsViewModel::setReaderColorPreset,
                             onReaderLineSpacingChanged = settingsViewModel::setReaderLineSpacing,
                             onReaderMarginChanged = settingsViewModel::setReaderMargin,
                             onReaderAlignmentChanged = settingsViewModel::setReaderTextAlignment,

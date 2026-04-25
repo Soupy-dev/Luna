@@ -385,7 +385,7 @@ private fun PlaybackShortcutRow(
             )
         }
 
-        if (settings.skip85sEnabled) {
+        if (settings.skip85sEnabled && (settings.skip85sAlwaysVisible || manualSkipSegment == null)) {
             Button(
                 onClick = {
                     exoPlayer.seekBy(85_000L)

@@ -2,9 +2,11 @@ package dev.soupy.eclipse.android.ui.detail
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.soupy.eclipse.android.core.storage.SettingsStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import dev.soupy.eclipse.android.data.ContinueWatchingDraft
@@ -41,6 +43,7 @@ class AndroidDetailViewModel(
     private val trackerRepository: TrackerRepository,
     private val aniSkipService: AniSkipService,
     private val introDbService: IntroDbService,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
     private val _state = MutableStateFlow(DetailScreenState())
     val state: StateFlow<DetailScreenState> = _state.asStateFlow()
@@ -48,7 +51,19 @@ class AndroidDetailViewModel(
     private var currentTarget: DetailTarget? = null
     private var currentProgressTarget: DetailTarget? = null
     private var currentRatingTmdbId: Int? = null
+    private var skipProviderSettings = SkipProviderSettings()
     private val syncedTrackerProgressKeys = mutableSetOf<String>()
+
+    init {
+        viewModelScope.launch {
+            settingsStore.settings.collect { settings ->
+                skipProviderSettings = SkipProviderSettings(
+                    aniSkipEnabled = settings.aniSkipEnabled,
+                    introDbEnabled = settings.introDbEnabled,
+                )
+            }
+        }
+    }
 
     fun load(target: DetailTarget?) {
         if (target == null) {
@@ -603,24 +618,39 @@ class AndroidDetailViewModel(
         val target = currentProgressTarget ?: currentTarget ?: return
         val context = source.context
         viewModelScope.launch {
-            val introSegments = when (target) {
-                is DetailTarget.TmdbMovie -> introDbService.fetchSkipTimes(
-                    tmdbId = target.id,
-                ).orNull().orEmpty()
-                is DetailTarget.TmdbShow -> introDbService.fetchSkipTimes(
-                    tmdbId = target.id,
-                    seasonNumber = context?.resolvedTMDBSeasonNumber,
-                    episodeNumber = context?.resolvedTMDBEpisodeNumber,
-                ).orNull().orEmpty()
-                is DetailTarget.AniListMediaTarget -> emptyList()
+            val providerSettings = skipProviderSettings
+            if (!providerSettings.aniSkipEnabled && !providerSettings.introDbEnabled) {
+                _state.update {
+                    it.copy(
+                        skipSegments = emptyList(),
+                        skipStatusMessage = "Skip segment providers are disabled in Settings.",
+                    )
+                }
+                return@launch
             }
-            val aniSkipSegments = context?.anilistMediaId?.let { anilistId ->
+
+            val introSegments = if (providerSettings.introDbEnabled) {
+                when (target) {
+                    is DetailTarget.TmdbMovie -> introDbService.fetchSkipTimes(
+                        tmdbId = target.id,
+                    ).orNull().orEmpty()
+                    is DetailTarget.TmdbShow -> introDbService.fetchSkipTimes(
+                        tmdbId = target.id,
+                        seasonNumber = context?.resolvedTMDBSeasonNumber,
+                        episodeNumber = context?.resolvedTMDBEpisodeNumber,
+                    ).orNull().orEmpty()
+                    is DetailTarget.AniListMediaTarget -> emptyList()
+                }
+            } else {
+                emptyList()
+            }
+            val aniSkipSegments = if (providerSettings.aniSkipEnabled) context?.anilistMediaId?.let { anilistId ->
                 aniSkipService.fetchSkipTimes(
                     anilistId = anilistId,
                     episodeNumber = context.localEpisodeNumber,
                     episodeDurationSeconds = 0.0,
                 ).orNull().orEmpty()
-            }.orEmpty()
+            }.orEmpty() else emptyList()
 
             val merged = (introSegments + aniSkipSegments).mergeSkipSegments()
             _state.update {
@@ -635,6 +665,11 @@ class AndroidDetailViewModel(
         }
     }
 }
+
+private data class SkipProviderSettings(
+    val aniSkipEnabled: Boolean = true,
+    val introDbEnabled: Boolean = true,
+)
 
 private fun DetailContent.toUiState(userRating: Int?): DetailScreenState = DetailScreenState(
     hasSelection = true,

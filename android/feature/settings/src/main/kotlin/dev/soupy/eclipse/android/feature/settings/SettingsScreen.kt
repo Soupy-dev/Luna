@@ -42,6 +42,7 @@ import java.time.format.DateTimeFormatter
 data class SettingsScreenState(
     val accentColor: String = "#6D8CFF",
     val tmdbLanguage: String = "en-US",
+    val selectedAppearance: String = "system",
     val autoModeEnabled: Boolean = true,
     val highQualityThreshold: Double = 0.9,
     val filterHorrorContent: Boolean = false,
@@ -61,10 +62,20 @@ data class SettingsScreenState(
     val subtitleStrokeWidth: Double = 1.0,
     val subtitleFontSize: Double = 30.0,
     val subtitleVerticalOffset: Double = -6.0,
+    val aniSkipEnabled: Boolean = true,
+    val introDbEnabled: Boolean = true,
     val aniSkipAutoSkip: Boolean = false,
     val skip85sEnabled: Boolean = false,
+    val skip85sAlwaysVisible: Boolean = false,
+    val showScheduleTab: Boolean = true,
+    val showKanzen: Boolean = false,
+    val seasonMenu: Boolean = false,
+    val horizontalEpisodeList: Boolean = false,
     val readingMode: Int = 2,
     val readerFontSize: Double = 16.0,
+    val readerFontFamily: String = "-apple-system",
+    val readerFontWeight: String = "normal",
+    val readerColorPreset: Int = 0,
     val readerLineSpacing: Double = 1.6,
     val readerMargin: Double = 4.0,
     val readerTextAlignment: String = "left",
@@ -116,9 +127,47 @@ data class TrackerSettingsRow(
     val isConnected: Boolean,
 )
 
+private val AppearanceOptions = listOf(
+    "system" to "System",
+    "light" to "Light",
+    "dark" to "Dark",
+)
+
+private val ReaderFontFamilies = listOf(
+    "-apple-system" to "System",
+    "Georgia" to "Georgia",
+    "Times New Roman" to "Times",
+    "Helvetica" to "Helvetica",
+    "Charter" to "Charter",
+    "New York" to "New York",
+)
+
+private val ReaderFontWeights = listOf(
+    "300" to "Light",
+    "normal" to "Regular",
+    "600" to "Semibold",
+    "bold" to "Bold",
+)
+
+private val ReaderColorPresets = listOf(
+    "Pure",
+    "Warm",
+    "Slate",
+    "Off-Black",
+    "Dark",
+)
+
 @Composable
 fun SettingsRoute(
     state: SettingsScreenState,
+    onAccentColorChanged: (String) -> Unit,
+    onTmdbLanguageChanged: (String) -> Unit,
+    onAppearanceChanged: (String) -> Unit,
+    onShowScheduleTabChanged: (Boolean) -> Unit,
+    onShowKanzenChanged: (Boolean) -> Unit,
+    onSeasonMenuChanged: (Boolean) -> Unit,
+    onHorizontalEpisodeListChanged: (Boolean) -> Unit,
+    onOpenServices: () -> Unit,
     onAutoModeChanged: (Boolean) -> Unit,
     onShowNextEpisodeChanged: (Boolean) -> Unit,
     onNextEpisodeThresholdChanged: (Int) -> Unit,
@@ -135,8 +184,11 @@ fun SettingsRoute(
     onSubtitleStrokeWidthChanged: (Double) -> Unit,
     onSubtitleFontSizeChanged: (Double) -> Unit,
     onSubtitleVerticalOffsetChanged: (Double) -> Unit,
+    onAniSkipEnabledChanged: (Boolean) -> Unit,
+    onIntroDbEnabledChanged: (Boolean) -> Unit,
     onAniSkipAutoSkipChanged: (Boolean) -> Unit,
     onSkip85sChanged: (Boolean) -> Unit,
+    onSkip85sAlwaysVisibleChanged: (Boolean) -> Unit,
     onCatalogEnabledChanged: (String, Boolean) -> Unit,
     onMoveCatalogUp: (String) -> Unit,
     onMoveCatalogDown: (String) -> Unit,
@@ -148,6 +200,9 @@ fun SettingsRoute(
     onClearLogs: () -> Unit,
     onReadingModeChanged: (Int) -> Unit,
     onReaderFontSizeChanged: (Double) -> Unit,
+    onReaderFontFamilyChanged: (String) -> Unit,
+    onReaderFontWeightChanged: (String) -> Unit,
+    onReaderColorPresetChanged: (Int) -> Unit,
     onReaderLineSpacingChanged: (Double) -> Unit,
     onReaderMarginChanged: (Double) -> Unit,
     onReaderAlignmentChanged: (String) -> Unit,
@@ -188,6 +243,33 @@ fun SettingsRoute(
                 subtitle = "Playback and discovery",
                 imageUrl = null,
                 supportingText = "Android settings are now backed by DataStore. The auto mode warning is explicit here too: it may not always be accurate.",
+            )
+        }
+
+        item {
+            SectionHeading(
+                title = "Interface",
+                subtitle = "Appearance, metadata language, and Android tab visibility.",
+            )
+        }
+
+        item {
+            AppearanceSettingsCard(
+                state = state,
+                onAccentColorChanged = onAccentColorChanged,
+                onTmdbLanguageChanged = onTmdbLanguageChanged,
+                onAppearanceChanged = onAppearanceChanged,
+            )
+        }
+
+        item {
+            DisplayOptionsCard(
+                state = state,
+                onShowScheduleTabChanged = onShowScheduleTabChanged,
+                onShowKanzenChanged = onShowKanzenChanged,
+                onSeasonMenuChanged = onSeasonMenuChanged,
+                onHorizontalEpisodeListChanged = onHorizontalEpisodeListChanged,
+                onOpenServices = onOpenServices,
             )
         }
 
@@ -251,28 +333,6 @@ fun SettingsRoute(
         }
 
         item {
-            GlassPanel {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Metadata Language",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = state.tmdbLanguage,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                    Text(
-                        text = "This is already flowing from persisted settings, even before the full Android service stack lands.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.74f),
-                    )
-                }
-            }
-        }
-
-        item {
             SectionHeading(
                 title = "Playback",
                 subtitle = "Player defaults and next-episode behavior.",
@@ -330,6 +390,24 @@ fun SettingsRoute(
 
         item {
             SettingToggleCard(
+                title = "AniSkip",
+                description = "Fetch anime skip segments from AniSkip when an AniList episode context is available.",
+                checked = state.aniSkipEnabled,
+                onCheckedChange = onAniSkipEnabledChanged,
+            )
+        }
+
+        item {
+            SettingToggleCard(
+                title = "TheIntroDB",
+                description = "Fetch skip segments from TheIntroDB for mapped TMDB movies and episodes.",
+                checked = state.introDbEnabled,
+                onCheckedChange = onIntroDbEnabledChanged,
+            )
+        }
+
+        item {
+            SettingToggleCard(
                 title = "Auto Skip Segments",
                 description = "Use fetched AniSkip or TheIntroDB segments to skip intros, recaps, outros, and previews automatically.",
                 checked = state.aniSkipAutoSkip,
@@ -347,52 +425,19 @@ fun SettingsRoute(
         }
 
         item {
-            GlassPanel {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = "Next Episode Threshold",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "${state.nextEpisodeThreshold}% watched",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                    Slider(
-                        value = state.nextEpisodeThreshold.toFloat(),
-                        onValueChange = { onNextEpisodeThresholdChanged(it.toInt()) },
-                        valueRange = 70f..98f,
-                    )
-                    Text(
-                        text = "When playback reporting is connected, Android will use this same threshold to decide when to surface next-episode actions.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.74f),
-                    )
-                }
-            }
+            SettingToggleCard(
+                title = "Always Show Skip 85s",
+                description = "Keep the 85 second skip button visible even when structured skip segments are available.",
+                checked = state.skip85sAlwaysVisible,
+                onCheckedChange = onSkip85sAlwaysVisibleChanged,
+            )
         }
 
         item {
-            GlassPanel {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Appearance Snapshot",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "Accent ${state.accentColor}",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                    Text(
-                        text = "The Android design system is already reading the same class of persisted appearance values we'll need for closer Luna parity.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.74f),
-                    )
-                }
-            }
+            NextEpisodeThresholdCard(
+                value = state.nextEpisodeThreshold,
+                onValueChange = onNextEpisodeThresholdChanged,
+            )
         }
 
         item {
@@ -407,6 +452,9 @@ fun SettingsRoute(
                 state = state,
                 onReadingModeChanged = onReadingModeChanged,
                 onReaderFontSizeChanged = onReaderFontSizeChanged,
+                onReaderFontFamilyChanged = onReaderFontFamilyChanged,
+                onReaderFontWeightChanged = onReaderFontWeightChanged,
+                onReaderColorPresetChanged = onReaderColorPresetChanged,
                 onReaderLineSpacingChanged = onReaderLineSpacingChanged,
                 onReaderMarginChanged = onReaderMarginChanged,
                 onReaderAlignmentChanged = onReaderAlignmentChanged,
@@ -512,6 +560,121 @@ fun SettingsRoute(
                 onImportClicked = {
                     importLauncher.launch(arrayOf("application/json", "text/plain"))
                 },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppearanceSettingsCard(
+    state: SettingsScreenState,
+    onAccentColorChanged: (String) -> Unit,
+    onTmdbLanguageChanged: (String) -> Unit,
+    onAppearanceChanged: (String) -> Unit,
+) {
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(
+                text = "Appearance",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            OutlinedTextField(
+                value = state.accentColor,
+                onValueChange = onAccentColorChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Accent Color") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = state.tmdbLanguage,
+                onValueChange = onTmdbLanguageChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("TMDB Language") },
+                singleLine = true,
+            )
+            OptionButtonGroup(
+                title = "Theme",
+                selected = state.selectedAppearance,
+                options = AppearanceOptions,
+                onSelected = onAppearanceChanged,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DisplayOptionsCard(
+    state: SettingsScreenState,
+    onShowScheduleTabChanged: (Boolean) -> Unit,
+    onShowKanzenChanged: (Boolean) -> Unit,
+    onSeasonMenuChanged: (Boolean) -> Unit,
+    onHorizontalEpisodeListChanged: (Boolean) -> Unit,
+    onOpenServices: () -> Unit,
+) {
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(
+                text = "Navigation and Layout",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            SettingInlineToggle(
+                title = "Show Schedule Tab",
+                checked = state.showScheduleTab,
+                onCheckedChange = onShowScheduleTabChanged,
+            )
+            SettingInlineToggle(
+                title = "Show Manga and Novel Tabs",
+                checked = state.showKanzen,
+                onCheckedChange = onShowKanzenChanged,
+            )
+            SettingInlineToggle(
+                title = "Alternative Season Menu",
+                checked = state.seasonMenu,
+                onCheckedChange = onSeasonMenuChanged,
+            )
+            SettingInlineToggle(
+                title = "Horizontal Episode List",
+                checked = state.horizontalEpisodeList,
+                onCheckedChange = onHorizontalEpisodeListChanged,
+            )
+            OutlinedButton(
+                onClick = onOpenServices,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Open Provider Services")
+            }
+        }
+    }
+}
+
+@Composable
+private fun NextEpisodeThresholdCard(
+    value: Int,
+    onValueChange: (Int) -> Unit,
+) {
+    GlassPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                text = "Next Episode Threshold",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "$value% watched",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+            Slider(
+                value = value.toFloat(),
+                onValueChange = { onValueChange(it.toInt()) },
+                valueRange = 70f..98f,
+            )
+            Text(
+                text = "Android uses this threshold to surface next-episode actions during playback.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.74f),
             )
         }
     }
@@ -680,6 +843,9 @@ private fun ReaderSettingsCard(
     state: SettingsScreenState,
     onReadingModeChanged: (Int) -> Unit,
     onReaderFontSizeChanged: (Double) -> Unit,
+    onReaderFontFamilyChanged: (String) -> Unit,
+    onReaderFontWeightChanged: (String) -> Unit,
+    onReaderColorPresetChanged: (Int) -> Unit,
     onReaderLineSpacingChanged: (Double) -> Unit,
     onReaderMarginChanged: (Double) -> Unit,
     onReaderAlignmentChanged: (String) -> Unit,
@@ -702,6 +868,22 @@ private fun ReaderSettingsCard(
                 value = state.readerFontSize.toFloat(),
                 valueRange = 12f..32f,
                 onValueChange = { onReaderFontSizeChanged(it.toDouble()) },
+            )
+            ReaderOptionButtons(
+                title = "Font Family",
+                selected = state.readerFontFamily,
+                options = ReaderFontFamilies,
+                onSelected = onReaderFontFamilyChanged,
+            )
+            ReaderOptionButtons(
+                title = "Font Weight",
+                selected = state.readerFontWeight,
+                options = ReaderFontWeights,
+                onSelected = onReaderFontWeightChanged,
+            )
+            ReaderColorPresetButtons(
+                selected = state.readerColorPreset,
+                onSelected = onReaderColorPresetChanged,
             )
             ReaderValueSlider(
                 title = "Line Spacing",
@@ -941,11 +1123,136 @@ private fun ReaderModeButtons(
 }
 
 @Composable
+private fun OptionButtonGroup(
+    title: String,
+    selected: String,
+    options: List<Pair<String, String>>,
+    onSelected: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            options.forEach { (value, label) ->
+                if (value.equals(selected, ignoreCase = true)) {
+                    Button(
+                        onClick = { onSelected(value) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(label)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { onSelected(value) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReaderOptionButtons(
+    title: String,
+    selected: String,
+    options: List<Pair<String, String>>,
+    onSelected: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        options.chunked(3).forEach { chunk ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                chunk.forEach { (value, label) ->
+                    if (value.equals(selected, ignoreCase = true)) {
+                        Button(
+                            onClick = { onSelected(value) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(label)
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { onSelected(value) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(label)
+                        }
+                    }
+                }
+                repeat(3 - chunk.size) {
+                    Column(modifier = Modifier.weight(1f)) {}
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReaderColorPresetButtons(
+    selected: Int,
+    onSelected: (Int) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Reader Color Theme",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ReaderColorPresets.chunked(3).forEachIndexed { chunkIndex, chunk ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    chunk.forEachIndexed { indexInChunk, label ->
+                        val index = chunkIndex * 3 + indexInChunk
+                        if (index == selected) {
+                            Button(
+                                onClick = { onSelected(index) },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(label)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { onSelected(index) },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(label)
+                            }
+                        }
+                    }
+                    repeat(3 - chunk.size) {
+                        Column(modifier = Modifier.weight(1f)) {}
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ReaderAlignmentButtons(
     selected: String,
     onSelected: (String) -> Unit,
 ) {
-    val values = listOf("left", "center", "justify")
+    val values = listOf("left", "center", "right", "justify")
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),

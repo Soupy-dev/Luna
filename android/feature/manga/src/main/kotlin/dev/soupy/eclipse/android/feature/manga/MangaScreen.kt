@@ -158,6 +158,9 @@ data class MangaReaderChapterRow(
 data class MangaReaderSettingsRow(
     val readingMode: Int = 2,
     val readerFontSize: Double = 16.0,
+    val readerFontFamily: String = "-apple-system",
+    val readerFontWeight: String = "normal",
+    val readerColorPreset: Int = 0,
     val readerLineSpacing: Double = 1.6,
     val readerMargin: Double = 4.0,
     val readerTextAlignment: String = "left",

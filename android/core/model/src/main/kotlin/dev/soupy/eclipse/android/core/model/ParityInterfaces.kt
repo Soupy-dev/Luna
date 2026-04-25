@@ -85,6 +85,7 @@ data class PlaybackSettingsSnapshot(
     val vlcHeaderProxyEnabled: Boolean = true,
     val aniSkipAutoSkip: Boolean = false,
     val skip85sEnabled: Boolean = false,
+    val skip85sAlwaysVisible: Boolean = false,
     val showNextEpisodeButton: Boolean = true,
     val nextEpisodeThreshold: Int = 90,
 )

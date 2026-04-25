@@ -35,8 +35,11 @@ data class AppSettings(
     val holdSpeedPlayer: Double = 2.0,
     val externalPlayer: String = "none",
     val alwaysLandscape: Boolean = false,
+    val aniSkipEnabled: Boolean = true,
+    val introDbEnabled: Boolean = true,
     val aniSkipAutoSkip: Boolean = false,
     val skip85sEnabled: Boolean = false,
+    val skip85sAlwaysVisible: Boolean = false,
     val showNextEpisodeButton: Boolean = true,
     val nextEpisodeThreshold: Int = 90,
     val vlcHeaderProxyEnabled: Boolean = true,
@@ -75,10 +78,12 @@ class SettingsStore(
     suspend fun updateAppearance(
         accentColor: String,
         tmdbLanguage: String,
+        selectedAppearance: String,
     ) {
         context.dataStore.edit { prefs ->
-            prefs[Keys.accentColor] = accentColor
-            prefs[Keys.tmdbLanguage] = tmdbLanguage
+            prefs[Keys.accentColor] = accentColor.trim().ifBlank { "#6D8CFF" }
+            prefs[Keys.tmdbLanguage] = tmdbLanguage.trim().ifBlank { "en-US" }
+            prefs[Keys.selectedAppearance] = selectedAppearance.normalizedAppearance()
         }
     }
 
@@ -95,12 +100,18 @@ class SettingsStore(
     }
 
     suspend fun updateSkipBehavior(
+        aniSkipEnabled: Boolean,
+        introDbEnabled: Boolean,
         aniSkipAutoSkip: Boolean,
         skip85sEnabled: Boolean,
+        skip85sAlwaysVisible: Boolean,
     ) {
         context.dataStore.edit { prefs ->
+            prefs[Keys.aniSkipEnabled] = aniSkipEnabled
+            prefs[Keys.introDbEnabled] = introDbEnabled
             prefs[Keys.aniSkipAutoSkip] = aniSkipAutoSkip
             prefs[Keys.skip85sEnabled] = skip85sEnabled
+            prefs[Keys.skip85sAlwaysVisible] = skip85sAlwaysVisible
         }
     }
 
@@ -147,6 +158,9 @@ class SettingsStore(
     suspend fun updateReader(
         readingMode: Int,
         readerFontSize: Double,
+        readerFontFamily: String,
+        readerFontWeight: String,
+        readerColorPreset: Int,
         readerLineSpacing: Double,
         readerMargin: Double,
         readerTextAlignment: String,
@@ -154,9 +168,32 @@ class SettingsStore(
         context.dataStore.edit { prefs ->
             prefs[Keys.readingMode] = readingMode.coerceIn(0, 3)
             prefs[Keys.readerFontSize] = readerFontSize.coerceIn(12.0, 32.0)
+            prefs[Keys.readerFontFamily] = readerFontFamily.trim().ifBlank { "-apple-system" }
+            prefs[Keys.readerFontWeight] = readerFontWeight.trim().ifBlank { "normal" }
+            prefs[Keys.readerColorPreset] = readerColorPreset.coerceIn(0, 4)
             prefs[Keys.readerLineSpacing] = readerLineSpacing.coerceIn(1.0, 2.4)
             prefs[Keys.readerMargin] = readerMargin.coerceIn(0.0, 12.0)
-            prefs[Keys.readerTextAlignment] = readerTextAlignment
+            prefs[Keys.readerTextAlignment] = readerTextAlignment.normalizedTextAlignment()
+        }
+    }
+
+    suspend fun updateNavigation(
+        showScheduleTab: Boolean,
+        showKanzen: Boolean,
+    ) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.showScheduleTab] = showScheduleTab
+            prefs[Keys.showKanzen] = showKanzen
+        }
+    }
+
+    suspend fun updateDisplayOptions(
+        seasonMenu: Boolean,
+        horizontalEpisodeList: Boolean,
+    ) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.seasonMenu] = seasonMenu
+            prefs[Keys.horizontalEpisodeList] = horizontalEpisodeList
         }
     }
 
@@ -240,8 +277,11 @@ class SettingsStore(
             prefs[Keys.holdSpeedPlayer] = payload.holdSpeedPlayer
             prefs[Keys.externalPlayer] = payload.externalPlayer
             prefs[Keys.alwaysLandscape] = payload.alwaysLandscape
+            prefs[Keys.aniSkipEnabled] = true
+            prefs[Keys.introDbEnabled] = true
             prefs[Keys.aniSkipAutoSkip] = payload.aniSkipAutoSkip
             prefs[Keys.skip85sEnabled] = payload.skip85sEnabled
+            prefs[Keys.skip85sAlwaysVisible] = false
             prefs[Keys.showNextEpisodeButton] = payload.showNextEpisodeButton
             prefs[Keys.nextEpisodeThreshold] = payload.nextEpisodeThresholdPercent()
             prefs[Keys.vlcHeaderProxyEnabled] = payload.vlcHeaderProxyEnabled
@@ -301,8 +341,11 @@ class SettingsStore(
         holdSpeedPlayer = preferences[Keys.holdSpeedPlayer] ?: 2.0,
         externalPlayer = preferences[Keys.externalPlayer] ?: "none",
         alwaysLandscape = preferences[Keys.alwaysLandscape] ?: false,
+        aniSkipEnabled = preferences[Keys.aniSkipEnabled] ?: true,
+        introDbEnabled = preferences[Keys.introDbEnabled] ?: true,
         aniSkipAutoSkip = preferences[Keys.aniSkipAutoSkip] ?: false,
         skip85sEnabled = preferences[Keys.skip85sEnabled] ?: false,
+        skip85sAlwaysVisible = preferences[Keys.skip85sAlwaysVisible] ?: false,
         showNextEpisodeButton = preferences[Keys.showNextEpisodeButton] ?: true,
         nextEpisodeThreshold = preferences[Keys.nextEpisodeThreshold] ?: 90,
         vlcHeaderProxyEnabled = preferences[Keys.vlcHeaderProxyEnabled] ?: true,
@@ -349,8 +392,11 @@ class SettingsStore(
         val holdSpeedPlayer = doublePreferencesKey("hold_speed_player")
         val externalPlayer = stringPreferencesKey("external_player")
         val alwaysLandscape = booleanPreferencesKey("always_landscape")
+        val aniSkipEnabled = booleanPreferencesKey("aniskip_enabled")
+        val introDbEnabled = booleanPreferencesKey("introdb_enabled")
         val aniSkipAutoSkip = booleanPreferencesKey("aniskip_auto_skip")
         val skip85sEnabled = booleanPreferencesKey("skip_85s_enabled")
+        val skip85sAlwaysVisible = booleanPreferencesKey("skip_85s_always_visible")
         val showNextEpisodeButton = booleanPreferencesKey("show_next_episode_button")
         val nextEpisodeThreshold = intPreferencesKey("next_episode_threshold")
         val vlcHeaderProxyEnabled = booleanPreferencesKey("vlc_header_proxy_enabled")
@@ -396,6 +442,21 @@ private fun String.normalizedLanguageCode(fallback: String): String =
         .replace('_', '-')
         .takeIf { it.isNotBlank() }
         ?: fallback
+
+private fun String.normalizedAppearance(): String =
+    when (trim().lowercase()) {
+        "light" -> "light"
+        "dark" -> "dark"
+        else -> "system"
+    }
+
+private fun String.normalizedTextAlignment(): String =
+    when (trim().lowercase()) {
+        "center" -> "center"
+        "right" -> "right"
+        "justify" -> "justify"
+        else -> "left"
+    }
 
 private fun String?.normalizedOptionalColor(): String? =
     this?.trim()

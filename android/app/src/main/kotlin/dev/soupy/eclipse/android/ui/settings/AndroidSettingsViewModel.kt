@@ -62,6 +62,7 @@ class AndroidSettingsViewModel(
                 _state.value = _state.value.copy(
                     accentColor = settings.accentColor,
                     tmdbLanguage = settings.tmdbLanguage,
+                    selectedAppearance = settings.selectedAppearance,
                     autoModeEnabled = settings.autoModeEnabled,
                     highQualityThreshold = settings.highQualityThreshold,
                     filterHorrorContent = settings.filterHorrorContent,
@@ -81,10 +82,20 @@ class AndroidSettingsViewModel(
                     subtitleStrokeWidth = settings.subtitleStrokeWidth,
                     subtitleFontSize = settings.subtitleFontSize,
                     subtitleVerticalOffset = settings.subtitleVerticalOffset,
+                    aniSkipEnabled = settings.aniSkipEnabled,
+                    introDbEnabled = settings.introDbEnabled,
                     aniSkipAutoSkip = settings.aniSkipAutoSkip,
                     skip85sEnabled = settings.skip85sEnabled,
+                    skip85sAlwaysVisible = settings.skip85sAlwaysVisible,
+                    showScheduleTab = settings.showScheduleTab,
+                    showKanzen = settings.showKanzen,
+                    seasonMenu = settings.seasonMenu,
+                    horizontalEpisodeList = settings.horizontalEpisodeList,
                     readingMode = settings.readingMode,
                     readerFontSize = settings.readerFontSize,
+                    readerFontFamily = settings.readerFontFamily,
+                    readerFontWeight = settings.readerFontWeight,
+                    readerColorPreset = settings.readerColorPreset,
                     readerLineSpacing = settings.readerLineSpacing,
                     readerMargin = settings.readerMargin,
                     readerTextAlignment = settings.readerTextAlignment,
@@ -100,6 +111,65 @@ class AndroidSettingsViewModel(
         refreshLogs()
         refreshTrackers()
         runStartupCacheMaintenance()
+    }
+
+    fun setAccentColor(value: String) {
+        val current = _state.value
+        updateAppearance(
+            accentColor = value,
+            tmdbLanguage = current.tmdbLanguage,
+            selectedAppearance = current.selectedAppearance,
+        )
+    }
+
+    fun setTmdbLanguage(value: String) {
+        val current = _state.value
+        updateAppearance(
+            accentColor = current.accentColor,
+            tmdbLanguage = value,
+            selectedAppearance = current.selectedAppearance,
+        )
+    }
+
+    fun setAppearance(value: String) {
+        val current = _state.value
+        updateAppearance(
+            accentColor = current.accentColor,
+            tmdbLanguage = current.tmdbLanguage,
+            selectedAppearance = value,
+        )
+    }
+
+    fun setShowScheduleTab(enabled: Boolean) {
+        val current = _state.value
+        updateNavigation(
+            showScheduleTab = enabled,
+            showKanzen = current.showKanzen,
+        )
+    }
+
+    fun setShowKanzen(enabled: Boolean) {
+        val current = _state.value
+        updateNavigation(
+            showScheduleTab = current.showScheduleTab,
+            showKanzen = enabled,
+        )
+    }
+
+    fun setSeasonMenu(enabled: Boolean) {
+        val current = _state.value
+        updateDisplayOptions(
+            seasonMenu = enabled,
+            horizontalEpisodeList = current.horizontalEpisodeList,
+        )
+    }
+
+    fun setHorizontalEpisodeList(enabled: Boolean) {
+        val current = _state.value
+        updateDisplayOptions(
+            seasonMenu = current.seasonMenu,
+            horizontalEpisodeList = enabled,
+        )
     }
 
     fun setAutoModeEnabled(enabled: Boolean) {
@@ -177,20 +247,73 @@ class AndroidSettingsViewModel(
 
     fun setAniSkipAutoSkip(enabled: Boolean) {
         val current = _state.value
-        viewModelScope.launch {
-            settingsStore.updateSkipBehavior(
-                aniSkipAutoSkip = enabled,
-                skip85sEnabled = current.skip85sEnabled,
-            )
-        }
+        updateSkipBehavior(
+            aniSkipEnabled = current.aniSkipEnabled,
+            introDbEnabled = current.introDbEnabled,
+            aniSkipAutoSkip = enabled,
+            skip85sEnabled = current.skip85sEnabled,
+            skip85sAlwaysVisible = current.skip85sAlwaysVisible,
+        )
     }
 
     fun setSkip85sEnabled(enabled: Boolean) {
         val current = _state.value
+        updateSkipBehavior(
+            aniSkipEnabled = current.aniSkipEnabled,
+            introDbEnabled = current.introDbEnabled,
+            aniSkipAutoSkip = current.aniSkipAutoSkip,
+            skip85sEnabled = enabled,
+            skip85sAlwaysVisible = current.skip85sAlwaysVisible,
+        )
+    }
+
+    fun setAniSkipEnabled(enabled: Boolean) {
+        val current = _state.value
+        updateSkipBehavior(
+            aniSkipEnabled = enabled,
+            introDbEnabled = current.introDbEnabled,
+            aniSkipAutoSkip = current.aniSkipAutoSkip,
+            skip85sEnabled = current.skip85sEnabled,
+            skip85sAlwaysVisible = current.skip85sAlwaysVisible,
+        )
+    }
+
+    fun setIntroDbEnabled(enabled: Boolean) {
+        val current = _state.value
+        updateSkipBehavior(
+            aniSkipEnabled = current.aniSkipEnabled,
+            introDbEnabled = enabled,
+            aniSkipAutoSkip = current.aniSkipAutoSkip,
+            skip85sEnabled = current.skip85sEnabled,
+            skip85sAlwaysVisible = current.skip85sAlwaysVisible,
+        )
+    }
+
+    fun setSkip85sAlwaysVisible(enabled: Boolean) {
+        val current = _state.value
+        updateSkipBehavior(
+            aniSkipEnabled = current.aniSkipEnabled,
+            introDbEnabled = current.introDbEnabled,
+            aniSkipAutoSkip = current.aniSkipAutoSkip,
+            skip85sEnabled = current.skip85sEnabled,
+            skip85sAlwaysVisible = enabled,
+        )
+    }
+
+    private fun updateSkipBehavior(
+        aniSkipEnabled: Boolean,
+        introDbEnabled: Boolean,
+        aniSkipAutoSkip: Boolean,
+        skip85sEnabled: Boolean,
+        skip85sAlwaysVisible: Boolean,
+    ) {
         viewModelScope.launch {
             settingsStore.updateSkipBehavior(
-                aniSkipAutoSkip = current.aniSkipAutoSkip,
-                skip85sEnabled = enabled,
+                aniSkipEnabled = aniSkipEnabled,
+                introDbEnabled = introDbEnabled,
+                aniSkipAutoSkip = aniSkipAutoSkip,
+                skip85sEnabled = skip85sEnabled,
+                skip85sAlwaysVisible = skip85sAlwaysVisible,
             )
         }
     }
@@ -386,6 +509,9 @@ class AndroidSettingsViewModel(
         updateReader(
             readingMode = mode,
             readerFontSize = current.readerFontSize,
+            readerFontFamily = current.readerFontFamily,
+            readerFontWeight = current.readerFontWeight,
+            readerColorPreset = current.readerColorPreset,
             readerLineSpacing = current.readerLineSpacing,
             readerMargin = current.readerMargin,
             readerTextAlignment = current.readerTextAlignment,
@@ -397,6 +523,51 @@ class AndroidSettingsViewModel(
         updateReader(
             readingMode = current.readingMode,
             readerFontSize = value,
+            readerFontFamily = current.readerFontFamily,
+            readerFontWeight = current.readerFontWeight,
+            readerColorPreset = current.readerColorPreset,
+            readerLineSpacing = current.readerLineSpacing,
+            readerMargin = current.readerMargin,
+            readerTextAlignment = current.readerTextAlignment,
+        )
+    }
+
+    fun setReaderFontFamily(value: String) {
+        val current = _state.value
+        updateReader(
+            readingMode = current.readingMode,
+            readerFontSize = current.readerFontSize,
+            readerFontFamily = value,
+            readerFontWeight = current.readerFontWeight,
+            readerColorPreset = current.readerColorPreset,
+            readerLineSpacing = current.readerLineSpacing,
+            readerMargin = current.readerMargin,
+            readerTextAlignment = current.readerTextAlignment,
+        )
+    }
+
+    fun setReaderFontWeight(value: String) {
+        val current = _state.value
+        updateReader(
+            readingMode = current.readingMode,
+            readerFontSize = current.readerFontSize,
+            readerFontFamily = current.readerFontFamily,
+            readerFontWeight = value,
+            readerColorPreset = current.readerColorPreset,
+            readerLineSpacing = current.readerLineSpacing,
+            readerMargin = current.readerMargin,
+            readerTextAlignment = current.readerTextAlignment,
+        )
+    }
+
+    fun setReaderColorPreset(value: Int) {
+        val current = _state.value
+        updateReader(
+            readingMode = current.readingMode,
+            readerFontSize = current.readerFontSize,
+            readerFontFamily = current.readerFontFamily,
+            readerFontWeight = current.readerFontWeight,
+            readerColorPreset = value,
             readerLineSpacing = current.readerLineSpacing,
             readerMargin = current.readerMargin,
             readerTextAlignment = current.readerTextAlignment,
@@ -408,6 +579,9 @@ class AndroidSettingsViewModel(
         updateReader(
             readingMode = current.readingMode,
             readerFontSize = current.readerFontSize,
+            readerFontFamily = current.readerFontFamily,
+            readerFontWeight = current.readerFontWeight,
+            readerColorPreset = current.readerColorPreset,
             readerLineSpacing = value,
             readerMargin = current.readerMargin,
             readerTextAlignment = current.readerTextAlignment,
@@ -419,6 +593,9 @@ class AndroidSettingsViewModel(
         updateReader(
             readingMode = current.readingMode,
             readerFontSize = current.readerFontSize,
+            readerFontFamily = current.readerFontFamily,
+            readerFontWeight = current.readerFontWeight,
+            readerColorPreset = current.readerColorPreset,
             readerLineSpacing = current.readerLineSpacing,
             readerMargin = value,
             readerTextAlignment = current.readerTextAlignment,
@@ -430,6 +607,9 @@ class AndroidSettingsViewModel(
         updateReader(
             readingMode = current.readingMode,
             readerFontSize = current.readerFontSize,
+            readerFontFamily = current.readerFontFamily,
+            readerFontWeight = current.readerFontWeight,
+            readerColorPreset = current.readerColorPreset,
             readerLineSpacing = current.readerLineSpacing,
             readerMargin = current.readerMargin,
             readerTextAlignment = alignment,
@@ -445,6 +625,9 @@ class AndroidSettingsViewModel(
     private fun updateReader(
         readingMode: Int,
         readerFontSize: Double,
+        readerFontFamily: String,
+        readerFontWeight: String,
+        readerColorPreset: Int,
         readerLineSpacing: Double,
         readerMargin: Double,
         readerTextAlignment: String,
@@ -453,6 +636,9 @@ class AndroidSettingsViewModel(
             settingsStore.updateReader(
                 readingMode = readingMode,
                 readerFontSize = readerFontSize,
+                readerFontFamily = readerFontFamily,
+                readerFontWeight = readerFontWeight,
+                readerColorPreset = readerColorPreset,
                 readerLineSpacing = readerLineSpacing,
                 readerMargin = readerMargin,
                 readerTextAlignment = readerTextAlignment,
@@ -468,6 +654,44 @@ class AndroidSettingsViewModel(
             settingsStore.updateAutoClearCache(
                 enabled = enabled,
                 thresholdMB = thresholdMB,
+            )
+        }
+    }
+
+    private fun updateAppearance(
+        accentColor: String,
+        tmdbLanguage: String,
+        selectedAppearance: String,
+    ) {
+        viewModelScope.launch {
+            settingsStore.updateAppearance(
+                accentColor = accentColor,
+                tmdbLanguage = tmdbLanguage,
+                selectedAppearance = selectedAppearance,
+            )
+        }
+    }
+
+    private fun updateNavigation(
+        showScheduleTab: Boolean,
+        showKanzen: Boolean,
+    ) {
+        viewModelScope.launch {
+            settingsStore.updateNavigation(
+                showScheduleTab = showScheduleTab,
+                showKanzen = showKanzen,
+            )
+        }
+    }
+
+    private fun updateDisplayOptions(
+        seasonMenu: Boolean,
+        horizontalEpisodeList: Boolean,
+    ) {
+        viewModelScope.launch {
+            settingsStore.updateDisplayOptions(
+                seasonMenu = seasonMenu,
+                horizontalEpisodeList = horizontalEpisodeList,
             )
         }
     }

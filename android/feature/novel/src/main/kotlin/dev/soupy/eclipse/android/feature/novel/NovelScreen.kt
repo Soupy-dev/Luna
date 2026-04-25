@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -38,7 +39,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -150,6 +154,9 @@ data class NovelReaderChapterRow(
 data class NovelReaderSettingsRow(
     val readingMode: Int = 2,
     val readerFontSize: Double = 16.0,
+    val readerFontFamily: String = "-apple-system",
+    val readerFontWeight: String = "normal",
+    val readerColorPreset: Int = 0,
     val readerLineSpacing: Double = 1.6,
     val readerMargin: Double = 4.0,
     val readerTextAlignment: String = "left",
@@ -930,6 +937,8 @@ private fun NovelReaderPanel(
         ?.let { chapter -> reader.totalChapters?.let { chapter.coerceAtMost(it) } ?: chapter }
     val readerTextStyle = MaterialTheme.typography.bodyLarge.copy(
         fontSize = readerSettings.readerFontSize.coerceIn(12.0, 32.0).sp,
+        fontFamily = readerSettings.fontFamily(),
+        fontWeight = readerSettings.fontWeight(),
         lineHeight = (readerSettings.readerFontSize.coerceIn(12.0, 32.0) *
             readerSettings.readerLineSpacing.coerceIn(1.0, 2.4)).sp,
         textAlign = readerSettings.textAlign(),
@@ -1130,15 +1139,19 @@ private fun NovelReaderPanel(
                 Column(
                     modifier = Modifier
                         .heightIn(max = 680.dp)
+                        .background(readerSettings.readerBackgroundColor())
                         .verticalScroll(textScrollState)
-                        .padding(horizontal = readerSettings.horizontalPadding()),
+                        .padding(
+                            horizontal = readerSettings.horizontalPadding(),
+                            vertical = 16.dp,
+                        ),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     content.readerParagraphs().forEach { paragraph ->
                         Text(
                             text = paragraph,
                             style = readerTextStyle,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.84f),
+                            color = readerSettings.readerTextColor(),
                         )
                     }
                 }
@@ -1165,8 +1178,48 @@ private fun NovelReaderSettingsRow.horizontalPadding() =
 private fun NovelReaderSettingsRow.textAlign(): TextAlign =
     when (readerTextAlignment.lowercase()) {
         "center" -> TextAlign.Center
+        "right" -> TextAlign.End
         "justify" -> TextAlign.Justify
         else -> TextAlign.Start
+    }
+
+private fun NovelReaderSettingsRow.fontFamily(): FontFamily =
+    when (readerFontFamily.lowercase()) {
+        "georgia",
+        "times new roman",
+        "charter",
+        "new york" -> FontFamily.Serif
+        "helvetica" -> FontFamily.SansSerif
+        else -> FontFamily.Default
+    }
+
+private fun NovelReaderSettingsRow.fontWeight(): FontWeight =
+    when (readerFontWeight.lowercase()) {
+        "300",
+        "light" -> FontWeight.Light
+        "600",
+        "semibold" -> FontWeight.SemiBold
+        "bold",
+        "700" -> FontWeight.Bold
+        else -> FontWeight.Normal
+    }
+
+private fun NovelReaderSettingsRow.readerBackgroundColor(): Color =
+    when (readerColorPreset.coerceIn(0, 4)) {
+        0 -> Color(0xFFFFFFFF)
+        1 -> Color(0xFFF9F1E4)
+        2 -> Color(0xFF49494D)
+        3 -> Color(0xFF121212)
+        else -> Color(0xFF000000)
+    }
+
+private fun NovelReaderSettingsRow.readerTextColor(): Color =
+    when (readerColorPreset.coerceIn(0, 4)) {
+        0 -> Color(0xFF000000)
+        1 -> Color(0xFF4F321C)
+        2 -> Color(0xFFD7D7D8)
+        3 -> Color(0xFFEAEAEA)
+        else -> Color(0xFFFFFFFF)
     }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
