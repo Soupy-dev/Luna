@@ -10,7 +10,7 @@ DEVELOPMENT_TEAM = ANMK3Y568U
 BUNDLE_IDENTIFIER = app.Eclipse.Soupy
 ECLIPSE_DISTRIBUTION_CHANNEL = GitHub
 // GitHub updater version. Override this for sideload/GitHub releases instead of MARKETING_VERSION.
-ECLIPSE_RELEASE_VERSION = 2.2.0
+ECLIPSE_RELEASE_VERSION = 2.2.1
 // Official release workflows stamp immutable Git revisions into the app.
 ECLIPSE_SOURCE_REVISION =
 ECLIPSE_MPVKIT_SOURCE_REVISION =

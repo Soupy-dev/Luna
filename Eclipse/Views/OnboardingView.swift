@@ -85,8 +85,9 @@ struct OnboardingView: View {
 
 #if !os(tvOS)
     @State private var showCloudRestore = false
+    @State private var showBackupRestore = false
     @State private var profilesBeforeRestore: [Profile] = []
-    @State private var didRestoreFromCloud = false
+    @State private var didRestoreExistingData = false
     @State private var pendingProfileUnlock: Profile?
 #endif
 
@@ -100,12 +101,9 @@ struct OnboardingView: View {
             ? [.welcome, .sources]
             : [.welcome, .sources, .profile]
 #else
-        let offersCloudRestore = !isKidsProfile && ExperimentalFeatureState.isEnabledAtLaunch
         self.baseSteps = isKidsProfile
             ? [.welcome, .hub, .sources]
-            : (offersCloudRestore
-                ? [.welcome, .hub, .restore, .sources, .profile]
-                : [.welcome, .hub, .sources, .profile])
+            : [.welcome, .hub, .restore, .sources, .profile]
 #endif
     }
 
@@ -113,7 +111,7 @@ struct OnboardingView: View {
 #if os(tvOS)
         return baseSteps
 #else
-        guard didRestoreFromCloud else { return baseSteps }
+        guard didRestoreExistingData else { return baseSteps }
         guard profileManager.profiles.count > 1 else {
             return baseSteps.filter { $0 != .profile }
         }
@@ -220,6 +218,18 @@ struct OnboardingView: View {
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             Button("Done") { showCloudRestore = false }
+                        }
+                    }
+            }
+            .navigationViewStyle(.stack)
+            .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showBackupRestore, onDismiss: reconcileRestoreOutcome) {
+            NavigationView {
+                BackupManagementView()
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { showBackupRestore = false }
                         }
                     }
             }
@@ -446,7 +456,7 @@ struct OnboardingView: View {
                         .multilineTextAlignment(.center)
                         .minimumScaleFactor(0.7)
 
-                    Text("Connect a cloud provider and pick up where you left off.")
+                    Text("Import a backup or connect a cloud provider to pick up where you left off.")
                         .font(.footnote)
                         .foregroundColor(.white.opacity(0.6))
                         .multilineTextAlignment(.center)
@@ -457,27 +467,50 @@ struct OnboardingView: View {
 
             SplashReveal(index: 1, enabled: staggerEnabled) {
                 GlassSection {
-                    Button {
-                        profilesBeforeRestore = profileManager.profiles
-                        showCloudRestore = true
-                    } label: {
-                        GlassDetailRow(
-                            icon: "icloud",
-                            iconColor: .blue,
-                            title: "Connect a Cloud Provider",
-                            subtitle: "iCloud, Google Drive, or OneDrive"
-                        ) {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.3))
+                    VStack(spacing: 0) {
+                        Button {
+                            profilesBeforeRestore = profileManager.profiles
+                            showBackupRestore = true
+                        } label: {
+                            GlassDetailRow(
+                                icon: "arrow.down.doc.fill",
+                                iconColor: .teal,
+                                title: "Import Backup",
+                                subtitle: "Restore from a saved Eclipse backup file"
+                            ) {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.3))
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        if ExperimentalFeatureState.isEnabledAtLaunch {
+                            GlassDivider()
+
+                            Button {
+                                profilesBeforeRestore = profileManager.profiles
+                                showCloudRestore = true
+                            } label: {
+                                GlassDetailRow(
+                                    icon: "icloud",
+                                    iconColor: .blue,
+                                    title: "Connect a Cloud Provider",
+                                    subtitle: "iCloud, Google Drive, or OneDrive"
+                                ) {
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.3))
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .buttonStyle(.plain)
                 }
             }
 
             SplashReveal(index: 2, enabled: staggerEnabled) {
-                GlassSectionFooter("New to Eclipse? Just continue — a provider can be connected any time in Settings › Cloud Sync.")
+                GlassSectionFooter("New to Eclipse? Just continue — you can restore your data later in Settings.")
             }
         }
 #endif
@@ -764,7 +797,7 @@ struct OnboardingView: View {
 
 #if !os(tvOS)
     private func reconcileRestoreOutcome() {
-        didRestoreFromCloud = profileManager.profiles != profilesBeforeRestore
+        didRestoreExistingData = didRestoreExistingData || profileManager.profiles != profilesBeforeRestore
     }
 
     private func activate(_ profile: Profile) {
@@ -779,7 +812,7 @@ struct OnboardingView: View {
 
     private func saveProfile() {
 #if !os(tvOS)
-        guard !didRestoreFromCloud else { return }
+        guard !didRestoreExistingData else { return }
 #endif
         guard !trimmedName.isEmpty else { return }
         let manager = ProfileManager.shared
