@@ -2170,10 +2170,13 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     private func rendererLoadExternalSubtitles(urls: [String], names: [String]? = nil, enforce: Bool = false) {
+        if enforce, !urls.isEmpty {
+            lastRequestedEmbeddedSubtitleTrackId = nil
+        }
         if vlcRenderer != nil {
-            logVLCUI("rendererLoadExternalSubtitles count=\(urls.count) names=\(names?.count ?? 0) enforce=\(enforce) urls=\(urls.joined(separator: " | "))", type: "Player")
+            logVLCUI("rendererLoadExternalSubtitles count=\(urls.count) names=\(names?.count ?? 0) enforce=\(enforce)", type: "Player")
         } else {
-            logMPV("rendererLoadExternalSubtitles count=\(urls.count) names=\(names?.count ?? 0) enforce=\(enforce) urls=\(urls.joined(separator: " | "))")
+            logMPV("rendererLoadExternalSubtitles count=\(urls.count) names=\(names?.count ?? 0) enforce=\(enforce)")
         }
         renderer.loadExternalSubtitles(urls: urls, names: names, enforce: enforce)
         subtitleTrackCacheValid = false
@@ -11494,7 +11497,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     private func normalizedSubtitleURLKey(_ url: String) -> String {
-        url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        url.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func captureOnlineSubtitleRendererTrackIds(knownBeforeLoad: Set<Int>) {
@@ -12308,13 +12311,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         stremioSubtitleFetchInProgress = true
         stremioSubtitleSearchAttempted = true
         updateSubtitleTracksMenu()
+        let loadGeneration = playbackLoadGeneration
 
         stremioSubtitleFetchTask = Task { [weak self] in
             guard let self else { return }
             let results = await self.fetchStremioSubtitleResults(reason: reason)
+            guard !Task.isCancelled else { return }
 
             await MainActor.run { [weak self] in
-                guard let self else { return }
+                guard let self,
+                      !self.isClosing,
+                      self.playbackLoadGeneration == loadGeneration,
+                      self.playbackProfileIsStillActive("a subtitle search") else { return }
                 self.stremioSubtitleFetchInProgress = false
                 self.stremioSubtitleResults = self.sortedStremioSubtitleResults(results)
                 Logger.shared.log("[PlayerVC.StremioSubtitles] fetch complete reason=\(reason) count=\(results.count)", type: "Player")
@@ -12348,13 +12356,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         openSubtitlesFetchInProgress = true
         openSubtitlesSearchAttempted = true
         updateSubtitleTracksMenu()
+        let loadGeneration = playbackLoadGeneration
 
         openSubtitlesFetchTask = Task { [weak self] in
             guard let self else { return }
             let results = await self.fetchOpenSubtitlesResults(reason: reason)
+            guard !Task.isCancelled else { return }
 
             await MainActor.run { [weak self] in
-                guard let self else { return }
+                guard let self,
+                      !self.isClosing,
+                      self.playbackLoadGeneration == loadGeneration,
+                      self.playbackProfileIsStillActive("a subtitle search") else { return }
                 self.openSubtitlesFetchInProgress = false
                 self.openSubtitlesResults = results
                 Logger.shared.log("[PlayerVC.OpenSubtitles] fetch complete reason=\(reason) count=\(results.count)", type: "Player")
@@ -12547,6 +12560,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         guard let url else { return false }
         let key = normalizedSubtitleURLKey(url)
         guard onlineSubtitleLoadedURLs.contains(key),
+              lastRequestedEmbeddedSubtitleTrackId == nil,
               subtitleModel.isVisible,
               currentSubtitleIndex < subtitleURLs.count else {
             return false
@@ -12632,13 +12646,18 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                     .filter { $0.id >= 0 && !isDisabledTrackName($0.name) }
                     .map(\.id)
             )
+            vlcSubtitleSelection = .none
             rendererLoadExternalSubtitles(urls: [urlString], names: [displayName], enforce: true)
             vlcExternalSubtitlesLoadedNatively = true
             vlcExternalSubtitlePriorityDeadline = nil
-            vlcSubtitleSelection = .none
+            let loadGeneration = playbackLoadGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.captureOnlineSubtitleRendererTrackIds(knownBeforeLoad: knownRendererSubtitleTrackIds)
-                self?.updateSubtitleTracksMenuWhenReady()
+                guard let self,
+                      !self.isClosing,
+                      self.playbackLoadGeneration == loadGeneration,
+                      self.playbackProfileIsStillActive("a subtitle track update") else { return }
+                self.captureOnlineSubtitleRendererTrackIds(knownBeforeLoad: knownRendererSubtitleTrackIds)
+                self.updateSubtitleTracksMenuWhenReady()
             }
         }
 
