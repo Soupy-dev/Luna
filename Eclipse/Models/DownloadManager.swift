@@ -13,6 +13,55 @@ enum DownloadStatus: String, Codable {
     case failed
 }
 
+struct DownloadSourceRefreshRegistry {
+    enum Kind {
+        case protectedTransport
+        case skyStream
+        case rejectedMedia
+    }
+
+    private var attempts: [String: (token: UUID, kind: Kind)] = [:]
+
+    var ids: Set<String> { Set(attempts.keys) }
+
+    func contains(_ id: String) -> Bool { attempts[id] != nil }
+
+    func kind(for id: String) -> Kind? { attempts[id]?.kind }
+
+    func isCurrent(id: String, token: UUID) -> Bool { attempts[id]?.token == token }
+
+    mutating func begin(id: String, kind: Kind) -> UUID? {
+        guard attempts[id] == nil else { return nil }
+        let token = UUID()
+        attempts[id] = (token, kind)
+        return token
+    }
+
+    mutating func finish(id: String, token: UUID) -> Bool {
+        guard isCurrent(id: id, token: token) else { return false }
+        attempts.removeValue(forKey: id)
+        return true
+    }
+
+    mutating func invalidate(id: String) -> UUID? {
+        attempts.removeValue(forKey: id)?.token
+    }
+}
+
+final class DownloadAvailability: ObservableObject {
+    @Published private(set) var revision: UInt64 = 0
+
+    func update(from previous: [DownloadItem], to current: [DownloadItem]) {
+        guard previous.count != current.count || !zip(previous, current).allSatisfy({ old, new in
+            old.id == new.id && old.tmdbId == new.tmdbId && old.isMovie == new.isMovie
+                && old.seasonNumber == new.seasonNumber && old.episodeNumber == new.episodeNumber
+                && old.episodePlaybackContext == new.episodePlaybackContext
+                && old.status == new.status && old.localFileName == new.localFileName
+        }) else { return }
+        revision &+= 1
+    }
+}
+
 enum DownloadEnqueueResult {
     case enqueued
     case alreadyExists
@@ -1568,14 +1617,14 @@ final class DownloadManager: NSObject, ObservableObject {
     static let shared = DownloadManager()
     private static let animeProviderAliasesKey = "downloadAnimeProviderAliasesV1"
 
-    private enum RefreshedDownloadTransport {
+    enum RefreshedDownloadTransport {
         case direct(url: URL, headers: [String: String], expectedContentLength: Int64?)
 #if os(iOS) && !targetEnvironment(macCatalyst)
         case skyStreamHLS(SkyStreamValidatedPlaybackDescriptor)
 #endif
     }
 
-    private struct RefreshedDownloadSource {
+    struct RefreshedDownloadSource {
         let transport: RefreshedDownloadTransport
         let streamName: String?
         let subtitleURL: String?
@@ -1612,8 +1661,12 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     @Published private(set) var downloads: [DownloadItem] = [] {
-        didSet { invalidateEpisodeLookup() }
+        didSet {
+            invalidateEpisodeLookup()
+            availability.update(from: oldValue, to: downloads)
+        }
     }
+    let availability = DownloadAvailability()
 #if os(iOS)
     private var episodeLookupRevision: UInt64 = 0
     private var episodeLookupCache: EpisodeDownloadLookupSnapshot?
@@ -1646,7 +1699,6 @@ final class DownloadManager: NSObject, ObservableObject {
     private var skyStreamHLSDescriptors: [String: SkyStreamValidatedPlaybackDescriptor] = [:]
     private var skyStreamHLSProxyURLs: [String: URL] = [:]
     private var skyStreamHLSPinnedVariantURLs: [String: URL] = [:]
-    private var skyStreamRestoringDownloadIDs = Set<String>()
 
     private struct ProtectedProviderDownloadAttempt {
         let attemptID: UUID
@@ -1666,7 +1718,6 @@ final class DownloadManager: NSObject, ObservableObject {
     private var stremioConfiguredOriginAuthorities: [String: SkyStreamPinnedOriginAuthority] = [:]
     private var persistenceLoadedDownloadIDs = Set<String>()
     private var nuvioSubtitleFetches: [String: NuvioBoundedSubtitleFetch] = [:]
-    private var nuvioRestoringDownloadIDs = Set<String>()
     private var nuvioAutoValidationProxyURLs: [UUID: URL] = [:]
     private var observedNuvioTransportProfileID: UUID?
 #endif
@@ -1675,13 +1726,19 @@ final class DownloadManager: NSObject, ObservableObject {
     private var nuvioDispatchApprovedIDs = Set<String>()
     private var nuvioDispatchValidationTokens: [String: UUID] = [:]
 
-    private var cloudflareRecoveringDownloadIDs = Set<String>()
+    private var sourceRefreshes = DownloadSourceRefreshRegistry()
+    private var sourceRefreshTasks: [UUID: Task<Void, Never>] = [:]
     private var mediaSourceRecoveryAttempts: [String: (count: Int, lastAttempt: Date)] = [:]
 
     private var animeProviderAliasesByTMDBID: [Int: [Int: Int]] = [:] {
         didSet { invalidateEpisodeLookup() }
     }
     private var scheduledQueueWakeWorkItem: DispatchWorkItem?
+    private var scheduledQueueWakeDate: Date?
+    private var isolatedDownloadsDirectory: URL?
+    private var transportMayStartOverride: (() -> Bool)?
+    private var refreshSourceOverride: (@MainActor (DownloadItem) async -> RefreshedDownloadSource?)?
+    private var transferStarterOverride: ((DownloadItem) -> Void)?
     #if canImport(UIKit)
     private var lifecycleObservers: [NSObjectProtocol] = []
     #endif
@@ -1703,11 +1760,15 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private var legacyDownloadsDirectory: URL {
-        fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        if let isolatedDownloadsDirectory {
+            return isolatedDownloadsDirectory.appendingPathComponent("Legacy", isDirectory: true)
+        }
+        return fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Downloads")
     }
 
     var downloadsDirectory: URL {
+        if let isolatedDownloadsDirectory { return isolatedDownloadsDirectory }
         let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let dir = documents.appendingPathComponent("Downloads", isDirectory: true)
         if !fileManager.fileExists(atPath: dir.path) {
@@ -1717,6 +1778,31 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     var backgroundCompletionHandler: (() -> Void)?
+
+    init(
+        downloadsDirectory: URL,
+        initialDownloads: [DownloadItem],
+        transportMayStart: @escaping () -> Bool,
+        refreshSource: @escaping @MainActor (DownloadItem) async -> RefreshedDownloadSource?,
+        transferStarter: @escaping (DownloadItem) -> Void
+    ) {
+        isolatedDownloadsDirectory = downloadsDirectory
+        transportMayStartOverride = transportMayStart
+        refreshSourceOverride = refreshSource
+        transferStarterOverride = transferStarter
+        super.init()
+        downloads = initialDownloads
+        backgroundSession = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+        restoringBackgroundTasks = false
+    }
+
+    func finishIsolatedSession() {
+        guard isolatedDownloadsDirectory != nil else { return }
+        cancelAllActive()
+        backgroundSession.invalidateAndCancel()
+        directFileQueue.sync { }
+        accessQueue.sync(flags: .barrier) { }
+    }
 
     private override init() {
         super.init()
@@ -1776,7 +1862,7 @@ final class DownloadManager: NSObject, ObservableObject {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                self?.processQueue()
+                self?.applicationDidBecomeActive()
             }
         )
 #if os(iOS) && !targetEnvironment(macCatalyst)
@@ -1786,10 +1872,7 @@ final class DownloadManager: NSObject, ObservableObject {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                self?.suspendProtectedProviderAttempts(
-                    message: "Waiting for app to reopen",
-                    processWhenPossible: false
-                )
+                self?.applicationDidEnterBackground()
             }
         )
         lifecycleObservers.append(
@@ -1844,6 +1927,29 @@ final class DownloadManager: NSObject, ObservableObject {
             work()
         } else {
             DispatchQueue.main.async(execute: work)
+        }
+    }
+
+    func applicationDidBecomeActive() {
+        processQueue()
+    }
+
+    func applicationDidEnterBackground() {
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        suspendProtectedProviderAttempts(message: "Waiting for app to reopen", processWhenPossible: false)
+#endif
+    }
+
+    private func invalidateSourceRefresh(id: String) {
+        if let token = sourceRefreshes.invalidate(id: id) {
+            sourceRefreshTasks.removeValue(forKey: token)?.cancel()
+        }
+    }
+
+    private func finishSourceRefresh(id: String, token: UUID) {
+        sourceRefreshTasks.removeValue(forKey: token)
+        if sourceRefreshes.finish(id: id, token: token) {
+            processQueue()
         }
     }
 
@@ -2741,6 +2847,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func captureKidsPolicyDetails(forDownload id: String, tmdbId: Int, isMovie: Bool) {
+        guard isolatedDownloadsDirectory == nil else { return }
         Task { [weak self] in
             let details: KidsPolicyDetails
             do {
@@ -2785,7 +2892,12 @@ final class DownloadManager: NSObject, ObservableObject {
         performOnMain { [weak self] in
             guard let self,
                   let index = downloads.firstIndex(where: { $0.id == id }),
-                  downloads[index].status == .downloading else { return }
+                  downloads[index].status == .downloading || downloads[index].status == .queued else { return }
+
+            invalidateSourceRefresh(id: id)
+            nuvioDispatchValidationPendingIDs.remove(id)
+            nuvioDispatchValidationTokens.removeValue(forKey: id)
+            nuvioDispatchApprovedIDs.remove(id)
 
 #if os(iOS) && !targetEnvironment(macCatalyst)
             let isProtectedProvider = downloads[index].claimsProtectedProviderTransport
@@ -2860,16 +2972,18 @@ final class DownloadManager: NSObject, ObservableObject {
     func resumeDownload(id: String) {
         performOnMain { [weak self] in
             guard let self,
-                  !cloudflareRecoveringDownloadIDs.contains(id),
                   let index = downloads.firstIndex(where: { $0.id == id }),
                   downloads[index].status == .paused || downloads[index].status == .failed else {
                 return
             }
 
+            invalidateSourceRefresh(id: id)
+
             downloads[index].status = .queued
             downloads[index].retryNotBefore = nil
             downloads[index].rateLimitRetryCount = nil
             downloads[index].error = nil
+            mediaSourceRecoveryAttempts.removeValue(forKey: id)
 
             if downloads[index].isHLS && downloads[index].hlsResumeSegmentIndex == nil {
                 downloads[index].progress = 0
@@ -2912,6 +3026,8 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func removeDownload(id: String, deleteFile: Bool) {
         let removal = {
+            self.invalidateSourceRefresh(id: id)
+            self.mediaSourceRecoveryAttempts.removeValue(forKey: id)
 #if os(iOS) && !targetEnvironment(macCatalyst)
             self.clearSkyStreamDownloadRuntimeState(id: id, discardDescriptor: true)
             self.clearProtectedProviderDownloadRuntimeState(id: id, scrubTransport: false)
@@ -2994,6 +3110,8 @@ final class DownloadManager: NSObject, ObservableObject {
             DispatchQueue.main.async { self.deleteAll() }
             return
         }
+        for id in sourceRefreshes.ids { invalidateSourceRefresh(id: id) }
+        mediaSourceRecoveryAttempts.removeAll()
         for (_, task) in activeTasks {
             invalidatedDirectTaskIdentifiers.insert(task.taskIdentifier)
             task.cancel()
@@ -3012,7 +3130,6 @@ final class DownloadManager: NSObject, ObservableObject {
         skyStreamHLSPinnedVariantURLs.removeAll()
         skyStreamHLSDescriptors.removeAll()
         invalidateAllProtectedProviderAttempts()
-        nuvioRestoringDownloadIDs.removeAll()
 #endif
         nuvioDispatchValidationPendingIDs.removeAll()
         nuvioDispatchApprovedIDs.removeAll()
@@ -3041,14 +3158,7 @@ final class DownloadManager: NSObject, ObservableObject {
     func pauseAll() {
         let active = downloads.filter { $0.status == .downloading || $0.status == .queued }
         for item in active {
-            if item.status == .downloading {
-                pauseDownload(id: item.id)
-            } else {
-                if let index = downloads.firstIndex(where: { $0.id == item.id }),
-                   downloads[index].status == .queued {
-                    downloads[index].status = .paused
-                }
-            }
+            pauseDownload(id: item.id)
         }
         saveDownloads()
     }
@@ -4623,7 +4733,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
         let currentlyDownloading = downloads.filter { $0.status == .downloading }.count
 
-        let reservedValidations = nuvioDispatchValidationPendingIDs.count
+        let reservedValidations = nuvioDispatchValidationPendingIDs.union(sourceRefreshes.ids).count
         var slotsAvailable = maxConcurrentDownloads - currentlyDownloading - reservedValidations
 
         guard slotsAvailable > 0, !restoringBackgroundTasks else { return }
@@ -4646,6 +4756,7 @@ final class DownloadManager: NSObject, ObservableObject {
                 return false
             }
             return !nuvioDispatchValidationPendingIDs.contains($0.id)
+                && !sourceRefreshes.contains($0.id)
         }
 
         for item in queued {
@@ -4672,6 +4783,9 @@ final class DownloadManager: NSObject, ObservableObject {
 
                 if let delayReason = hlsStartDelayReason() {
                     setQueuedMessage(id: item.id, message: delayReason)
+                    if UIApplication.shared.applicationState == .active {
+                        scheduleQueueWake(at: now.addingTimeInterval(30))
+                    }
                     Logger.shared.log("Delaying HLS packaging for \(item.displayTitle): \(delayReason)", type: "Download")
                     continue
                 }
@@ -4690,15 +4804,19 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func scheduleQueueWake(at date: Date) {
+        if let scheduledQueueWakeDate, scheduledQueueWakeDate <= date,
+           scheduledQueueWakeWorkItem?.isCancelled == false { return }
         if let scheduledQueueWakeWorkItem,
            !scheduledQueueWakeWorkItem.isCancelled {
             scheduledQueueWakeWorkItem.cancel()
         }
         let workItem = DispatchWorkItem { [weak self] in
             self?.scheduledQueueWakeWorkItem = nil
+            self?.scheduledQueueWakeDate = nil
             self?.processQueue()
         }
         scheduledQueueWakeWorkItem = workItem
+        scheduledQueueWakeDate = date
         DispatchQueue.main.asyncAfter(
             deadline: .now() + max(0, date.timeIntervalSinceNow),
             execute: workItem
@@ -4805,6 +4923,15 @@ final class DownloadManager: NSObject, ObservableObject {
 #endif
         guard let url = URL(string: item.streamURL) else {
             markFailed(id: item.id, error: "Invalid stream URL")
+            return
+        }
+
+        if let transferStarterOverride,
+           let index = downloads.firstIndex(where: { $0.id == item.id }) {
+            downloads[index].status = .downloading
+            downloads[index].error = nil
+            saveDownloads()
+            transferStarterOverride(downloads[index])
             return
         }
 
@@ -5362,7 +5489,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private func restoreValidatedSkyStreamDownload(_ item: DownloadItem) {
         guard item.lastContentReference?.kind == .skyStream,
-              skyStreamRestoringDownloadIDs.insert(item.id).inserted else {
+              let refreshToken = sourceRefreshes.begin(id: item.id, kind: .skyStream) else {
             return
         }
         let expectedReference = item.lastContentReference
@@ -5373,12 +5500,12 @@ final class DownloadManager: NSObject, ObservableObject {
             saveDownloads()
         }
 
-        Task { @MainActor [weak self] in
+        sourceRefreshTasks[refreshToken] = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer {
-                self.skyStreamRestoringDownloadIDs.remove(item.id)
-            }
+            defer { self.finishSourceRefresh(id: item.id, token: refreshToken) }
             let refreshed = await refreshDownloadSource(id: item.id)
+            guard sourceRefreshes.isCurrent(id: item.id, token: refreshToken),
+                  !Task.isCancelled else { return }
             guard let index = downloads.firstIndex(where: { $0.id == item.id }),
                   downloads[index].status == .queued,
                   downloads[index].lastContentReference == expectedReference,
@@ -5430,7 +5557,7 @@ final class DownloadManager: NSObject, ObservableObject {
               protectedOwnerMatchesActiveProfile(item),
               providerKind != .nuvio || authorizedNuvioReference(for: item) != nil,
               needsFreshTransport,
-              nuvioRestoringDownloadIDs.insert(item.id).inserted else {
+              let refreshToken = sourceRefreshes.begin(id: item.id, kind: .protectedTransport) else {
             return
         }
         let expectedReference = item.lastContentReference
@@ -5444,10 +5571,12 @@ final class DownloadManager: NSObject, ObservableObject {
             saveDownloads()
         }
 
-        Task { @MainActor [weak self] in
+        sourceRefreshTasks[refreshToken] = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.nuvioRestoringDownloadIDs.remove(item.id) }
+            defer { self.finishSourceRefresh(id: item.id, token: refreshToken) }
             let refreshed = await self.refreshDownloadSource(id: item.id)
+            guard self.sourceRefreshes.isCurrent(id: item.id, token: refreshToken),
+                  !Task.isCancelled else { return }
             guard let index = self.downloads.firstIndex(where: { $0.id == item.id }),
                   self.downloads[index].status == .queued,
                   self.downloads[index].streamURL == expectedStreamURL,
@@ -5461,7 +5590,9 @@ final class DownloadManager: NSObject, ObservableObject {
             guard self.protectedProviderTransportMayStart,
                   self.protectedOwnerMatchesActiveProfile(self.downloads[index]),
                   ServiceStoreScope.isCurrent(expectedScopeGeneration) else {
-                self.downloads[index].error = "Waiting for the download's profile"
+                self.downloads[index].error = self.protectedProviderTransportMayStart
+                    ? "Waiting for the download's profile"
+                    : "Waiting for app to reopen"
                 self.saveDownloads()
                 return
             }
@@ -5472,9 +5603,9 @@ final class DownloadManager: NSObject, ObservableObject {
                       id: item.id,
                       resetTransferProgress: true
                   ) != nil else {
-                self.scheduleSystemBackoffDownloadRetry(
+                self.markFailed(
                     id: item.id,
-                    message: "The provider could not refresh protected download access."
+                    error: "The provider could not refresh this download. Retry, or remove it and select the episode's source again."
                 )
                 return
             }
@@ -5517,10 +5648,11 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private var nuvioProtectedTransportMayStart: Bool {
+        if let transportMayStartOverride { return transportMayStartOverride() }
 #if canImport(UIKit)
-        UIApplication.shared.applicationState == .active
+        return UIApplication.shared.applicationState == .active
 #else
-        true
+        return true
 #endif
     }
 
@@ -5908,7 +6040,6 @@ final class DownloadManager: NSObject, ObservableObject {
         nuvioDispatchValidationPendingIDs.remove(id)
         nuvioDispatchValidationTokens.removeValue(forKey: id)
         nuvioDispatchApprovedIDs.remove(id)
-        nuvioRestoringDownloadIDs.remove(id)
         stremioConfiguredOriginAuthorities.removeValue(forKey: id)
         invalidateNuvioProtectedAttempt(id: id)
         storeResumeData(nil, id: id)
@@ -5932,10 +6063,11 @@ final class DownloadManager: NSObject, ObservableObject {
         }
         nuvioAutoValidationProxyURLs.removeAll()
         for id in protectedIDs {
+            let wasRecoveringMedia = sourceRefreshes.kind(for: id) == .rejectedMedia
+            invalidateSourceRefresh(id: id)
             nuvioDispatchValidationPendingIDs.remove(id)
             nuvioDispatchValidationTokens.removeValue(forKey: id)
             nuvioDispatchApprovedIDs.remove(id)
-            nuvioRestoringDownloadIDs.remove(id)
             stremioConfiguredOriginAuthorities.removeValue(forKey: id)
             if let task = activeTasks.removeValue(forKey: id) {
                 invalidatedDirectTaskIdentifiers.insert(task.taskIdentifier)
@@ -5951,7 +6083,7 @@ final class DownloadManager: NSObject, ObservableObject {
             resetProtectedProviderHLSCheckpoint(id: id)
             scrubProtectedProviderTransportInMemory(id: id)
             if let index = downloads.firstIndex(where: { $0.id == id }),
-               downloads[index].status == .downloading {
+               downloads[index].status == .downloading || wasRecoveringMedia {
                 if let limitation = downloads[index].resumeLimitationMessage {
                     downloads[index].status = .paused
                     downloads[index].error = limitation
@@ -6087,7 +6219,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func setQueuedMessage(id: String, message: String) {
-        DispatchQueue.main.async {
+        performOnMain {
             guard let index = self.downloads.firstIndex(where: { $0.id == id }),
                   self.downloads[index].status == .queued,
                   self.downloads[index].error != message else { return }
@@ -6097,8 +6229,9 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func clearQueuedMessage(id: String) {
-        DispatchQueue.main.async {
+        performOnMain {
             guard let index = self.downloads.firstIndex(where: { $0.id == id }),
+                  self.downloads[index].status == .queued,
                   self.downloads[index].error != nil else { return }
             self.downloads[index].error = nil
             self.saveDownloads()
@@ -6456,10 +6589,9 @@ final class DownloadManager: NSObject, ObservableObject {
         performOnMain { [weak self] in
             guard let self,
                   let index = downloads.firstIndex(where: { $0.id == id }),
-                  cloudflareRecoveringDownloadIDs.insert(id).inserted else { return }
+                  !sourceRefreshes.contains(id) else { return }
 
             guard beginMediaSourceRecoveryAttempt(id: id) else {
-                cloudflareRecoveringDownloadIDs.remove(id)
                 markFailed(
                     id: id,
                     error: "The media source could not be refreshed after repeated HTTP \(statusCode) responses."
@@ -6485,6 +6617,7 @@ final class DownloadManager: NSObject, ObservableObject {
                 clearProtectedProviderDownloadRuntimeState(id: id, scrubTransport: true)
             }
 #endif
+            guard let refreshToken = sourceRefreshes.begin(id: id, kind: .rejectedMedia) else { return }
             downloads[index].status = .paused
             downloads[index].error = "Refreshing expired media source"
 #if os(iOS) && !targetEnvironment(macCatalyst)
@@ -6502,9 +6635,12 @@ final class DownloadManager: NSObject, ObservableObject {
                 type: "Download"
             )
 
-            Task { @MainActor [weak self] in
+            sourceRefreshTasks[refreshToken] = Task { @MainActor [weak self] in
                 guard let self else { return }
+                defer { self.finishSourceRefresh(id: id, token: refreshToken) }
                 var refreshed = await refreshDownloadSource(id: id)
+                guard sourceRefreshes.isCurrent(id: id, token: refreshToken),
+                      !Task.isCancelled else { return }
 #if os(iOS) && !targetEnvironment(macCatalyst)
                 if let recoveringProtectedOwnerProfileID,
                    (ProfileManager.shared.activeProfileID != recoveringProtectedOwnerProfileID
@@ -6514,7 +6650,6 @@ final class DownloadManager: NSObject, ObservableObject {
                         downloads[currentIndex].error = "Waiting for the download's profile"
                         scrubProtectedProviderTransportInMemory(id: id)
                     }
-                    cloudflareRecoveringDownloadIDs.remove(id)
                     saveDownloads()
                     processQueue()
                     return
@@ -6536,14 +6671,17 @@ final class DownloadManager: NSObject, ObservableObject {
                         for: challengedURL,
                         rejectedCookieHeader: rejectedCookieHeader
                     )
+                    guard sourceRefreshes.isCurrent(id: id, token: refreshToken),
+                          !Task.isCancelled else { return }
                     if solvedMediaChallenge {
                         refreshed = await refreshDownloadSource(id: id) ?? refreshed
                     }
                 }
 
+                guard sourceRefreshes.isCurrent(id: id, token: refreshToken),
+                      !Task.isCancelled else { return }
                 guard let currentIndex = downloads.firstIndex(where: { $0.id == id }),
                       downloads[currentIndex].status == .paused else {
-                    cloudflareRecoveringDownloadIDs.remove(id)
                     processQueue()
                     return
                 }
@@ -6557,7 +6695,6 @@ final class DownloadManager: NSObject, ObservableObject {
                     downloads[currentIndex].status = .queued
                     downloads[currentIndex].rateLimitRetryCount = nil
                     downloads[currentIndex].error = nil
-                    cloudflareRecoveringDownloadIDs.remove(id)
                     saveDownloads()
                     Logger.shared.log(
                         "Download provider re-resolved source id=\(id) changedTransport=\(installed.changed) kind=\(installed.kind)",
@@ -6568,12 +6705,10 @@ final class DownloadManager: NSObject, ObservableObject {
 
                     downloads[currentIndex].status = .queued
                     downloads[currentIndex].error = nil
-                    cloudflareRecoveringDownloadIDs.remove(id)
                     saveDownloads()
                     processQueue()
                 } else {
                     let isSkyStream = downloads[currentIndex].lastContentReference?.kind == .skyStream
-                    cloudflareRecoveringDownloadIDs.remove(id)
                     markFailed(
                         id: id,
                         error: isSkyStream
@@ -6771,6 +6906,7 @@ final class DownloadManager: NSObject, ObservableObject {
     @MainActor
     private func refreshDownloadSource(id: String) async -> RefreshedDownloadSource? {
         guard let item = downloads.first(where: { $0.id == id }) else { return nil }
+        if let refreshSourceOverride { return await refreshSourceOverride(item) }
         if let sourceId = item.lastSourceId,
            let reference = item.lastContentReference,
            Self.isValidRecoveryReference(reference, matchingSourceId: sourceId) {
@@ -7332,7 +7468,8 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func resumeDataURL(id: String) -> URL {
-        let directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let directory = (isolatedDownloadsDirectory
+            ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
             .appendingPathComponent("DownloadResume", isDirectory: true)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         var excludedDirectory = directory
@@ -7939,12 +8076,9 @@ final class DownloadManager: NSObject, ObservableObject {
         guard !item.isHLS,
               item.status == .downloading || item.status == .queued,
               item.retryNotBefore.map({ $0 <= Date() }) ?? true,
-              !cloudflareRecoveringDownloadIDs.contains(downloadID) else {
+              !sourceRefreshes.contains(downloadID) else {
             return false
         }
-#if os(iOS) && !targetEnvironment(macCatalyst)
-        guard !skyStreamRestoringDownloadIDs.contains(downloadID) else { return false }
-#endif
         activeTasks[downloadID] = task
         return true
     }

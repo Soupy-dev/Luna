@@ -509,6 +509,7 @@ struct MediaDetailContentView: View {
 #endif
 #if !os(tvOS)
     private let downloadManager = DownloadManager.shared
+    @ObservedObject private var downloadAvailability = DownloadManager.shared.availability
     @ObservedObject private var localNotificationManager = LocalNotificationManager.shared
 #endif
     @ObservedObject private var libraryManager = LibraryManager.shared

@@ -25,6 +25,9 @@ struct EpisodeCell: View {
 
     @State private var isWatched: Bool = false
     @State private var isDownloaded: Bool = false
+#if !os(tvOS)
+    @State private var activeDownloadStatus: DownloadStatus?
+#endif
 
     @State private var downloadStateRefreshTask: Task<Void, Never>?
     @State private var progressValue: Double = 0
@@ -184,7 +187,7 @@ struct EpisodeCell: View {
             handleEpisodeProgressListChange(entries)
         }
 #if !os(tvOS)
-        .onReceive(DownloadManager.shared.$downloads) { _ in
+        .onReceive(DownloadManager.shared.availability.$revision) { _ in
             scheduleDownloadStateRefresh()
         }
 #endif
@@ -348,7 +351,7 @@ struct EpisodeCell: View {
             handleEpisodeProgressListChange(entries)
         }
 #if !os(tvOS)
-        .onReceive(DownloadManager.shared.$downloads) { _ in
+        .onReceive(DownloadManager.shared.availability.$revision) { _ in
             scheduleDownloadStateRefresh()
         }
 #endif
@@ -506,7 +509,7 @@ struct EpisodeCell: View {
             handleEpisodeProgressListChange(entries)
         }
 #if !os(tvOS)
-        .onReceive(DownloadManager.shared.$downloads) { _ in
+        .onReceive(DownloadManager.shared.availability.$revision) { _ in
             scheduleDownloadStateRefresh()
         }
 #endif
@@ -554,7 +557,7 @@ struct EpisodeCell: View {
                     }) {
                         Label("Remove Download", systemImage: "trash")
                     }
-                } else if activeDownload == nil {
+                } else if activeDownloadStatus == nil && activeDownload == nil {
                     Button(action: onDownload) {
                         Label("Download", systemImage: "arrow.down.circle")
                     }
@@ -670,6 +673,12 @@ struct EpisodeCell: View {
             episodeNumber: episode.episodeNumber,
             playbackContext: playbackContext
         ) != nil
+        activeDownloadStatus = DownloadManager.shared.activeEpisodeDownloadItem(
+            tmdbId: showId,
+            seasonNumber: episode.seasonNumber,
+            episodeNumber: episode.episodeNumber,
+            playbackContext: playbackContext
+        )?.status
 #else
 
         let present = false

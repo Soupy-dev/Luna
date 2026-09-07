@@ -2092,3 +2092,230 @@ final class ServiceCompatibilityTests: XCTestCase {
         )
     }
 }
+
+
+private actor TrackerImportConcurrencyProbe {
+    private var active = 0
+    private var maximumActive = 0
+    private var started: [Int] = []
+    private var completed: [Int] = []
+
+    func begin(_ id: Int) {
+        started.append(id)
+        active += 1
+        maximumActive = max(maximumActive, active)
+    }
+
+    func finish(_ id: Int) {
+        active -= 1
+        completed.append(id)
+    }
+
+    func snapshot() -> (active: Int, maximum: Int, started: [Int], completed: [Int]) {
+        (active, maximumActive, started, completed)
+    }
+}
+
+final class TrackerImportPerformanceTests: XCTestCase {
+    func testBoundedLookupsPreserveOrderAndMissingResults() async throws {
+        let probe = TrackerImportConcurrencyProbe()
+        let results = try await TrackerImportWork.map(Array(0..<24)) { id -> Int? in
+            await probe.begin(id)
+            try await Task.sleep(nanoseconds: id == 0 ? 160_000_000 : 20_000_000)
+            await probe.finish(id)
+            return id.isMultiple(of: 5) ? nil : id
+        }
+        let snapshot = await probe.snapshot()
+        XCTAssertEqual(results, (0..<24).map { $0.isMultiple(of: 5) ? nil : $0 })
+        XCTAssertEqual(snapshot.started.count, 24)
+        XCTAssertEqual(snapshot.maximum, 4)
+        XCTAssertEqual(snapshot.active, 0)
+        XCTAssertLessThan(try XCTUnwrap(snapshot.completed.firstIndex(of: 4)), try XCTUnwrap(snapshot.completed.firstIndex(of: 0)))
+    }
+
+    func testCanceledImportDoesNotStartTheRestOfTheLibrary() async throws {
+        let probe = TrackerImportConcurrencyProbe()
+        let admitted = expectation(description: "Initial bounded lookups started")
+        admitted.expectedFulfillmentCount = 4
+        let task = Task {
+            try await TrackerImportWork.map(Array(0..<1_000)) { id in
+                await probe.begin(id)
+                admitted.fulfill()
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+                return id
+            }
+        }
+        await fulfillment(of: [admitted], timeout: 2)
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("Canceled preparation must not return a batch for commit")
+        } catch is CancellationError {
+        }
+        let snapshot = await probe.snapshot()
+        XCTAssertEqual(snapshot.started.count, 4)
+    }
+
+    func testExpiredAuthorityCancelsRemainingLookups() async throws {
+        enum AuthorityError: Error { case expired }
+        let probe = TrackerImportConcurrencyProbe()
+        do {
+            _ = try await TrackerImportWork.map(Array(0..<1_000)) { id in
+                await probe.begin(id)
+                if id == 0 { throw AuthorityError.expired }
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+                return id
+            }
+            XCTFail("Expired authority must not produce an import batch")
+        } catch AuthorityError.expired {
+        }
+        let snapshot = await probe.snapshot()
+        XCTAssertLessThanOrEqual(snapshot.started.count, 4)
+    }
+
+    func testAniListImportReusesMetadataWithoutAnotherRequest() async throws {
+        let anime = try importAnime(id: 1)
+        let nodes = try await AniListImportMetadata.resolve(ids: [1, 1], prefetched: [anime]) { _ in
+            XCTFail("The library response already contains this metadata")
+            return [:]
+        }
+        XCTAssertEqual(nodes.count, 1)
+        XCTAssertEqual(nodes[1]?.seasonYear, 2020)
+        XCTAssertEqual(nodes[1]?.format, "TV")
+        XCTAssertEqual(nodes[1]?.kitsuId, 42)
+    }
+
+    func testAniListImportFetchesOnlyMissingIDsAndRejectsMismatchedMetadata() async throws {
+        let first = try importAnime(id: 1)
+        let second = try importAnime(id: 2)
+        let foreign = try importAnime(id: 9)
+        let nodes = try await AniListImportMetadata.resolve(ids: [3, 2, 1, 2], prefetched: [first, foreign]) { ids in
+            XCTAssertEqual(ids, [2, 3])
+            return [2: second, 3: foreign, 9: foreign]
+        }
+        XCTAssertEqual(Set(nodes.keys), Set([1, 2]))
+    }
+
+    func testCompleteIDLookupDoesNotRetryEachMissingID() throws {
+        let page = try TrackerAniListIDBatchPage.decode(
+            Data(#"{"data":{"Page":{"pageInfo":{"hasNextPage":false},"media":[{"id":101,"idMal":1}]}}}"#.utf8),
+            requestedIDs: Set([1, 2])
+        )
+        let complete = TrackerAniListIDBatchResult(idsByMAL: page.idsByMAL, isComplete: !page.hasNextPage)
+        XCTAssertEqual(complete.idsByMAL, [1: 101])
+        XCTAssertEqual(complete.fallbackIDs(requested: [1, 2]), [])
+        let partial = TrackerAniListIDBatchResult(idsByMAL: page.idsByMAL, isComplete: false)
+        XCTAssertEqual(partial.fallbackIDs(requested: [1, 2]), [2])
+        let failed = TrackerAniListIDBatchResult(idsByMAL: [:], isComplete: false)
+        XCTAssertEqual(failed.fallbackIDs(requested: [1, 2]), [1, 2])
+    }
+
+    func testPartialAndInvalidIDResponsesNeverClaimCompleteAbsence() throws {
+        let payloads = [
+            #"{"data":{"Page":{"media":[]}}}"#,
+            #"{"data":{"Page":{"pageInfo":{"hasNextPage":false},"media":[]}},"errors":[{"message":"unavailable"}]}"#,
+            #"{"data":{"Page":{"pageInfo":{"hasNextPage":false},"media":[{"id":101,"idMal":9}]}}}"#,
+            #"{"data":{"Page":{"pageInfo":{"hasNextPage":false},"media":[{"id":-1,"idMal":1}]}}}"#
+        ]
+        for payload in payloads {
+            XCTAssertThrowsError(try TrackerAniListIDBatchPage.decode(Data(payload.utf8), requestedIDs: [1]))
+        }
+        let page = try TrackerAniListIDBatchPage.decode(
+            Data(#"{"data":{"Page":{"pageInfo":{"hasNextPage":true},"media":[{"id":101,"idMal":1}]}}}"#.utf8),
+            requestedIDs: [1]
+        )
+        XCTAssertTrue(page.hasNextPage)
+    }
+
+    func testTrackerAndMetadataRequestsShareAniListSpacing() async throws {
+        let limiter = AniListRateLimiter(minInterval: 0.08, burstCapacity: 1)
+        let scheduler = TrackerRequestScheduler(aniListLimiter: limiter)
+        let start = Date()
+        try await scheduler.waitForSlot(provider: .anilist)
+        try await limiter.waitForSlot()
+        try await scheduler.waitForSlot(provider: .anilist)
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 0.14)
+    }
+
+    func testTrackerCooldownDelaysAlreadyWaitingMetadataRequests() async throws {
+        let limiter = AniListRateLimiter(minInterval: 0.08, burstCapacity: 1)
+        let scheduler = TrackerRequestScheduler(aniListLimiter: limiter)
+        try await limiter.waitForSlot()
+        let start = Date()
+        let waiter = Task { try await limiter.waitForSlot() }
+        try await Task.sleep(nanoseconds: 15_000_000)
+        let response = try response(status: 429, headers: ["Retry-After": "0.2"])
+        _ = await scheduler.recordResponse(provider: .anilist, response: response)
+        try await waiter.value
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 0.19)
+    }
+
+    func testCanceledAniListQueueDoesNotLeaveLongReservations() async throws {
+        let limiter = AniListRateLimiter(minInterval: 0.08, burstCapacity: 1)
+        try await limiter.waitForSlot()
+        let waiters = (0..<20).map { _ in Task { try await limiter.waitForSlot() } }
+        try await Task.sleep(nanoseconds: 15_000_000)
+        for waiter in waiters { waiter.cancel() }
+        for waiter in waiters { _ = try? await waiter.value }
+        let start = Date()
+        try await limiter.waitForSlot()
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.4)
+    }
+
+    func testTMDBCooldownDelaysQueuedLookup() async throws {
+        let limiter = TMDBRateLimiter(maxConcurrent: 2, minInterval: 0.08)
+        _ = try await limiter.execute { 0 }
+        let start = Date()
+        let waiter = Task { try await limiter.execute { 1 } }
+        try await Task.sleep(nanoseconds: 15_000_000)
+        let response = try response(status: 429, headers: ["Retry-After": "0.2"])
+        await limiter.recordResponse(response)
+        let value = try await waiter.value
+        XCTAssertEqual(value, 1)
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 0.19)
+    }
+
+    func testMALCooldownExtendsAQueuedRequest() async throws {
+        let scheduler = TrackerRequestScheduler()
+        try await scheduler.waitForSlot(provider: .myAnimeList)
+        let start = Date()
+        let waiter = Task { try await scheduler.waitForSlot(provider: .myAnimeList) }
+        try await Task.sleep(nanoseconds: 400_000_000)
+        let response = try response(status: 429, headers: ["Retry-After": "1"])
+        _ = await scheduler.recordResponse(provider: .myAnimeList, response: response)
+        try await waiter.value
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 1.3)
+    }
+
+    func testInvalidOptionalImportMetadataDoesNotDiscardTheProgressRow() throws {
+        let data = Data(#"{"id":1,"idMal":1,"title":{"english":"Example"},"episodes":12,"seasonYear":999999999}"#.utf8)
+        let media = try JSONDecoder().decode(TrackerAniListImportMedia.self, from: data)
+        XCTAssertEqual(media.id, 1)
+        XCTAssertEqual(media.episodes, 12)
+        XCTAssertNil(media.importMetadata)
+    }
+
+    func testReducedAniListRateLimitReschedulesQueuedRequests() async throws {
+        let limiter = AniListRateLimiter(minInterval: 0.08, burstCapacity: 1)
+        try await limiter.waitForSlot()
+        let start = Date()
+        let waiter = Task { try await limiter.waitForSlot() }
+        try await Task.sleep(nanoseconds: 15_000_000)
+        let response = try response(status: 200, headers: ["X-RateLimit-Limit": "75"])
+        await limiter.recordResponse(response)
+        try await waiter.value
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 0.7)
+    }
+
+    private func importAnime(id: Int) throws -> AniListAnime {
+        let json = """
+        {"id":\(id),"idMal":\(id),"title":{"english":"Example","romaji":"Example"},"episodes":12,"seasonYear":2020,"format":"TV","externalLinks":[{"site":"Kitsu","url":"https://kitsu.io/anime/42"}]}
+        """
+        return try JSONDecoder().decode(AniListAnime.self, from: Data(json.utf8))
+    }
+
+    private func response(status: Int, headers: [String: String]) throws -> HTTPURLResponse {
+        let url = try XCTUnwrap(URL(string: "https://example.com/metadata"))
+        return try XCTUnwrap(HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: headers))
+    }
+}

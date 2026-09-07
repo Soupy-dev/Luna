@@ -394,7 +394,7 @@ private enum TrackerCredentialVault {
     }
 }
 
-private enum TrackerRequestProvider: Hashable {
+enum TrackerRequestProvider: Hashable {
     case anilist
     case myAnimeList
     case trakt
@@ -518,55 +518,161 @@ struct TrackerWatchSyncDedupeGate {
     }
 }
 
-private actor TrackerRequestScheduler {
+enum TrackerImportWork {
+    static let maximumConcurrentLookups = 4
+
+    static func map<Input, Output>(
+        _ inputs: [Input],
+        operation: @escaping @Sendable (Input) async throws -> Output
+    ) async throws -> [Output] {
+        try Task.checkCancellation()
+        return try await withThrowingTaskGroup(of: (Int, Output).self) { group in
+            var nextIndex = 0
+            var outputs = [Output?](repeating: nil, count: inputs.count)
+
+            func enqueueNext() {
+                let index = nextIndex
+                let input = inputs[index]
+                nextIndex += 1
+                group.addTask {
+                    try Task.checkCancellation()
+                    return (index, try await operation(input))
+                }
+            }
+
+            for _ in 0..<min(maximumConcurrentLookups, inputs.count) {
+                enqueueNext()
+            }
+            while let (index, output) = try await group.next() {
+                try Task.checkCancellation()
+                outputs[index] = output
+                if nextIndex < inputs.count {
+                    enqueueNext()
+                }
+            }
+            try Task.checkCancellation()
+            return outputs.compactMap { $0 }
+        }
+    }
+}
+
+struct TrackerAniListIDBatchPage {
+    let idsByMAL: [Int: Int]
+    let hasNextPage: Bool
+
+    static func decode(_ data: Data, requestedIDs: Set<Int>) throws -> Self {
+        struct Response: Decodable {
+            let data: Body
+            let errors: [GraphQLError]?
+            struct GraphQLError: Decodable { let message: String? }
+            struct Body: Decodable { let Page: Page }
+            struct Page: Decodable {
+                let media: [Media]
+                let pageInfo: PageInfo
+            }
+            struct PageInfo: Decodable { let hasNextPage: Bool }
+            struct Media: Decodable {
+                let id: Int
+                let idMal: Int?
+            }
+        }
+
+        guard data.count <= 8 * 1_024 * 1_024 else {
+            throw BoundedURLSessionError.responseTooLarge(maximumBytes: 8 * 1_024 * 1_024)
+        }
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        guard response.errors?.isEmpty != false, response.data.Page.media.count <= 50 else {
+            throw URLError(.cannotParseResponse)
+        }
+        var ids: [Int: Int] = [:]
+        for media in response.data.Page.media {
+            guard RemoteMediaNumericBoundary.positiveIdentifier(media.id) != nil,
+                  let malID = media.idMal,
+                  requestedIDs.contains(malID) else {
+                throw URLError(.cannotParseResponse)
+            }
+            ids[malID] = media.id
+        }
+        return Self(idsByMAL: ids, hasNextPage: response.data.Page.pageInfo.hasNextPage)
+    }
+}
+
+struct TrackerAniListIDBatchResult {
+    let idsByMAL: [Int: Int]
+    let isComplete: Bool
+
+    func fallbackIDs(requested: [Int]) -> [Int] {
+        isComplete ? [] : requested.filter { idsByMAL[$0] == nil }
+    }
+}
+
+struct TrackerAniListImportMedia: Decodable {
+    let id: Int
+    let idMal: Int?
+    let title: AniListAnime.AniListTitle
+    let episodes: Int?
+    let importMetadata: AniListAnime?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, idMal, title, episodes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        idMal = try container.decodeIfPresent(Int.self, forKey: .idMal)
+        title = try container.decode(AniListAnime.AniListTitle.self, forKey: .title)
+        episodes = try container.decodeIfPresent(Int.self, forKey: .episodes)
+        importMetadata = try? AniListAnime(from: decoder)
+    }
+}
+
+actor TrackerRequestScheduler {
     static let shared = TrackerRequestScheduler()
 
     private var nextAllowedAt: [TrackerRequestProvider: Date] = [:]
-    private var minimumSpacing: [TrackerRequestProvider: TimeInterval] = [
-        .anilist: 0.8,
+    private let aniListLimiter: AniListRateLimiter
+    private let minimumSpacing: [TrackerRequestProvider: TimeInterval] = [
         .myAnimeList: 1.2,
         .trakt: 1.05
     ]
 
-    func waitForSlot(provider: TrackerRequestProvider) async {
-        let now = Date()
-        let slot = max(now, nextAllowedAt[provider] ?? .distantPast)
-        nextAllowedAt[provider] = slot.addingTimeInterval(minimumSpacing[provider] ?? 1)
+    init(aniListLimiter: AniListRateLimiter = .shared) {
+        self.aniListLimiter = aniListLimiter
+    }
 
-        let delay = slot.timeIntervalSince(now)
-        if delay > 0.001,
-           let nanoseconds = TrackerRateLimitHeaderPolicy.sleepNanoseconds(for: delay) {
-            try? await Task.sleep(nanoseconds: nanoseconds)
+    func waitForSlot(provider: TrackerRequestProvider) async throws {
+        if provider == .anilist {
+            try await aniListLimiter.waitForSlot()
+            return
+        }
+
+        while true {
+            try Task.checkCancellation()
+            let now = Date()
+            let slot = max(now, nextAllowedAt[provider] ?? .distantPast)
+            let delay = slot.timeIntervalSince(now)
+            if delay <= 0 {
+                nextAllowedAt[provider] = now.addingTimeInterval(minimumSpacing[provider] ?? 1)
+                return
+            }
+            try await Task.sleep(nanoseconds: AniListRateLimiter.nanoseconds(for: min(delay, 120)))
         }
     }
 
-    func recordResponse(provider: TrackerRequestProvider, response: HTTPURLResponse) -> TimeInterval? {
-        if provider == .anilist,
-           let spacing = TrackerRateLimitHeaderPolicy.minimumSpacing(
-            response.value(forHTTPHeaderField: "X-RateLimit-Limit")
-           ) {
-            minimumSpacing[provider] = spacing
+    func recordResponse(provider: TrackerRequestProvider, response: HTTPURLResponse) async -> TimeInterval? {
+        if provider == .anilist {
+            await aniListLimiter.recordResponse(response)
+            return response.statusCode == 429
+                ? AniListRateLimiter.boundedRetryAfter(response.value(forHTTPHeaderField: "Retry-After"))
+                : nil
         }
-
         if response.statusCode == 429 {
             let pause = TrackerRateLimitHeaderPolicy.retryDelay(
                 response.value(forHTTPHeaderField: "Retry-After")
             )
             nextAllowedAt[provider] = max(nextAllowedAt[provider] ?? .distantPast, Date().addingTimeInterval(pause))
             return pause
-        }
-
-        let now = Date()
-        if provider == .anilist,
-           let remainingValue = response.value(forHTTPHeaderField: "X-RateLimit-Remaining"),
-           let remaining = Int(remainingValue),
-           remaining <= 1,
-           let resetDelay = TrackerRateLimitHeaderPolicy.resetDelay(
-            response.value(forHTTPHeaderField: "X-RateLimit-Reset"),
-            now: now
-           ) {
-            let resetDate = now.addingTimeInterval(resetDelay)
-            nextAllowedAt[provider] = max(nextAllowedAt[provider] ?? .distantPast, resetDate)
         }
 
         return nil
@@ -684,6 +790,7 @@ private struct RemoteAnimeProgress {
     let status: String
     let progress: Int
     let totalEpisodes: Int?
+    var importMetadata: AniListAnime? = nil
 }
 
 private extension RemoteAnimeProgress {
@@ -693,7 +800,8 @@ private extension RemoteAnimeProgress {
         title: String,
         status: String,
         progress: Int,
-        totalEpisodes: Int?
+        totalEpisodes: Int?,
+        importMetadata: AniListAnime? = nil
     ) {
         let safeAniListID = TrackerRemoteProgressBoundary.positiveIdentifier(anilistId)
         let safeMALID = TrackerRemoteProgressBoundary.positiveIdentifier(malId)
@@ -713,6 +821,7 @@ private extension RemoteAnimeProgress {
         self.status = String(status.prefix(64))
         self.progress = progress
         self.totalEpisodes = totalEpisodes
+        self.importMetadata = importMetadata
     }
 }
 
@@ -742,6 +851,7 @@ private struct TrackerSyncToolPlan {
     let action: TrackerSyncToolAction
 
     let owner: UUID
+    let operationGeneration: UInt64
 
     var accountSnapshots: [TrackerAccount] = []
     let preview: TrackerSyncPreview
@@ -1084,6 +1194,7 @@ final class TrackerManager: NSObject, ObservableObject {
 #endif
     private var cachedSyncToolPlan: TrackerSyncToolPlan?
     private var syncToolTask: Task<Void, Never>?
+    private var syncToolTaskID: UUID?
 
     private var trackerStateURL: URL
     private var activeProfileID: UUID
@@ -3453,6 +3564,7 @@ final class TrackerManager: NSObject, ObservableObject {
 
         syncToolTask?.cancel()
         syncToolTask = nil
+        syncToolTaskID = nil
         cachedSyncToolPlan = nil
         traktTokenRefreshTasks[profileID]?.task.cancel()
         traktTokenRefreshTasks[profileID] = nil
@@ -5325,7 +5437,11 @@ final class TrackerManager: NSObject, ObservableObject {
         var lastError: Error?
 
         for attempt in 0..<maxRetries {
-            await TrackerRequestScheduler.shared.waitForSlot(provider: provider)
+            try Task.checkCancellation()
+            if isAniListRead, AnimeProviderHealthCenter.shared.isAniListTemporarilyUnavailable {
+                throw AniListReadGateError.cooldown
+            }
+            try await TrackerRequestScheduler.shared.waitForSlot(provider: provider)
             try Task.checkCancellation()
             guard !accountBoundaryRecoveryBlocksNetworkOperations() else {
                 throw CancellationError()
@@ -11629,10 +11745,12 @@ final class TrackerManager: NSObject, ObservableObject {
     }
 
     private func validateSyncToolPlan(_ plan: TrackerSyncToolPlan) async throws {
+        try requireOwner(plan.owner, operationGeneration: plan.operationGeneration)
         try await validateSyncToolAuthority(
             owner: plan.owner,
             accounts: plan.accountSnapshots
         )
+        try requireOwner(plan.owner, operationGeneration: plan.operationGeneration)
     }
 
     private func finalizedSyncToolPlan(_ plan: TrackerSyncToolPlan) async throws -> TrackerSyncToolPlan {
@@ -11649,11 +11767,18 @@ final class TrackerManager: NSObject, ObservableObject {
     }
 
 #if !os(tvOS)
+    @MainActor
     func previewSyncTool(_ action: TrackerSyncToolAction) {
         guard !isRunningSyncTool else { return }
+        let invocationOwner = activeProfileID
+        let invocationGeneration = trackerOperationGenerationSnapshot()
+        let taskID = UUID()
+        syncToolTaskID = taskID
+        isRunningSyncTool = true
 
-        Task {
+        let task = Task {
             await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                 self.isRunningSyncTool = true
                 self.syncToolStatus = "Building preview..."
                 self.syncToolPreview = nil
@@ -11664,10 +11789,13 @@ final class TrackerManager: NSObject, ObservableObject {
             }
 
             do {
-                let plan = try await buildSyncToolPlan(for: action)
+                try Task.checkCancellation()
+                try self.requireOwner(invocationOwner, operationGeneration: invocationGeneration)
+                let plan = try await buildSyncToolPlan(for: action, owner: invocationOwner, operationGeneration: invocationGeneration)
                 try await validateSyncToolPlan(plan)
                 try await MainActor.run {
-                    try self.requireOwner(plan.owner)
+                    guard self.syncToolTaskID == taskID else { return }
+                    try self.requireOwner(plan.owner, operationGeneration: plan.operationGeneration)
                     self.cachedSyncToolPlan = plan
                     self.syncToolPreview = plan.preview
                     self.syncToolStatus = "Preview ready"
@@ -11675,18 +11803,27 @@ final class TrackerManager: NSObject, ObservableObject {
                 }
             } catch {
                 await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                     self.syncToolStatus = "Preview failed: \(error.localizedDescription)"
                     self.isRunningSyncTool = false
                 }
             }
         }
+        syncToolTask = task
     }
 
+    @MainActor
     func runSyncTool(_ action: TrackerSyncToolAction) {
         guard !isRunningSyncTool else { return }
+        let invocationOwner = activeProfileID
+        let invocationGeneration = trackerOperationGenerationSnapshot()
+        let taskID = UUID()
+        syncToolTaskID = taskID
+        isRunningSyncTool = true
 
         let task = Task {
             await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                 self.isRunningSyncTool = true
                 self.syncToolStatus = "Running \(action.title)..."
                 self.syncToolProgressCompleted = 0
@@ -11695,9 +11832,12 @@ final class TrackerManager: NSObject, ObservableObject {
             }
 
             do {
-                let plan = try await cachedOrBuildSyncToolPlan(for: action)
+                try Task.checkCancellation()
+                try self.requireOwner(invocationOwner, operationGeneration: invocationGeneration)
+                let plan = try await cachedOrBuildSyncToolPlan(for: action, owner: invocationOwner, operationGeneration: invocationGeneration)
                 let total = syncToolOperationCount(for: plan)
                 await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                     self.syncToolProgressCompleted = 0
                     self.syncToolProgressTotal = total
                     self.syncToolProgressDetail = total > 0 ? "0 of \(total) operations complete" : "No write operations needed"
@@ -11705,7 +11845,8 @@ final class TrackerManager: NSObject, ObservableObject {
                 }
                 let result = try await performSyncTool(plan)
                 try await MainActor.run {
-                    try self.requireOwner(plan.owner)
+                    guard self.syncToolTaskID == taskID else { return }
+                    try self.requireOwner(plan.owner, operationGeneration: plan.operationGeneration)
                     self.cachedSyncToolPlan = nil
                     self.syncToolPreview = result
                     self.syncToolStatus = "Finished \(action.title)"
@@ -11717,6 +11858,7 @@ final class TrackerManager: NSObject, ObservableObject {
                 }
             } catch is CancellationError {
                 await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                     self.syncToolStatus = "Canceled \(action.title)"
                     self.syncToolProgressDetail = "Canceled"
                     self.syncToolIsLocked = false
@@ -11725,6 +11867,7 @@ final class TrackerManager: NSObject, ObservableObject {
                 }
             } catch {
                 await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                     self.syncToolStatus = "Sync failed: \(error.localizedDescription)"
                     self.syncToolProgressDetail = nil
                     self.syncToolIsLocked = false
@@ -11736,23 +11879,28 @@ final class TrackerManager: NSObject, ObservableObject {
         syncToolTask = task
     }
 
+    @MainActor
     func cancelSyncTool() {
+        guard isRunningSyncTool else { return }
         syncToolTask?.cancel()
-        Task { @MainActor in
-            self.syncToolStatus = "Canceling sync..."
-            self.syncToolProgressDetail = "Stopping after the current request..."
-        }
+        syncToolStatus = "Canceling sync..."
+        syncToolProgressDetail = "Stopping after the current request..."
     }
 
-    private func cachedOrBuildSyncToolPlan(for action: TrackerSyncToolAction) async throws -> TrackerSyncToolPlan {
+    private func cachedOrBuildSyncToolPlan(
+        for action: TrackerSyncToolAction,
+        owner: UUID,
+        operationGeneration: UInt64
+    ) async throws -> TrackerSyncToolPlan {
+        try requireOwner(owner, operationGeneration: operationGeneration)
 
         if let cachedSyncToolPlan,
            cachedSyncToolPlan.action == action,
-           cachedSyncToolPlan.owner == ProfileManager.shared.activeProfileID {
+           cachedSyncToolPlan.owner == owner {
             try await validateSyncToolPlan(cachedSyncToolPlan)
             return cachedSyncToolPlan
         }
-        let plan = try await buildSyncToolPlan(for: action)
+        let plan = try await buildSyncToolPlan(for: action, owner: owner, operationGeneration: operationGeneration)
         try await validateSyncToolPlan(plan)
         cachedSyncToolPlan = plan
         return plan
@@ -11785,20 +11933,29 @@ final class TrackerManager: NSObject, ObservableObject {
         }
     }
 
-    private func buildSyncToolPreview(for action: TrackerSyncToolAction) async throws -> TrackerSyncPreview {
-        try await buildSyncToolPlan(for: action).preview
+    private func buildSyncToolPreview(
+        for action: TrackerSyncToolAction,
+        owner: UUID,
+        operationGeneration: UInt64
+    ) async throws -> TrackerSyncPreview {
+        try await buildSyncToolPlan(for: action, owner: owner, operationGeneration: operationGeneration).preview
     }
 
-    private func buildSyncToolPlan(for action: TrackerSyncToolAction) async throws -> TrackerSyncToolPlan {
+    private func buildSyncToolPlan(
+        for action: TrackerSyncToolAction,
+        owner: UUID,
+        operationGeneration: UInt64
+    ) async throws -> TrackerSyncToolPlan {
 
-        let owner = ProfileManager.shared.activeProfileID
-        try requireOwner(owner)
+        try Task.checkCancellation()
+        try requireOwner(owner, operationGeneration: operationGeneration)
         switch action {
         case .fillEclipseFromAniList:
             let account = try connectedAccount(.anilist)
-            let animeEntries = try await fetchAniListAnimeProgressEntries(account: account)
-            try await validateSyncToolAuthority(owner: owner, accounts: [account])
-            let mangaEntries = try await fetchAniListMangaProgressEntries(account: account)
+            let accountAuthority = operationAuthority(for: account, owner: owner, operationGeneration: operationGeneration)
+            async let animeTask = fetchAniListAnimeProgressEntries(account: account, requiredAuthority: accountAuthority)
+            async let mangaTask = fetchAniListMangaProgressEntries(account: account, requiredAuthority: accountAuthority)
+            let (animeEntries, mangaEntries) = try await (animeTask, mangaTask)
             try await validateSyncToolAuthority(owner: owner, accounts: [account])
             let animePreview = previewForRemoteFill(action: action, entries: animeEntries, sourceName: "AniList")
             let mangaMapped = mangaEntries.filter { $0.anilistId != nil }
@@ -11819,6 +11976,7 @@ final class TrackerManager: NSObject, ObservableObject {
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [account],
                 preview: preview,
                 animeEntries: animeEntries,
@@ -11827,13 +11985,14 @@ final class TrackerManager: NSObject, ObservableObject {
 
         case .fillEclipseFromMAL:
             let account = try connectedAccount(.myAnimeList)
-            let fetchedAnimeEntries = try await fetchMALAnimeProgressEntries(account: account)
+            let accountAuthority = operationAuthority(for: account, owner: owner, operationGeneration: operationGeneration)
+            async let animeTask = fetchMALAnimeProgressEntries(account: account, requiredAuthority: accountAuthority)
+            async let mangaTask = fetchMALMangaProgressEntries(account: account, requiredAuthority: accountAuthority)
+            let (fetchedAnimeEntries, fetchedMangaEntries) = try await (animeTask, mangaTask)
             try await validateSyncToolAuthority(owner: owner, accounts: [account])
-            let animeEntries = await resolveMALAnimeEntriesToAniList(fetchedAnimeEntries)
+            let animeEntries = try await resolveMALAnimeEntriesToAniList(fetchedAnimeEntries)
             try await validateSyncToolAuthority(owner: owner, accounts: [account])
-            let fetchedMangaEntries = try await fetchMALMangaProgressEntries(account: account)
-            try await validateSyncToolAuthority(owner: owner, accounts: [account])
-            let mangaEntries = await resolveMALMangaEntriesToAniList(fetchedMangaEntries)
+            let mangaEntries = try await resolveMALMangaEntriesToAniList(fetchedMangaEntries)
             try await validateSyncToolAuthority(owner: owner, accounts: [account])
             let animePreview = previewForRemoteFill(action: action, entries: animeEntries, sourceName: "MAL")
             let mangaMapped = mangaEntries.filter { $0.anilistId != nil }
@@ -11854,6 +12013,7 @@ final class TrackerManager: NSObject, ObservableObject {
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [account],
                 preview: preview,
                 animeEntries: animeEntries,
@@ -11876,6 +12036,7 @@ final class TrackerManager: NSObject, ObservableObject {
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [account],
                 preview: preview
             ))
@@ -11896,6 +12057,7 @@ final class TrackerManager: NSObject, ObservableObject {
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [account],
                 preview: preview
             ))
@@ -11903,13 +12065,15 @@ final class TrackerManager: NSObject, ObservableObject {
         case .portAniListToMAL:
             let account = try connectedAccount(.anilist)
             let destination = try connectedAccount(.myAnimeList)
-            let sourceAnimeEntries = try await fetchAniListAnimeProgressEntries(account: account)
-            try await validateSyncToolAuthority(owner: owner, accounts: [account, destination])
-            let sourceMangaEntries = try await fetchAniListMangaProgressEntries(account: account)
-            try await validateSyncToolAuthority(owner: owner, accounts: [account, destination])
-            let destinationAnime = try await fetchMALAnimeProgressEntries(account: destination)
-            try await validateSyncToolAuthority(owner: owner, accounts: [account, destination])
-            let destinationManga = try await fetchMALMangaProgressEntries(account: destination)
+            let accountAuthority = operationAuthority(for: account, owner: owner, operationGeneration: operationGeneration)
+            let destinationAuthority = operationAuthority(for: destination, owner: owner, operationGeneration: operationGeneration)
+            async let sourceAnimeTask = fetchAniListAnimeProgressEntries(account: account, requiredAuthority: accountAuthority)
+            async let sourceMangaTask = fetchAniListMangaProgressEntries(account: account, requiredAuthority: accountAuthority)
+            async let destinationAnimeTask = fetchMALAnimeProgressEntries(account: destination, requiredAuthority: destinationAuthority)
+            async let destinationMangaTask = fetchMALMangaProgressEntries(account: destination, requiredAuthority: destinationAuthority)
+            let (sourceAnimeEntries, sourceMangaEntries, destinationAnime, destinationManga) = try await (
+                sourceAnimeTask, sourceMangaTask, destinationAnimeTask, destinationMangaTask
+            )
             try await validateSyncToolAuthority(owner: owner, accounts: [account, destination])
             let destinationAnimeByMAL = remoteAnimeByMALId(destinationAnime)
             let destinationMangaByMAL = remoteMangaByMALId(destinationManga)
@@ -11943,6 +12107,7 @@ final class TrackerManager: NSObject, ObservableObject {
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [account, destination],
                 preview: preview,
                 animeEntries: animeEntries,
@@ -11952,17 +12117,19 @@ final class TrackerManager: NSObject, ObservableObject {
         case .portMALToAniList:
             let account = try connectedAccount(.myAnimeList)
             let destination = try connectedAccount(.anilist)
-            let fetchedSourceAnimeEntries = try await fetchMALAnimeProgressEntries(account: account)
+            let accountAuthority = operationAuthority(for: account, owner: owner, operationGeneration: operationGeneration)
+            let destinationAuthority = operationAuthority(for: destination, owner: owner, operationGeneration: operationGeneration)
+            async let sourceAnimeTask = fetchMALAnimeProgressEntries(account: account, requiredAuthority: accountAuthority)
+            async let sourceMangaTask = fetchMALMangaProgressEntries(account: account, requiredAuthority: accountAuthority)
+            async let destinationAnimeTask = fetchAniListAnimeProgressEntries(account: destination, requiredAuthority: destinationAuthority)
+            async let destinationMangaTask = fetchAniListMangaProgressEntries(account: destination, requiredAuthority: destinationAuthority)
+            let (fetchedSourceAnimeEntries, fetchedSourceMangaEntries, destinationAnime, destinationManga) = try await (
+                sourceAnimeTask, sourceMangaTask, destinationAnimeTask, destinationMangaTask
+            )
             try await validateSyncToolAuthority(owner: owner, accounts: [account, destination])
-            let sourceAnimeEntries = await resolveMALAnimeEntriesToAniList(fetchedSourceAnimeEntries)
+            let sourceAnimeEntries = try await resolveMALAnimeEntriesToAniList(fetchedSourceAnimeEntries)
             try await validateSyncToolAuthority(owner: owner, accounts: [account, destination])
-            let fetchedSourceMangaEntries = try await fetchMALMangaProgressEntries(account: account)
-            try await validateSyncToolAuthority(owner: owner, accounts: [account, destination])
-            let sourceMangaEntries = await resolveMALMangaEntriesToAniList(fetchedSourceMangaEntries)
-            try await validateSyncToolAuthority(owner: owner, accounts: [account, destination])
-            let destinationAnime = try await fetchAniListAnimeProgressEntries(account: destination)
-            try await validateSyncToolAuthority(owner: owner, accounts: [account, destination])
-            let destinationManga = try await fetchAniListMangaProgressEntries(account: destination)
+            let sourceMangaEntries = try await resolveMALMangaEntriesToAniList(fetchedSourceMangaEntries)
             try await validateSyncToolAuthority(owner: owner, accounts: [account, destination])
             let destinationAnimeByAniList = remoteAnimeByAniListId(destinationAnime)
             let destinationMangaByAniList = remoteMangaByAniListId(destinationManga)
@@ -11996,6 +12163,7 @@ final class TrackerManager: NSObject, ObservableObject {
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [account, destination],
                 preview: preview,
                 animeEntries: animeEntries,
@@ -12005,14 +12173,14 @@ final class TrackerManager: NSObject, ObservableObject {
     }
 
     private func performSyncTool(_ plan: TrackerSyncToolPlan) async throws -> TrackerSyncPreview {
-        let operationGeneration = trackerOperationGenerationSnapshot()
+        let operationGeneration = plan.operationGeneration
         try await validateSyncToolPlan(plan)
         let action = plan.action
         switch action {
         case .fillEclipseFromAniList:
             _ = try connectedAccount(.anilist)
             await updateSyncToolProgress(detail: "Filling Eclipse anime from AniList...")
-            let animeResult = try await fillEclipseFromRemoteAnime(plan.animeEntries, sourceName: "AniList", action: action, owner: plan.owner)
+            let animeResult = try await fillEclipseFromRemoteAnime(plan.animeEntries, sourceName: "AniList", action: action, owner: plan.owner, requiredOperationGeneration: plan.operationGeneration)
             try await advanceSyncToolProgress(by: plan.animeEntries.count, detail: "Finished AniList anime fill")
             await updateSyncToolProgress(detail: "Filling Eclipse manga from AniList...")
             let mangaResult = try await fillEclipseFromRemoteManga(plan.mangaEntries, sourceName: "AniList", action: action, owner: plan.owner, requiredOperationGeneration: operationGeneration)
@@ -12025,7 +12193,7 @@ final class TrackerManager: NSObject, ObservableObject {
         case .fillEclipseFromMAL:
             _ = try connectedAccount(.myAnimeList)
             await updateSyncToolProgress(detail: "Filling Eclipse anime from MAL...")
-            let animeResult = try await fillEclipseFromRemoteAnime(plan.animeEntries, sourceName: "MAL", action: action, owner: plan.owner)
+            let animeResult = try await fillEclipseFromRemoteAnime(plan.animeEntries, sourceName: "MAL", action: action, owner: plan.owner, requiredOperationGeneration: plan.operationGeneration)
             try await advanceSyncToolProgress(by: plan.animeEntries.count, detail: "Finished MAL anime fill")
             await updateSyncToolProgress(detail: "Filling Eclipse manga from MAL...")
             let mangaResult = try await fillEclipseFromRemoteManga(plan.mangaEntries, sourceName: "MAL", action: action, owner: plan.owner, requiredOperationGeneration: operationGeneration)
@@ -12319,11 +12487,18 @@ final class TrackerManager: NSObject, ObservableObject {
         }
     }
 #else
+    @MainActor
     func previewSyncTool(_ action: TrackerSyncToolAction) {
         guard !isRunningSyncTool else { return }
+        let invocationOwner = activeProfileID
+        let invocationGeneration = trackerOperationGenerationSnapshot()
+        let taskID = UUID()
+        syncToolTaskID = taskID
+        isRunningSyncTool = true
 
-        Task {
+        let task = Task {
             await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                 self.isRunningSyncTool = true
                 self.syncToolStatus = "Building preview..."
                 self.syncToolPreview = nil
@@ -12334,10 +12509,13 @@ final class TrackerManager: NSObject, ObservableObject {
             }
 
             do {
-                let plan = try await buildTVSyncToolPlan(for: action)
+                try Task.checkCancellation()
+                try self.requireOwner(invocationOwner, operationGeneration: invocationGeneration)
+                let plan = try await buildTVSyncToolPlan(for: action, owner: invocationOwner, operationGeneration: invocationGeneration)
                 try await validateSyncToolPlan(plan)
                 try await MainActor.run {
-                    try self.requireOwner(plan.owner)
+                    guard self.syncToolTaskID == taskID else { return }
+                    try self.requireOwner(plan.owner, operationGeneration: plan.operationGeneration)
                     self.cachedSyncToolPlan = plan
                     self.syncToolPreview = plan.preview
                     self.syncToolStatus = "Preview ready"
@@ -12345,18 +12523,27 @@ final class TrackerManager: NSObject, ObservableObject {
                 }
             } catch {
                 await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                     self.syncToolStatus = "Preview failed: \(error.localizedDescription)"
                     self.isRunningSyncTool = false
                 }
             }
         }
+        syncToolTask = task
     }
 
+    @MainActor
     func runSyncTool(_ action: TrackerSyncToolAction) {
         guard !isRunningSyncTool else { return }
+        let invocationOwner = activeProfileID
+        let invocationGeneration = trackerOperationGenerationSnapshot()
+        let taskID = UUID()
+        syncToolTaskID = taskID
+        isRunningSyncTool = true
 
         let task = Task {
             await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                 self.isRunningSyncTool = true
                 self.syncToolStatus = "Running \(action.title)..."
                 self.syncToolProgressCompleted = 0
@@ -12365,6 +12552,8 @@ final class TrackerManager: NSObject, ObservableObject {
             }
 
             do {
+                try Task.checkCancellation()
+                try self.requireOwner(invocationOwner, operationGeneration: invocationGeneration)
                 let plan: TrackerSyncToolPlan
                 if let cachedSyncToolPlan,
                    cachedSyncToolPlan.action == action,
@@ -12372,12 +12561,13 @@ final class TrackerManager: NSObject, ObservableObject {
                     try await validateSyncToolPlan(cachedSyncToolPlan)
                     plan = cachedSyncToolPlan
                 } else {
-                    plan = try await buildTVSyncToolPlan(for: action)
+                    plan = try await buildTVSyncToolPlan(for: action, owner: invocationOwner, operationGeneration: invocationGeneration)
                     try await validateSyncToolPlan(plan)
                     cachedSyncToolPlan = plan
                 }
                 let total = tvSyncToolOperationCount(for: plan)
                 await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                     self.syncToolProgressCompleted = 0
                     self.syncToolProgressTotal = total
                     self.syncToolProgressDetail = total > 0 ? "0 of \(total) operations complete" : "No write operations needed"
@@ -12385,7 +12575,8 @@ final class TrackerManager: NSObject, ObservableObject {
                 }
                 let result = try await performTVSyncTool(plan)
                 try await MainActor.run {
-                    try self.requireOwner(plan.owner)
+                    guard self.syncToolTaskID == taskID else { return }
+                    try self.requireOwner(plan.owner, operationGeneration: plan.operationGeneration)
                     self.cachedSyncToolPlan = nil
                     self.syncToolPreview = result
                     self.syncToolStatus = "Finished \(action.title)"
@@ -12397,6 +12588,7 @@ final class TrackerManager: NSObject, ObservableObject {
                 }
             } catch is CancellationError {
                 await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                     self.syncToolStatus = "Canceled \(action.title)"
                     self.syncToolProgressDetail = "Canceled"
                     self.syncToolIsLocked = false
@@ -12405,6 +12597,7 @@ final class TrackerManager: NSObject, ObservableObject {
                 }
             } catch {
                 await MainActor.run {
+                guard self.syncToolTaskID == taskID else { return }
                     self.syncToolStatus = "Sync failed: \(error.localizedDescription)"
                     self.syncToolProgressDetail = nil
                     self.syncToolIsLocked = false
@@ -12416,12 +12609,12 @@ final class TrackerManager: NSObject, ObservableObject {
         syncToolTask = task
     }
 
+    @MainActor
     func cancelSyncTool() {
+        guard isRunningSyncTool else { return }
         syncToolTask?.cancel()
-        Task { @MainActor in
-            self.syncToolStatus = "Canceling sync..."
-            self.syncToolProgressDetail = "Stopping after the current request..."
-        }
+        syncToolStatus = "Canceling sync..."
+        syncToolProgressDetail = "Stopping after the current request..."
     }
 
     private func tvSyncToolOperationCount(for plan: TrackerSyncToolPlan) -> Int {
@@ -12451,17 +12644,23 @@ final class TrackerManager: NSObject, ObservableObject {
         }
     }
 
-    private func buildTVSyncToolPlan(for action: TrackerSyncToolAction) async throws -> TrackerSyncToolPlan {
-        let owner = ProfileManager.shared.activeProfileID
-        try requireOwner(owner)
+    private func buildTVSyncToolPlan(
+        for action: TrackerSyncToolAction,
+        owner: UUID,
+        operationGeneration: UInt64
+    ) async throws -> TrackerSyncToolPlan {
+        try Task.checkCancellation()
+        try requireOwner(owner, operationGeneration: operationGeneration)
         switch action {
         case .fillEclipseFromAniList:
             let account = try connectedAccount(.anilist)
-            let entries = try await fetchAniListAnimeProgressEntries(account: account)
+            let accountAuthority = operationAuthority(for: account, owner: owner, operationGeneration: operationGeneration)
+            let entries = try await fetchAniListAnimeProgressEntries(account: account, requiredAuthority: accountAuthority)
             try await validateSyncToolAuthority(owner: owner, accounts: [account])
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [account],
                 preview: tvRemoteFillPreview(action: action, entries: entries, sourceName: "AniList"),
                 animeEntries: entries
@@ -12469,13 +12668,15 @@ final class TrackerManager: NSObject, ObservableObject {
 
         case .fillEclipseFromMAL:
             let account = try connectedAccount(.myAnimeList)
-            let fetchedEntries = try await fetchMALAnimeProgressEntries(account: account)
+            let accountAuthority = operationAuthority(for: account, owner: owner, operationGeneration: operationGeneration)
+            let fetchedEntries = try await fetchMALAnimeProgressEntries(account: account, requiredAuthority: accountAuthority)
             try await validateSyncToolAuthority(owner: owner, accounts: [account])
-            let entries = await resolveMALAnimeEntriesToAniList(fetchedEntries)
+            let entries = try await resolveMALAnimeEntriesToAniList(fetchedEntries)
             try await validateSyncToolAuthority(owner: owner, accounts: [account])
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [account],
                 preview: tvRemoteFillPreview(action: action, entries: entries, sourceName: "MAL"),
                 animeEntries: entries
@@ -12487,6 +12688,7 @@ final class TrackerManager: NSObject, ObservableObject {
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [account],
                 preview: TrackerSyncPreview(
                     action: action,
@@ -12505,6 +12707,7 @@ final class TrackerManager: NSObject, ObservableObject {
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [account],
                 preview: TrackerSyncPreview(
                     action: action,
@@ -12520,9 +12723,11 @@ final class TrackerManager: NSObject, ObservableObject {
         case .portAniListToMAL:
             let source = try connectedAccount(.anilist)
             let destination = try connectedAccount(.myAnimeList)
-            let sourceEntries = try await fetchAniListAnimeProgressEntries(account: source)
-            try await validateSyncToolAuthority(owner: owner, accounts: [source, destination])
-            let destinationEntries = try await fetchMALAnimeProgressEntries(account: destination)
+            let sourceAuthority = operationAuthority(for: source, owner: owner, operationGeneration: operationGeneration)
+            let destinationAuthority = operationAuthority(for: destination, owner: owner, operationGeneration: operationGeneration)
+            async let sourceTask = fetchAniListAnimeProgressEntries(account: source, requiredAuthority: sourceAuthority)
+            async let destinationTask = fetchMALAnimeProgressEntries(account: destination, requiredAuthority: destinationAuthority)
+            let (sourceEntries, destinationEntries) = try await (sourceTask, destinationTask)
             try await validateSyncToolAuthority(owner: owner, accounts: [source, destination])
             let destinationByMAL = tvRemoteAnimeByMALId(destinationEntries)
             let entries = sourceEntries.filter { entry in
@@ -12537,6 +12742,7 @@ final class TrackerManager: NSObject, ObservableObject {
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [source, destination],
                 preview: TrackerSyncPreview(
                     action: action,
@@ -12555,11 +12761,13 @@ final class TrackerManager: NSObject, ObservableObject {
         case .portMALToAniList:
             let source = try connectedAccount(.myAnimeList)
             let destination = try connectedAccount(.anilist)
-            let fetchedSourceEntries = try await fetchMALAnimeProgressEntries(account: source)
+            let sourceAuthority = operationAuthority(for: source, owner: owner, operationGeneration: operationGeneration)
+            let destinationAuthority = operationAuthority(for: destination, owner: owner, operationGeneration: operationGeneration)
+            async let sourceTask = fetchMALAnimeProgressEntries(account: source, requiredAuthority: sourceAuthority)
+            async let destinationTask = fetchAniListAnimeProgressEntries(account: destination, requiredAuthority: destinationAuthority)
+            let (fetchedSourceEntries, destinationEntries) = try await (sourceTask, destinationTask)
             try await validateSyncToolAuthority(owner: owner, accounts: [source, destination])
-            let sourceEntries = await resolveMALAnimeEntriesToAniList(fetchedSourceEntries)
-            try await validateSyncToolAuthority(owner: owner, accounts: [source, destination])
-            let destinationEntries = try await fetchAniListAnimeProgressEntries(account: destination)
+            let sourceEntries = try await resolveMALAnimeEntriesToAniList(fetchedSourceEntries)
             try await validateSyncToolAuthority(owner: owner, accounts: [source, destination])
             let destinationByAniList = tvRemoteAnimeByAniListId(destinationEntries)
             let entries = sourceEntries.filter { entry in
@@ -12574,6 +12782,7 @@ final class TrackerManager: NSObject, ObservableObject {
             return try await finalizedSyncToolPlan(TrackerSyncToolPlan(
                 action: action,
                 owner: owner,
+                operationGeneration: operationGeneration,
                 accountSnapshots: [source, destination],
                 preview: TrackerSyncPreview(
                     action: action,
@@ -12599,14 +12808,14 @@ final class TrackerManager: NSObject, ObservableObject {
         case .fillEclipseFromAniList:
             _ = try connectedAccount(.anilist)
             await updateSyncToolProgress(detail: "Filling Eclipse anime from AniList...")
-            let result = try await fillEclipseFromRemoteAnime(plan.animeEntries, sourceName: "AniList", action: action, owner: plan.owner)
+            let result = try await fillEclipseFromRemoteAnime(plan.animeEntries, sourceName: "AniList", action: action, owner: plan.owner, requiredOperationGeneration: plan.operationGeneration)
             try await advanceSyncToolProgress(by: plan.animeEntries.count, detail: "Finished AniList anime fill")
             return try await finalizedSyncToolResult(result, plan: plan)
 
         case .fillEclipseFromMAL:
             _ = try connectedAccount(.myAnimeList)
             await updateSyncToolProgress(detail: "Filling Eclipse anime from MAL...")
-            let result = try await fillEclipseFromRemoteAnime(plan.animeEntries, sourceName: "MAL", action: action, owner: plan.owner)
+            let result = try await fillEclipseFromRemoteAnime(plan.animeEntries, sourceName: "MAL", action: action, owner: plan.owner, requiredOperationGeneration: plan.operationGeneration)
             try await advanceSyncToolProgress(by: plan.animeEntries.count, detail: "Finished MAL anime fill")
             return try await finalizedSyncToolResult(result, plan: plan)
 
@@ -12805,10 +13014,7 @@ final class TrackerManager: NSObject, ObservableObject {
                             status
                             progress
                             media {
-                                id
-                                idMal
-                                title { romaji english native }
-                                episodes
+                                \(AniListImportMetadata.fields)
                             }
                         }
                     }
@@ -12816,32 +13022,21 @@ final class TrackerManager: NSObject, ObservableObject {
             }
             """
 
-            struct Response: Codable {
+            struct Response: Decodable {
                 let data: DataWrapper?
-                struct DataWrapper: Codable { let MediaListCollection: CollectionData? }
-                struct CollectionData: Codable {
+                struct DataWrapper: Decodable { let MediaListCollection: CollectionData? }
+                struct CollectionData: Decodable {
                     let hasNextChunk: Bool
                     let lists: [MediaListGroup]
                 }
-                struct MediaListGroup: Codable {
+                struct MediaListGroup: Decodable {
                     let status: String?
                     let entries: [MediaList]
                 }
-                struct MediaList: Codable {
+                struct MediaList: Decodable {
                     let status: String?
                     let progress: Int?
-                    let media: Media?
-                }
-                struct Media: Codable {
-                    let id: Int
-                    let idMal: Int?
-                    let title: Title
-                    let episodes: Int?
-                }
-                struct Title: Codable {
-                    let romaji: String?
-                    let english: String?
-                    let native: String?
+                    let media: TrackerAniListImportMedia?
                 }
             }
 
@@ -12901,7 +13096,8 @@ final class TrackerManager: NSObject, ObservableObject {
                         title: media.title.english ?? media.title.romaji ?? media.title.native ?? "Unknown",
                         status: item.status ?? group.status ?? "CURRENT",
                         progress: item.progress ?? 0,
-                        totalEpisodes: media.episodes
+                        totalEpisodes: media.episodes,
+                        importMetadata: media.importMetadata
                     ) else {
                         throw NSError(domain: "AniList", code: -4, userInfo: [NSLocalizedDescriptionKey: "AniList anime list contained unsupported numeric values."])
                     }
@@ -13038,9 +13234,9 @@ final class TrackerManager: NSObject, ObservableObject {
         return entries
     }
 
-    private func resolveMALAnimeEntriesToAniList(_ entries: [RemoteAnimeProgress]) async -> [RemoteAnimeProgress] {
+    private func resolveMALAnimeEntriesToAniList(_ entries: [RemoteAnimeProgress]) async throws -> [RemoteAnimeProgress] {
         let malIds = entries.compactMap(\.malId)
-        let resolvedIds = await resolveAniListIds(fromMALIds: malIds, mediaType: "ANIME")
+        let resolvedIds = try await resolveAniListIds(fromMALIds: malIds, mediaType: "ANIME")
 
         return entries.map { entry in
             RemoteAnimeProgress(
@@ -13310,9 +13506,9 @@ final class TrackerManager: NSObject, ObservableObject {
         return entries
     }
 
-    private func resolveMALMangaEntriesToAniList(_ entries: [RemoteMangaProgress]) async -> [RemoteMangaProgress] {
+    private func resolveMALMangaEntriesToAniList(_ entries: [RemoteMangaProgress]) async throws -> [RemoteMangaProgress] {
         let malIds = entries.compactMap(\.malId)
-        let resolvedIds = await resolveAniListIds(fromMALIds: malIds, mediaType: "MANGA")
+        let resolvedIds = try await resolveAniListIds(fromMALIds: malIds, mediaType: "MANGA")
 
         return entries.map { entry in
             RemoteMangaProgress(
@@ -13327,24 +13523,24 @@ final class TrackerManager: NSObject, ObservableObject {
     }
 #endif
 
-    private func resolveAniListIds(fromMALIds malIds: [Int], mediaType: String) async -> [Int: Int] {
-        let uniqueIds = Array(Set(malIds))
+    private func resolveAniListIds(fromMALIds malIds: [Int], mediaType: String) async throws -> [Int: Int] {
+        try Task.checkCancellation()
+        let uniqueIds = Array(Set(malIds.filter { RemoteMediaNumericBoundary.positiveIdentifier($0) != nil })).sorted()
         guard !uniqueIds.isEmpty else { return [:] }
 
-        var result: [Int: Int] = [:]
-        let cached = cachedAniListIds(fromMALIds: uniqueIds, mediaType: mediaType)
-        result.merge(cached) { current, _ in current }
-
-        let missing = uniqueIds.filter { cached[$0] == nil }
+        var result = cachedAniListIds(fromMALIds: uniqueIds, mediaType: mediaType)
+        let missing = uniqueIds.filter { result[$0] == nil }
         for chunk in chunked(missing, size: 50) {
+            try Task.checkCancellation()
             let fetched = await fetchAniListIdsByMALIds(chunk, mediaType: mediaType)
-            result.merge(fetched) { current, _ in current }
-            for (malId, anilistId) in fetched {
+            try Task.checkCancellation()
+            result.merge(fetched.idsByMAL) { current, _ in current }
+            for (malId, anilistId) in fetched.idsByMAL {
                 cacheAniListId(anilistId, forMALId: malId, mediaType: mediaType)
             }
 
-            let unresolved = chunk.filter { fetched[$0] == nil }
-            for malId in unresolved {
+            for malId in fetched.fallbackIDs(requested: chunk) {
+                try Task.checkCancellation()
                 if let anilistId = await getAniListId(fromMALId: malId, mediaType: mediaType) {
                     result[malId] = anilistId
                     cacheAniListId(anilistId, forMALId: malId, mediaType: mediaType)
@@ -13355,49 +13551,55 @@ final class TrackerManager: NSObject, ObservableObject {
         return result
     }
 
-    private func fetchAniListIdsByMALIds(_ malIds: [Int], mediaType: String) async -> [Int: Int] {
-        guard !malIds.isEmpty else { return [:] }
+    private func fetchAniListIdsByMALIds(_ malIds: [Int], mediaType: String) async -> TrackerAniListIDBatchResult {
+        guard !malIds.isEmpty else {
+            return TrackerAniListIDBatchResult(idsByMAL: [:], isComplete: true)
+        }
+        let requestedIDs = Set(malIds)
         let idList = malIds.map(String.init).joined(separator: ", ")
-        let query = """
-        query {
-            Page(perPage: \(malIds.count)) {
-                media(type: \(mediaType), idMal_in: [\(idList)]) {
-                    id
-                    idMal
-                }
-            }
-        }
-        """
-
-        struct Response: Codable {
-            let data: DataWrapper
-            struct DataWrapper: Codable { let Page: PageData }
-            struct PageData: Codable { let media: [Media] }
-            struct Media: Codable {
-                let id: Int
-                let idMal: Int?
-            }
-        }
+        var idsByMAL: [Int: Int] = [:]
+        var page = 1
+        var seenMediaIDs = Set<Int>()
 
         do {
-            var request = URLRequest(url: URL(string: "https://graphql.anilist.co")!)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["query": query])
-
-            let (data, response) = try await sendTrackerRequest(request, provider: .anilist)
-            guard response.statusCode == 200 else { return [:] }
-
-            let decoded = try JSONDecoder().decode(Response.self, from: data)
-            return decoded.data.Page.media.reduce(into: [Int: Int]()) { result, media in
-                if let malId = media.idMal {
-                    result[malId] = media.id
+            while page <= TrackerRemoteProgressBoundary.maximumPageCount {
+                try Task.checkCancellation()
+                let query = """
+                query {
+                    Page(page: \(page), perPage: 50) {
+                        pageInfo { hasNextPage }
+                        media(type: \(mediaType), idMal_in: [\(idList)], sort: ID) {
+                            id
+                            idMal
+                        }
+                    }
                 }
+                """
+                guard let url = URL(string: "https://graphql.anilist.co") else {
+                    throw URLError(.badURL)
+                }
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONSerialization.data(withJSONObject: ["query": query])
+
+                let (data, response) = try await sendTrackerRequest(request, provider: .anilist)
+                guard response.statusCode == 200 else { throw URLError(.badServerResponse) }
+                let decoded = try TrackerAniListIDBatchPage.decode(data, requestedIDs: requestedIDs)
+                let pageIDs = Set(decoded.idsByMAL.values)
+                let hasNewIDs = !pageIDs.subtracting(seenMediaIDs).isEmpty
+                seenMediaIDs.formUnion(pageIDs)
+                idsByMAL.merge(decoded.idsByMAL) { _, new in new }
+                if !decoded.hasNextPage {
+                    return TrackerAniListIDBatchResult(idsByMAL: idsByMAL, isComplete: true)
+                }
+                guard hasNewIDs else { throw URLError(.cannotParseResponse) }
+                page += 1
             }
         } catch {
             Logger.shared.log("Batch AniList idMal lookup failed for \(malIds.count) \(mediaType) entries: \(error.localizedDescription)", type: "Tracker")
-            return [:]
         }
+        return TrackerAniListIDBatchResult(idsByMAL: idsByMAL, isComplete: false)
     }
 
     private func cachedAniListIds(fromMALIds malIds: [Int], mediaType: String) -> [Int: Int] {
@@ -13468,13 +13670,18 @@ final class TrackerManager: NSObject, ObservableObject {
         owner: UUID,
         requiredOperationGeneration: UInt64? = nil
     ) async throws -> TrackerSyncPreview {
+        let operationGeneration = requiredOperationGeneration ?? trackerOperationGenerationSnapshot()
         try Task.checkCancellation()
         let anilistIds = entries.compactMap { $0.anilistId }
-        let tmdbMap = await AniListService.shared.mapAniListAnimeIdsToTMDBForImport(anilistIds, tmdbService: TMDBService.shared)
+        let tmdbMap = await AniListService.shared.mapAniListAnimeIdsToTMDBForImport(
+            anilistIds,
+            prefetched: entries.compactMap(\.importMetadata),
+            tmdbService: TMDBService.shared
+        )
         try Task.checkCancellation()
 
         let counts = try await MainActor.run { () throws -> (added: Int, advanced: Int, unmapped: Int) in
-            try self.requireOwner(owner, operationGeneration: requiredOperationGeneration)
+            try self.requireOwner(owner, operationGeneration: operationGeneration)
             let library = LibraryManager.shared
             var added = 0
             var advanced = 0
@@ -13537,6 +13744,7 @@ final class TrackerManager: NSObject, ObservableObject {
         owner: UUID,
         requiredOperationGeneration: UInt64? = nil
     ) async throws -> TrackerSyncPreview {
+        let operationGeneration = requiredOperationGeneration ?? trackerOperationGenerationSnapshot()
         try Task.checkCancellation()
         let anilistIds = entries.compactMap { $0.anilistId }
         let aniMapMatches = await AniListService.shared.mapAniListAnimeIdsToTMDBViaAniMapForMALImport(
@@ -13551,7 +13759,7 @@ final class TrackerManager: NSObject, ObservableObject {
         try Task.checkCancellation()
 
         let counts = try await MainActor.run { () throws -> (added: Int, advanced: Int, unmapped: Int, aniMapMapped: Int, fallbackMapped: Int) in
-            try self.requireOwner(owner, operationGeneration: requiredOperationGeneration)
+            try self.requireOwner(owner, operationGeneration: operationGeneration)
             let library = LibraryManager.shared
             var added = 0
             var advanced = 0
@@ -14134,6 +14342,12 @@ final class TrackerManager: NSObject, ObservableObject {
             }
 
             do {
+#if !os(tvOS)
+                async let mangaEntriesTask = fetchAniListMangaProgressEntries(
+                    account: account,
+                    requiredAuthority: authority
+                )
+#endif
                 let animeEntries = try await fetchAniListAnimeProgressEntries(
                     account: account,
                     requiredAuthority: authority
@@ -14165,10 +14379,7 @@ final class TrackerManager: NSObject, ObservableObject {
                     Logger.shared.log("AniList anime import completed: \(imported) local changes from \(animeEntries.count) entries", type: "Tracker")
                 }
 #else
-                let mangaEntries = try await fetchAniListMangaProgressEntries(
-                    account: account,
-                    requiredAuthority: authority
-                )
+                let mangaEntries = try await mangaEntriesTask
 
                 await MainActor.run {
                     aniListImportProgress = "Adding items to Eclipse..."
@@ -14245,6 +14456,12 @@ final class TrackerManager: NSObject, ObservableObject {
                     requiredAuthority: authority
                 )
                 let requestAuthority = authority.replacingCredential(with: refreshedAccount)
+#if !os(tvOS)
+                async let fetchedMangaEntriesTask = fetchMALMangaProgressEntries(
+                    account: refreshedAccount,
+                    requiredAuthority: requestAuthority
+                )
+#endif
                 let fetchedAnimeEntries = try await fetchMALAnimeProgressEntries(
                     account: refreshedAccount,
                     requiredAuthority: requestAuthority
@@ -14254,7 +14471,7 @@ final class TrackerManager: NSObject, ObservableObject {
                     malImportProgress = "Matching MAL anime to app collections..."
                 }
 
-                let animeEntries = await resolveMALAnimeEntriesToAniList(fetchedAnimeEntries)
+                let animeEntries = try await resolveMALAnimeEntriesToAniList(fetchedAnimeEntries)
                 let mappedAnimeCount = animeEntries.filter { $0.anilistId != nil }.count
 
                 await MainActor.run {
@@ -14282,17 +14499,14 @@ final class TrackerManager: NSObject, ObservableObject {
                     Logger.shared.log("MAL anime import completed: \(imported) local changes from \(animeEntries.count) entries", type: "Tracker")
                 }
 #else
-                let fetchedMangaEntries = try await fetchMALMangaProgressEntries(
-                    account: refreshedAccount,
-                    requiredAuthority: requestAuthority
-                )
+                let fetchedMangaEntries = try await fetchedMangaEntriesTask
 
                 await MainActor.run {
                     malImportProgress = "Matching MAL entries to app collections..."
                 }
 
-                let animeEntries = await resolveMALAnimeEntriesToAniList(fetchedAnimeEntries)
-                let mangaEntries = await resolveMALMangaEntriesToAniList(fetchedMangaEntries)
+                let animeEntries = try await resolveMALAnimeEntriesToAniList(fetchedAnimeEntries)
+                let mangaEntries = try await resolveMALMangaEntriesToAniList(fetchedMangaEntries)
                 let mappedAnimeCount = animeEntries.filter { $0.anilistId != nil }.count
                 let mappedMangaCount = mangaEntries.filter { $0.anilistId != nil }.count
 
@@ -14522,17 +14736,28 @@ final class TrackerManager: NSObject, ObservableObject {
                     traktImportProgress = "Matching \(showIds.count) shows and \(movieIds.count) movies to TMDB..."
                 }
 
-                var mappedShows: [Int: TMDBSearchResult] = [:]
-                for tmdbId in showIds {
-                    if let detail = try? await TMDBService.shared.getTVShowDetails(id: tmdbId) {
-                        mappedShows[tmdbId] = Self.tmdbSearchResult(from: detail)
+                let lookupItems = showIds.map { (id: $0, isMovie: false) }
+                    + movieIds.map { (id: $0, isMovie: true) }
+                let matches = try await TrackerImportWork.map(lookupItems) { item -> (Int, Bool, TMDBSearchResult?) in
+                    guard await self.operationAuthorityIsCurrent(requestAuthority) else {
+                        throw CancellationError()
                     }
+                    let result: TMDBSearchResult?
+                    if item.isMovie {
+                        result = try? await Self.tmdbSearchResult(from: TMDBService.shared.getMovieDetails(id: item.id))
+                    } else {
+                        result = try? await Self.tmdbSearchResult(from: TMDBService.shared.getTVShowDetails(id: item.id))
+                    }
+                    try Task.checkCancellation()
+                    return (item.id, item.isMovie, result)
                 }
-
+                var mappedShows: [Int: TMDBSearchResult] = [:]
                 var mappedMovies: [Int: TMDBSearchResult] = [:]
-                for tmdbId in movieIds {
-                    if let detail = try? await TMDBService.shared.getMovieDetails(id: tmdbId) {
-                        mappedMovies[tmdbId] = Self.tmdbSearchResult(from: detail)
+                for (id, isMovie, result) in matches {
+                    if isMovie {
+                        mappedMovies[id] = result
+                    } else {
+                        mappedShows[id] = result
                     }
                 }
 

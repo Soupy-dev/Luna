@@ -3,7 +3,11 @@ import AVKit
 import Kingfisher
 
 struct DownloadsView: View {
-    @StateObject private var downloadManager = DownloadManager.shared
+    @StateObject private var downloadManager: DownloadManager
+
+    init(downloadManager: DownloadManager = .shared) {
+        _downloadManager = StateObject(wrappedValue: downloadManager)
+    }
     @StateObject private var progressManager = ProgressManager.shared
 
     @ObservedObject private var contentFilter = TMDBContentFilter.shared
@@ -226,7 +230,7 @@ struct DownloadsView: View {
                                 }
                             }
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                if item.status == .downloading {
+                                if item.status == .downloading || item.status == .queued {
                                     Button {
                                         downloadManager.pauseDownload(id: item.id)
                                     } label: {
@@ -355,7 +359,7 @@ struct DownloadsView: View {
         .padding(12)
         .glassCard(cornerRadius: 16)
         .contextMenu {
-            if item.status == .downloading {
+            if item.status == .downloading || item.status == .queued {
                 Button(action: { downloadManager.pauseDownload(id: item.id) }) {
                     Label("Pause", systemImage: "pause.circle")
                 }
@@ -376,7 +380,7 @@ struct DownloadsView: View {
 
             Button(action: {
                 switch item.status {
-                case .downloading:
+                case .downloading, .queued:
                     downloadManager.pauseDownload(id: item.id)
                 case .paused:
                     downloadManager.resumeDownload(id: item.id)
@@ -391,7 +395,7 @@ struct DownloadsView: View {
             }
 
             .buttonStyle(.borderless)
-            .disabled(item.status == .queued)
+            .accessibilityLabel(item.status == .paused ? "Resume download" : "Pause download")
 
             Button(action: {
                 downloadManager.cancelDownload(id: item.id)
@@ -402,6 +406,7 @@ struct DownloadsView: View {
                     .frame(width: 32, height: 32)
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("Cancel download")
         }
     }
 
@@ -409,7 +414,7 @@ struct DownloadsView: View {
         switch status {
         case .downloading: return "pause.circle.fill"
         case .paused: return "play.circle.fill"
-        case .queued: return "xmark.circle"
+        case .queued: return "pause.circle.fill"
         default: return "circle"
         }
     }

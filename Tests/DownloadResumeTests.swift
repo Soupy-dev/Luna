@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import XCTest
 @testable import Eclipse
 
@@ -86,6 +87,159 @@ final class DownloadResumeTests: XCTestCase {
                      episodePlaybackContext: episodeContext(episode: episode), status: .completed,
                      progress: 1, totalBytes: 100, downloadedBytes: 100, localFileName: "\(id).mkv",
                      subtitleFileName: nil, error: nil, dateAdded: Date(), dateCompleted: Date(), isAnime: false)
+    }
+
+    @MainActor
+    func testBackgroundReturnDiscardsOldRefreshWithoutBlockingTheNewAttempt() async throws {
+        let fixture = try DownloadLifecycleFixture()
+        defer { fixture.cleanUp() }
+        let started = expectation(description: "Initial transfer starts")
+        fixture.onStart = { _ in started.fulfill() }
+        fixture.manager.applicationDidBecomeActive()
+        await fulfillment(of: [started], timeout: 3)
+
+        fixture.isActive = false
+        fixture.manager.applicationDidEnterBackground()
+        XCTAssertEqual(fixture.manager.downloads.first?.status, .queued)
+        XCTAssertEqual(fixture.manager.downloads.first?.streamURL, "")
+
+        let firstRefresh = expectation(description: "First foreground refresh")
+        fixture.onRefresh = { firstRefresh.fulfill() }
+        fixture.isActive = true
+        fixture.manager.applicationDidBecomeActive()
+        await fulfillment(of: [firstRefresh], timeout: 3)
+
+        fixture.isActive = false
+        fixture.manager.applicationDidEnterBackground()
+        let secondRefresh = expectation(description: "Fresh foreground operation")
+        fixture.onRefresh = { secondRefresh.fulfill() }
+        fixture.isActive = true
+        fixture.manager.applicationDidBecomeActive()
+        await fulfillment(of: [secondRefresh], timeout: 3)
+
+        fixture.resolve(0, url: "https://cdn.example/old.mp4")
+        await fixture.settle()
+        fixture.manager.applicationDidBecomeActive()
+        await fixture.settle()
+        XCTAssertEqual(fixture.requestCount, 2)
+        XCTAssertEqual(fixture.startedURLs.count, 1)
+        XCTAssertEqual(fixture.manager.downloads.first?.status, .queued)
+        XCTAssertEqual(fixture.manager.downloads.first?.error, "Refreshing protected download access")
+
+        let resumed = expectation(description: "Current refresh resumes transfer")
+        fixture.onStart = { _ in resumed.fulfill() }
+        fixture.resolve(1, url: "https://cdn.example/current.mp4")
+        await fulfillment(of: [resumed], timeout: 3)
+        XCTAssertEqual(fixture.startedURLs.last, "https://cdn.example/current.mp4")
+        XCTAssertEqual(fixture.manager.downloads.first?.status, .downloading)
+    }
+
+    @MainActor
+    func testCancelDuringRefreshAllowsSameEpisodeToBeEnqueuedAgain() async throws {
+        let fixture = try DownloadLifecycleFixture(needsRefresh: true)
+        defer { fixture.cleanUp() }
+        let refreshing = expectation(description: "Refreshing download")
+        fixture.onRefresh = { refreshing.fulfill() }
+        fixture.manager.applicationDidBecomeActive()
+        await fulfillment(of: [refreshing], timeout: 3)
+        let oldRevision = fixture.manager.availability.revision
+        fixture.manager.cancelDownload(id: fixture.item.id)
+        XCTAssertTrue(fixture.manager.downloads.isEmpty)
+        XCTAssertGreaterThan(fixture.manager.availability.revision, oldRevision)
+        XCTAssertNil(fixture.manager.activeEpisodeDownloadItem(
+            tmdbId: fixture.item.tmdbId, seasonNumber: 1, episodeNumber: 1, playbackContext: nil
+        ))
+
+        let replacementStarted = expectation(description: "Replacement download starts")
+        fixture.onStart = { _ in replacementStarted.fulfill() }
+        let outcome = fixture.manager.enqueueDownload(
+            tmdbId: fixture.item.tmdbId, isMovie: false, title: "Lifecycle fixture",
+            displayTitle: "Episode 1", posterURL: nil, seasonNumber: 1, episodeNumber: 1,
+            episodeName: nil, streamURL: "https://cdn.example/replacement.mp4", headers: [:],
+            subtitleURL: nil, serviceBaseURL: "https://animepahe.example",
+            lastSourceId: fixture.item.lastSourceId,
+            lastContentReference: fixture.item.lastContentReference, isAnime: true
+        )
+        guard case .enqueued = outcome else { return XCTFail("Cancelled episode was not admitted again") }
+        await fulfillment(of: [replacementStarted], timeout: 3)
+        fixture.resolve(0, url: "https://cdn.example/stale.mp4")
+        await fixture.settle()
+        XCTAssertEqual(fixture.startedURLs, ["https://cdn.example/replacement.mp4"])
+        XCTAssertEqual(fixture.manager.downloads.first?.status, .downloading)
+        XCTAssertEqual(fixture.manager.downloads.first?.streamURL, "https://cdn.example/replacement.mp4")
+    }
+
+    @MainActor
+    func testQueuedDownloadCanPauseAndResumeWhileAccessIsRefreshing() async throws {
+        let fixture = try DownloadLifecycleFixture(needsRefresh: true)
+        defer { fixture.cleanUp() }
+        let first = expectation(description: "Refresh begins")
+        fixture.onRefresh = { first.fulfill() }
+        fixture.manager.applicationDidBecomeActive()
+        await fulfillment(of: [first], timeout: 3)
+        fixture.manager.pauseDownload(id: fixture.item.id)
+        XCTAssertEqual(fixture.manager.downloads.first?.status, .paused)
+        fixture.resolve(0, url: "https://cdn.example/stale.mp4")
+        await fixture.settle()
+        XCTAssertEqual(fixture.manager.downloads.first?.status, .paused)
+        XCTAssertTrue(fixture.startedURLs.isEmpty)
+
+        let second = expectation(description: "Manual resume refreshes again")
+        fixture.onRefresh = { second.fulfill() }
+        fixture.manager.resumeDownload(id: fixture.item.id)
+        await fulfillment(of: [second], timeout: 3)
+        let resumed = expectation(description: "Resumed transfer starts")
+        fixture.onStart = { _ in resumed.fulfill() }
+        fixture.resolve(1, url: "https://cdn.example/resumed.mp4")
+        await fulfillment(of: [resumed], timeout: 3)
+    }
+
+    @MainActor
+    func testFailedForegroundRefreshOffersRetryInsteadOfAnEndlessQueue() async throws {
+        let fixture = try DownloadLifecycleFixture(needsRefresh: true)
+        defer { fixture.cleanUp() }
+        let refreshing = expectation(description: "Foreground refresh begins")
+        fixture.onRefresh = { refreshing.fulfill() }
+        fixture.manager.applicationDidBecomeActive()
+        await fulfillment(of: [refreshing], timeout: 3)
+        let failed = expectation(description: "Download becomes retryable")
+        let observation = fixture.manager.$downloads.map { $0.first?.status }.removeDuplicates().sink { status in
+            if status == .failed { failed.fulfill() }
+        }
+        fixture.resolve(0, url: nil)
+        await fulfillment(of: [failed], timeout: 3)
+        observation.cancel()
+        await fixture.settle()
+        XCTAssertNil(fixture.manager.downloads.first?.retryNotBefore)
+        XCTAssertEqual(fixture.manager.downloads.first?.error, "The provider could not refresh this download. Retry, or remove it and select the episode's source again.")
+
+        let retry = expectation(description: "Retry begins new resolution")
+        fixture.onRefresh = { retry.fulfill() }
+        fixture.manager.resumeDownload(id: fixture.item.id)
+        await fulfillment(of: [retry], timeout: 3)
+        let started = expectation(description: "Retry starts transfer")
+        fixture.onStart = { _ in started.fulfill() }
+        fixture.resolve(1, url: "https://cdn.example/retry.mp4")
+        await fulfillment(of: [started], timeout: 3)
+    }
+
+    func testDownloadAvailabilityPublishesStatusAndRemovalButNotByteProgress() {
+        let availability = DownloadAvailability()
+        var item = episodeDownload(id: "availability", episode: 1)
+        item.status = .downloading
+        availability.update(from: [], to: [item])
+        let initialRevision = availability.revision
+        var progressed = item
+        progressed.progress = 0.4
+        progressed.downloadedBytes = 40
+        availability.update(from: [item], to: [progressed])
+        XCTAssertEqual(availability.revision, initialRevision)
+        var paused = progressed
+        paused.status = .paused
+        availability.update(from: [progressed], to: [paused])
+        XCTAssertEqual(availability.revision, initialRevision + 1)
+        availability.update(from: [paused], to: [])
+        XCTAssertEqual(availability.revision, initialRevision + 2)
     }
 
     private let chunk = DirectDownloadResumePolicy.chunkBytes
@@ -462,4 +616,79 @@ private final class DownloadResumeURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+@MainActor
+private final class DownloadLifecycleFixture {
+    let root: URL
+    let item: DownloadItem
+    var isActive = true
+    var onStart: ((DownloadItem) -> Void)?
+    var onRefresh: (() -> Void)?
+    var startedURLs: [String] = []
+    var requestCount = 0
+    private var pending: [Int: CheckedContinuation<DownloadManager.RefreshedDownloadSource?, Never>] = [:]
+    private(set) lazy var manager = DownloadManager(
+        downloadsDirectory: root, initialDownloads: [item],
+        transportMayStart: { [weak self] in self?.isActive == true },
+        refreshSource: { [weak self] _ in
+            guard let self else { return nil }
+            return await withCheckedContinuation { continuation in
+                let index = self.requestCount
+                self.requestCount += 1
+                self.pending[index] = continuation
+                self.onRefresh?()
+            }
+        },
+        transferStarter: { [weak self] item in
+            self?.startedURLs.append(item.streamURL)
+            self?.onStart?(item)
+        }
+    )
+
+    init(needsRefresh: Bool = false) throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let sourceID = "service:download-lifecycle-fixture"
+        let tmdbID = 1_937_467_211
+        item = DownloadItem(
+            id: DownloadManager.downloadID(tmdbId: tmdbID, isMovie: false, seasonNumber: 1, episodeNumber: 1),
+            tmdbId: tmdbID, isMovie: false, title: "Lifecycle fixture", displayTitle: "Episode 1",
+            posterURL: nil, seasonNumber: 1, episodeNumber: 1, episodeName: nil,
+            streamURL: needsRefresh ? "" : "https://cdn.example/initial.mp4", headers: [:],
+            subtitleURL: nil, serviceBaseURL: "https://animepahe.example",
+            lastSourceId: sourceID,
+            lastContentReference: .service(sourceID: sourceID, href: "https://animepahe.example/episode"),
+            protectedProviderKind: .service, protectedTransportKind: .direct,
+            protectedOwnerProfileID: ProfileManager.shared.activeProfileID,
+            status: .queued, progress: 0, totalBytes: 0, downloadedBytes: 0,
+            localFileName: nil, subtitleFileName: nil, error: nil, dateAdded: Date(), dateCompleted: nil,
+            isAnime: true
+        )
+    }
+
+    func resolve(_ index: Int, url: String?) {
+        let source = url.flatMap(URL.init(string:)).map {
+            DownloadManager.RefreshedDownloadSource(
+                transport: .direct(url: $0, headers: [:], expectedContentLength: nil),
+                streamName: nil, subtitleURL: nil, subtitleHeaders: nil,
+                serviceContentHref: "https://animepahe.example/episode",
+                lastSourceId: "service:download-lifecycle-fixture",
+                lastContentReference: .service(sourceID: "service:download-lifecycle-fixture", href: "https://animepahe.example/episode")
+            )
+        }
+        pending.removeValue(forKey: index)?.resume(returning: source)
+    }
+
+    func settle() async {
+        for _ in 0..<10 { await Task.yield() }
+    }
+
+    func cleanUp() {
+        manager.cancelAllActive()
+        for continuation in pending.values { continuation.resume(returning: nil) }
+        pending.removeAll()
+        manager.finishIsolatedSession()
+        try? FileManager.default.removeItem(at: root)
+    }
 }

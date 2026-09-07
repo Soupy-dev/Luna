@@ -1368,26 +1368,12 @@ actor AniListRateLimiter {
                     deadline: deadline
                 )
             }
-            let reservedNextAvailableTime = slotTime.addingTimeInterval(minInterval)
-            nextAvailableTime = reservedNextAvailableTime
-
             let delay = slotTime.timeIntervalSince(now)
-            do {
-                if delay > 0.001 {
-                    try await Task.sleep(nanoseconds: Self.nanoseconds(for: delay))
-                }
-                try Task.checkCancellation()
-            } catch {
-
-                if nextAvailableTime == reservedNextAvailableTime {
-                    nextAvailableTime = max(Date(), slotTime)
-                }
-                throw error
-            }
-
-            if globalPauseUntil > Date() {
+            if delay > 0 {
+                try await Task.sleep(nanoseconds: Self.nanoseconds(for: delay))
                 continue
             }
+            nextAvailableTime = slotTime.addingTimeInterval(minInterval)
             return
         }
     }
@@ -1396,6 +1382,9 @@ actor AniListRateLimiter {
         if let interval = Self.boundedRateLimitInterval(
             response.value(forHTTPHeaderField: "X-RateLimit-Limit")
         ) {
+            if interval > minInterval {
+                nextAvailableTime = nextAvailableTime.addingTimeInterval(interval - minInterval)
+            }
             minInterval = interval
         }
 
@@ -1564,6 +1553,47 @@ private enum AniMapStructuralRole {
 struct AniMapTMDBImportMatch {
     let tmdbResult: TMDBSearchResult
     let tmdbSeason: Int?
+}
+
+enum AniListImportMetadata {
+    static let fields = """
+        id
+        idMal
+        externalLinks { site siteId url }
+        averageScore
+        title { romaji english native }
+        episodes
+        status
+        seasonYear
+        season
+        format
+        type
+        coverImage { large medium }
+    """
+
+    static func resolve(
+        ids: [Int],
+        prefetched: [AniListAnime],
+        fetch: ([Int]) async -> [Int: AniListAnime]
+    ) async throws -> [Int: AniListAnime] {
+        try Task.checkCancellation()
+        let requested = Set(ids.filter { RemoteMediaNumericBoundary.positiveIdentifier($0) != nil })
+        var nodes: [Int: AniListAnime] = [:]
+        for anime in prefetched where requested.contains(anime.id) {
+            nodes[anime.id] = anime
+        }
+        let missing = requested.filter { nodes[$0] == nil }.sorted()
+        if !missing.isEmpty {
+            let fetched = await fetch(missing)
+            try Task.checkCancellation()
+            for id in missing {
+                if let anime = fetched[id], anime.id == id {
+                    nodes[id] = anime
+                }
+            }
+        }
+        return nodes
+    }
 }
 
 private struct AniMapLookupResult {
@@ -6606,127 +6636,138 @@ final class AniListService {
             await AniMapMappingService.shared.prepareGlobalIndexIfNeeded()
         }
 
-        func normalized(_ value: String) -> String {
+        @Sendable func normalized(_ value: String) -> String {
             return value.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
         }
 
         let langCode = self.preferredLanguageCode
         let cacheLanguage = self.tmdbMatchCacheLanguage
 
-        return await withTaskGroup(of: (Int, TMDBSearchResult?, AnimeTMDBMatchCacheRecord?).self) { group in
-            for anime in animeList {
-                group.addTask {
-                    let titleCandidates = AniListTitlePicker.titleCandidates(from: anime.title)
-                    let expectedYear = anime.seasonYear
-                    let cacheKey = AnimeTMDBMatchCacheKey(
-                        source: .anilist,
-                        id: anime.id,
-                        language: cacheLanguage,
-                        titleCandidates: titleCandidates,
-                        expectedYear: expectedYear,
+        guard let matches = try? await TrackerImportWork.map(animeList, operation: { anime -> (Int, TMDBSearchResult?, AnimeTMDBMatchCacheRecord?) in
+            try Task.checkCancellation()
+            let titleCandidates = AniListTitlePicker.titleCandidates(from: anime.title)
+            let expectedYear = anime.seasonYear
+            let cacheKey = AnimeTMDBMatchCacheKey(
+                source: .anilist,
+                id: anime.id,
+                language: cacheLanguage,
+                titleCandidates: titleCandidates,
+                expectedYear: expectedYear,
+                format: anime.format
+            )
+
+            if let cached = await AnimeTMDBMatchCache.shared.lookup(cacheKey) {
+                let seededResult = cached.result?.withAnimeIdentitySeed(
+                    AnimeMediaIdentitySeed(
+                        anilistId: anime.id,
+                        malId: anime.idMal,
+                        kitsuId: anime.kitsuId,
                         format: anime.format
                     )
+                )
+                return (anime.id, seededResult, nil)
+            }
 
-                    if let cached = await AnimeTMDBMatchCache.shared.lookup(cacheKey) {
-                        let seededResult = cached.result?.withAnimeIdentitySeed(
-                            AnimeMediaIdentitySeed(
-                                anilistId: anime.id,
-                                malId: anime.idMal,
-                                kitsuId: anime.kitsuId,
-                                format: anime.format
-                            )
-                        )
-                        return (anime.id, seededResult, nil)
+            var bestMatch: TMDBTVShow?
+            var lookupCompleted = true
+
+            for candidate in titleCandidates where !candidate.isEmpty {
+                try Task.checkCancellation()
+                let results: [TMDBTVShow]
+                do {
+                    results = try await tmdbService.searchTVShows(query: candidate)
+                } catch {
+                    try Task.checkCancellation()
+                    lookupCompleted = false
+                    continue
+                }
+                guard !results.isEmpty else { continue }
+                let candidateKey = normalized(candidate)
+
+                let exactMatches = results.filter { normalized($0.name) == candidateKey }
+                if !exactMatches.isEmpty {
+                    let bestExact = exactMatches.min { a, b in
+                        if let expectedYear = expectedYear {
+                            let aDiff = Int(a.firstAirDate?.prefix(4) ?? "").flatMap {
+                                RemoteMediaNumericBoundary.absoluteDifference($0, expectedYear)
+                            } ?? 10000
+                            let bDiff = Int(b.firstAirDate?.prefix(4) ?? "").flatMap {
+                                RemoteMediaNumericBoundary.absoluteDifference($0, expectedYear)
+                            } ?? 10000
+                            if aDiff != bDiff { return aDiff < bDiff }
+                        }
+                        let aAnim = a.genreIds?.contains(16) == true
+                        let bAnim = b.genreIds?.contains(16) == true
+                        if aAnim != bAnim { return aAnim }
+                        return a.popularity > b.popularity
                     }
+                    if let best = bestExact { bestMatch = best; break }
+                }
 
-                    var bestMatch: TMDBTVShow?
-
-                    for candidate in titleCandidates where !candidate.isEmpty {
-                        guard let results = try? await tmdbService.searchTVShows(query: candidate), !results.isEmpty else { continue }
-                        let candidateKey = normalized(candidate)
-
-                        let exactMatches = results.filter { normalized($0.name) == candidateKey }
-                        if !exactMatches.isEmpty {
-                            let bestExact = exactMatches.min { a, b in
-                                if let expectedYear = expectedYear {
-                                    let aDiff = Int(a.firstAirDate?.prefix(4) ?? "").flatMap {
-                                        RemoteMediaNumericBoundary.absoluteDifference($0, expectedYear)
-                                    } ?? 10000
-                                    let bDiff = Int(b.firstAirDate?.prefix(4) ?? "").flatMap {
-                                        RemoteMediaNumericBoundary.absoluteDifference($0, expectedYear)
-                                    } ?? 10000
-                                    if aDiff != bDiff { return aDiff < bDiff }
-                                }
-                                let aAnim = a.genreIds?.contains(16) == true
-                                let bAnim = b.genreIds?.contains(16) == true
-                                if aAnim != bAnim { return aAnim }
-                                return a.popularity > b.popularity
-                            }
-                            if let best = bestExact { bestMatch = best; break }
+                let partialMatches = results.filter {
+                    let nameKey = normalized($0.name)
+                    return nameKey.contains(candidateKey) || candidateKey.contains(nameKey)
+                }
+                if !partialMatches.isEmpty {
+                    let best = partialMatches.min { a, b in
+                        if let expectedYear = expectedYear {
+                            let aDiff = Int(a.firstAirDate?.prefix(4) ?? "").flatMap {
+                                RemoteMediaNumericBoundary.absoluteDifference($0, expectedYear)
+                            } ?? 10000
+                            let bDiff = Int(b.firstAirDate?.prefix(4) ?? "").flatMap {
+                                RemoteMediaNumericBoundary.absoluteDifference($0, expectedYear)
+                            } ?? 10000
+                            if aDiff != bDiff { return aDiff < bDiff }
                         }
-
-                        let partialMatches = results.filter {
-                            let nameKey = normalized($0.name)
-                            return nameKey.contains(candidateKey) || candidateKey.contains(nameKey)
-                        }
-                        if !partialMatches.isEmpty {
-                            let best = partialMatches.min { a, b in
-                                if let expectedYear = expectedYear {
-                                    let aDiff = Int(a.firstAirDate?.prefix(4) ?? "").flatMap {
-                                        RemoteMediaNumericBoundary.absoluteDifference($0, expectedYear)
-                                    } ?? 10000
-                                    let bDiff = Int(b.firstAirDate?.prefix(4) ?? "").flatMap {
-                                        RemoteMediaNumericBoundary.absoluteDifference($0, expectedYear)
-                                    } ?? 10000
-                                    if aDiff != bDiff { return aDiff < bDiff }
-                                }
-                                let aAnim = a.genreIds?.contains(16) == true
-                                let bAnim = b.genreIds?.contains(16) == true
-                                if aAnim != bAnim { return aAnim }
-                                return a.popularity > b.popularity
-                            }
-                            if let best = best { bestMatch = best; break }
-                        }
-
-                        if bestMatch == nil {
-                            bestMatch = results.min { a, b in
-                                let aAnim = a.genreIds?.contains(16) == true
-                                let bAnim = b.genreIds?.contains(16) == true
-                                if aAnim != bAnim { return aAnim }
-                                return a.popularity > b.popularity
-                            }
-                        }
+                        let aAnim = a.genreIds?.contains(16) == true
+                        let bAnim = b.genreIds?.contains(16) == true
+                        if aAnim != bAnim { return aAnim }
+                        return a.popularity > b.popularity
                     }
+                    if let best = best { bestMatch = best; break }
+                }
 
-                    if let bestMatch = bestMatch {
-                        let aniTitle = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: langCode)
-                        Logger.shared.log("AniListService: Matched '\(aniTitle)' -> TMDB '\(bestMatch.name)' (ID: \(bestMatch.id))", type: "AniList")
+                if bestMatch == nil {
+                    bestMatch = results.min { a, b in
+                        let aAnim = a.genreIds?.contains(16) == true
+                        let bAnim = b.genreIds?.contains(16) == true
+                        if aAnim != bAnim { return aAnim }
+                        return a.popularity > b.popularity
                     }
-                    let result = bestMatch?.asSearchResult.withAnimeIdentitySeed(
-                        AnimeMediaIdentitySeed(
-                            anilistId: anime.id,
-                            malId: anime.idMal,
-                            kitsuId: anime.kitsuId,
-                            format: anime.format
-                        )
-                    )
-                    return (anime.id, result, AnimeTMDBMatchCacheRecord(key: cacheKey, result: result))
                 }
             }
 
-            var dict: [Int: TMDBSearchResult] = [:]
-            var cacheRecords: [AnimeTMDBMatchCacheRecord] = []
-            for await (anilistId, match, cacheRecord) in group {
-                if let match = match {
-                    dict[anilistId] = match
-                }
-                if let cacheRecord {
-                    cacheRecords.append(cacheRecord)
-                }
+            try Task.checkCancellation()
+            if let bestMatch = bestMatch {
+                let aniTitle = AniListTitlePicker.title(from: anime.title, preferredLanguageCode: langCode)
+                Logger.shared.log("AniListService: Matched '\(aniTitle)' -> TMDB '\(bestMatch.name)' (ID: \(bestMatch.id))", type: "AniList")
             }
-            await AnimeTMDBMatchCache.shared.store(cacheRecords)
-            return dict
+            let result = bestMatch?.asSearchResult.withAnimeIdentitySeed(
+                AnimeMediaIdentitySeed(
+                    anilistId: anime.id,
+                    malId: anime.idMal,
+                    kitsuId: anime.kitsuId,
+                    format: anime.format
+                )
+            )
+            let cacheRecord = result != nil || lookupCompleted
+                ? AnimeTMDBMatchCacheRecord(key: cacheKey, result: result)
+                : nil
+            return (anime.id, result, cacheRecord)
+        }) else { return [:] }
+
+        var dict: [Int: TMDBSearchResult] = [:]
+        var cacheRecords: [AnimeTMDBMatchCacheRecord] = []
+        for (anilistId, match, cacheRecord) in matches {
+            if let match = match {
+                dict[anilistId] = match
+            }
+            if let cacheRecord {
+                cacheRecords.append(cacheRecord)
+            }
         }
+        await AnimeTMDBMatchCache.shared.store(cacheRecords)
+        return dict
     }
 
     func getAniListId(fromMalId malId: Int) async throws -> Int? {
@@ -6988,12 +7029,17 @@ final class AniListService {
 
     func mapAniListAnimeIdsToTMDBForImport(
         _ ids: [Int],
+        prefetched: [AniListAnime] = [],
         tmdbService: TMDBService
     ) async -> [Int: TMDBSearchResult] {
         let uniqueIds = Array(Set(ids))
         guard !uniqueIds.isEmpty else { return [:] }
 
-        let nodes = await batchFetchAniListImportNodes(ids: uniqueIds)
+        guard let nodes = try? await AniListImportMetadata.resolve(
+            ids: uniqueIds,
+            prefetched: prefetched,
+            fetch: { await self.batchFetchAniListImportNodes(ids: $0) }
+        ) else { return [:] }
         return await batchMapAniListToTMDB(Array(nodes.values), tmdbService: tmdbService)
     }
 
@@ -7004,26 +7050,23 @@ final class AniListService {
         let uniqueIds = Array(Set(ids))
         guard !uniqueIds.isEmpty else { return [:] }
 
-        return await withTaskGroup(of: (Int, AniMapTMDBImportMatch?).self) { group in
-            for anilistId in uniqueIds {
-                group.addTask {
-                    let mappings = await AniMapMappingService.shared.mappings(forAniListId: anilistId)
-                    guard let mapping = Self.bestAniMapImportMapping(mappings, anilistId: anilistId),
-                          let match = await Self.tmdbImportMatch(from: mapping, tmdbService: tmdbService) else {
-                        return (anilistId, nil)
-                    }
-                    return (anilistId, match)
-                }
+        guard let matches = try? await TrackerImportWork.map(uniqueIds.sorted(), operation: { anilistId -> (Int, AniMapTMDBImportMatch?) in
+            let mappings = await AniMapMappingService.shared.mappings(forAniListId: anilistId)
+            try Task.checkCancellation()
+            guard let mapping = Self.bestAniMapImportMapping(mappings, anilistId: anilistId),
+                  let match = await Self.tmdbImportMatch(from: mapping, tmdbService: tmdbService) else {
+                return (anilistId, nil)
             }
+            return (anilistId, match)
+        }) else { return [:] }
 
-            var result: [Int: AniMapTMDBImportMatch] = [:]
-            for await (anilistId, match) in group {
-                if let match {
-                    result[anilistId] = match
-                }
+        var result: [Int: AniMapTMDBImportMatch] = [:]
+        for (anilistId, match) in matches {
+            if let match {
+                result[anilistId] = match
             }
-            return result
         }
+        return result
     }
 
     private static func bestAniMapImportMapping(_ mappings: [AniMapMapping], anilistId: Int) -> AniMapMapping? {
@@ -7245,20 +7288,7 @@ final class AniListService {
     private func batchFetchAniListImportNodes(ids: [Int]) async -> [Int: AniListAnime] {
         guard !ids.isEmpty else { return [:] }
 
-        let fragment = """
-            id
-            idMal
-            externalLinks { site siteId url }
-            averageScore
-            title { romaji english native }
-            episodes
-            status
-            seasonYear
-            season
-            format
-            type
-            coverImage { large medium }
-        """
+        let fragment = AniListImportMetadata.fields
 
         let uniqueIds = Array(Set(ids)).sorted()
         let chunkSize = 20
@@ -7266,6 +7296,7 @@ final class AniListService {
         var start = 0
 
         while start < uniqueIds.count {
+            guard !Task.isCancelled else { return [:] }
             let chunk = Array(uniqueIds[start..<min(start + chunkSize, uniqueIds.count)])
             let idList = chunk.map(String.init).joined(separator: ", ")
 
@@ -7275,6 +7306,7 @@ final class AniListService {
 
                 let maxPages = 4
                 while hasNextPage, pageNumber <= maxPages {
+                    try Task.checkCancellation()
                     let query = """
                     query {
                         Page(page: \(pageNumber), perPage: \(chunkSize)) {

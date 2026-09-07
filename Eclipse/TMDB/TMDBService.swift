@@ -105,12 +105,25 @@ class TMDBService: ObservableObject {
         configuredRequest.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         let request = configuredRequest
 
-        let result = try await rateLimiter.execute {
-            try await URLSession.shared.boundedData(
-                for: request,
-                maximumResponseBytes: Self.maximumJSONResponseBytes
-            )
+        var received: (Data, URLResponse)?
+        for attempt in 0..<2 {
+            let result = try await rateLimiter.execute {
+                let result = try await URLSession.shared.boundedData(
+                    for: request,
+                    maximumResponseBytes: Self.maximumJSONResponseBytes
+                )
+                if let response = result.1 as? HTTPURLResponse {
+                    await self.rateLimiter.recordResponse(response)
+                }
+                return result
+            }
+            if (result.1 as? HTTPURLResponse)?.statusCode == 429, attempt == 0 {
+                continue
+            }
+            received = result
+            break
         }
+        guard let result = received else { throw TMDBError.decodingError }
         let responseData = Self.normalizedResponseData(result.0, endpoint: url.path)
         guard responseData.count <= Self.maximumJSONResponseBytes else {
             throw BoundedURLSessionError.responseTooLarge(
@@ -1814,6 +1827,19 @@ actor TMDBRateLimiter {
 
         defer { releaseSlot() }
         return try await operation()
+    }
+
+    func recordResponse(_ response: HTTPURLResponse) {
+        guard response.statusCode == 429 else { return }
+        let delay = AniListRateLimiter.boundedRetryAfter(response.value(forHTTPHeaderField: "Retry-After"))
+        pause(for: delay)
+    }
+
+    func pause(for delay: TimeInterval) {
+        guard delay.isFinite, delay > 0 else { return }
+        let nanoseconds = AniListRateLimiter.nanoseconds(for: min(delay, 120))
+        let next = DispatchTime.now().uptimeNanoseconds.addingReportingOverflow(nanoseconds)
+        nextAllowedStart = max(nextAllowedStart, next.overflow ? UInt64.max : next.partialValue)
     }
 
     private func acquireSlot(waiterID: UUID) async throws {
