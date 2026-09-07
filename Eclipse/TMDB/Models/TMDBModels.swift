@@ -128,7 +128,7 @@ struct AnimeMediaIdentitySeed: Codable, Equatable, Sendable {
 
 }
 
-struct TMDBSearchResult: Codable, Identifiable {
+struct TMDBSearchResult: Codable, Identifiable, Sendable {
     let id: Int
     let mediaType: String
     let title: String?

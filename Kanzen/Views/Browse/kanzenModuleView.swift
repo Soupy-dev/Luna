@@ -22,9 +22,11 @@ struct KanzenModuleView: View {
 
     }
     func deleteItems(at offsets: IndexSet) {
-        for index in offsets
-        {
-            moduleManager.deleteModule(moduleManager.modules[index])
+        let selectedModules = offsets.compactMap { index in
+            moduleManager.modules.indices.contains(index) ? moduleManager.modules[index] : nil
+        }
+        for module in selectedModules {
+            moduleManager.deleteModule(module)
         }
     }
     var body: some View {

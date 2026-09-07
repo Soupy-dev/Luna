@@ -1,7 +1,215 @@
 import XCTest
+import SwiftUI
+import Combine
 @testable import Eclipse
 
+private struct ServicesSheetInactiveSceneFixture: View {
+    @Environment(\.scenePhase) private var scenePhase
+    let onAppear: (Bool) -> Void
+    let onScene: (ObjectIdentifier?, Bool) -> Void
+
+    var body: some View {
+        ServicesSheetPresentationAnchor(onResolve: { _ in }, onSceneActivity: onScene)
+            .onAppear { onAppear(scenePhase == .active) }
+    }
+}
+
 final class PlaybackInputSafetyTests: XCTestCase {
+    func testActiveOwningSceneStartsWorkWhenSwiftUIRemainsInactive() {
+        let owner = NSObject()
+        var state = ServicesSheetActivityState()
+        XCTAssertEqual(state.appear(environmentIsActive: false), .none)
+        XCTAssertFalse(state.hasStarted)
+        XCTAssertEqual(state.updateScene(id: ObjectIdentifier(owner), isActive: true), .start)
+        XCTAssertTrue(state.allowsWork)
+        XCTAssertEqual(state.updateEnvironment(isActive: false), .none)
+        XCTAssertEqual(state.updateScene(id: ObjectIdentifier(owner), isActive: true), .none)
+        XCTAssertEqual(state.appear(environmentIsActive: false), .none)
+    }
+
+    func testOwningScenePausesResumesAndIgnoresOtherWindows() {
+        let owner = NSObject()
+        let other = NSObject()
+        var state = ServicesSheetActivityState()
+        XCTAssertEqual(state.updateScene(id: ObjectIdentifier(owner), isActive: false), .none)
+        XCTAssertEqual(state.appear(environmentIsActive: true), .none)
+        XCTAssertEqual(state.sceneActivityChanged(id: ObjectIdentifier(other), isActive: true), .none)
+        XCTAssertFalse(state.allowsWork)
+        XCTAssertEqual(state.sceneActivityChanged(id: ObjectIdentifier(owner), isActive: true), .start)
+        XCTAssertEqual(state.sceneActivityChanged(id: ObjectIdentifier(owner), isActive: false), .pause)
+        XCTAssertEqual(state.updateEnvironment(isActive: true), .none)
+        XCTAssertEqual(state.sceneActivityChanged(id: ObjectIdentifier(owner), isActive: true), .resume)
+        XCTAssertEqual(state.updateScene(id: nil, isActive: false), .pause)
+        XCTAssertEqual(state.updateEnvironment(isActive: true), .none)
+        XCTAssertEqual(state.sceneActivityChanged(id: ObjectIdentifier(owner), isActive: true), .none)
+    }
+
+    func testDismissedSheetCannotRestartFromLateActivation() {
+        let owner = NSObject()
+        var state = ServicesSheetActivityState()
+        XCTAssertEqual(state.appear(environmentIsActive: true), .start)
+        state.dismiss()
+        XCTAssertEqual(state.updateScene(id: ObjectIdentifier(owner), isActive: true), .none)
+        XCTAssertEqual(state.updateEnvironment(isActive: true), .none)
+        XCTAssertEqual(state.appear(environmentIsActive: true), .none)
+        XCTAssertFalse(state.isPresented)
+    }
+
+    func testSheetResumesAfterReturningFromAChildPresentation() {
+        let owner = NSObject()
+        var state = ServicesSheetActivityState()
+        _ = state.updateScene(id: ObjectIdentifier(owner), isActive: true)
+        XCTAssertEqual(state.appear(environmentIsActive: false), .start)
+        XCTAssertEqual(state.disappear(), .pause)
+        XCTAssertEqual(state.updateScene(id: ObjectIdentifier(owner), isActive: true), .none)
+        XCTAssertEqual(state.appear(environmentIsActive: false), .resume)
+        XCTAssertEqual(state.appear(environmentIsActive: false), .none)
+        state.dismiss()
+        _ = state.disappear()
+        XCTAssertEqual(state.appear(environmentIsActive: false), .none)
+    }
+
+    @MainActor
+    func testUIKitHostingAnchorReportsActiveSceneDespiteInactiveEnvironment() async throws {
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) else {
+            throw XCTSkip("The test host has no active window scene")
+        }
+        let started = expectation(description: "Attached scene starts the inactive-environment sheet")
+        var state = ServicesSheetActivityState()
+        var fulfilled = false
+        var observationFinished = false
+        func checkStarted() {
+            if state.hasStarted && !fulfilled {
+                fulfilled = true
+                started.fulfill()
+            }
+        }
+        let fixture = ServicesSheetInactiveSceneFixture(
+            onAppear: { active in
+                guard !observationFinished else { return }
+                XCTAssertFalse(active)
+                _ = state.appear(environmentIsActive: active)
+                checkStarted()
+            },
+            onScene: { sceneID, active in
+                guard !observationFinished else { return }
+                if let sceneID { XCTAssertEqual(sceneID, ObjectIdentifier(scene)) }
+                _ = state.updateScene(id: sceneID, isActive: active)
+                checkStarted()
+            }
+        ).environment(\.scenePhase, .inactive)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: fixture)
+        window.isHidden = false
+        defer {
+            observationFinished = true
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        await fulfillment(of: [started], timeout: 3)
+        XCTAssertTrue(state.allowsWork)
+    }
+
+    func testServiceSettingOptionsKeepSingleQuotesWithoutTrapping() throws {
+        for quote in ["\"", "'", "“", "”", "‘", "’"] {
+            let source = [
+                "// Settings start",
+                "const mode = \"auto\"; // Select mode [\(quote), \"auto\", '', ‘manual’]",
+                "// Settings end"
+            ].joined(separator: "\n")
+            let setting = try XCTUnwrap(ServiceManager.parseSettingsFromJS(source).first)
+            XCTAssertEqual(setting.options, [quote, "auto", "manual"])
+            XCTAssertEqual(setting.comment, "Select mode")
+            XCTAssertEqual(setting.value, "auto")
+        }
+    }
+
+    func testServiceSettingTypesAndRoundTripRemainUnchanged() {
+        let source = [
+            "const untouched = 7;",
+            "// Settings start",
+            "const text = ‘hello’; // Label [‘hello’, “world”]",
+            "const enabled = true;",
+            "const count = 12;",
+            "const speed = 1.5;",
+            "// Settings end",
+            "function useSettings() { return untouched; }"
+        ].joined(separator: "\n")
+        let settings = ServiceManager.parseSettingsFromJS(source)
+        XCTAssertEqual(settings.map(\.value), ["hello", "true", "12", "1.5"])
+        XCTAssertEqual(settings.map(\.type), [.string, .bool, .int, .float])
+        let updated = ServiceManager.updateSettingsInJS(source, with: settings)
+        XCTAssertTrue(updated.hasPrefix("const untouched = 7;\n"))
+        XCTAssertTrue(updated.hasSuffix("function useSettings() { return untouched; }"))
+        XCTAssertEqual(ServiceManager.parseSettingsFromJS(updated).map(\.value), settings.map(\.value))
+    }
+
+    @MainActor
+    func testTraktWatchlistBatchPersistsOnceAndPreservesExistingEntries() async throws {
+        let profile = UUID()
+        let key = LibraryManager.collectionsKey(for: profile)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let manager = LibraryManager(profileID: profile)
+        manager.applyTraktWatchlistPull([watchlistResult(1)])
+        let collection = try XCTUnwrap(manager.collections.first { $0.name == TrackerManager.traktWatchlistCollectionName })
+        let originalID = collection.id
+        let originalDate = Date(timeIntervalSince1970: 1234)
+        collection.items = [
+            LibraryItem(searchResult: watchlistResult(1), dateAdded: originalDate),
+            LibraryItem(searchResult: watchlistResult(1), dateAdded: originalDate)
+        ]
+        await drainLibraryCallbacks()
+        var publications = 0
+        var saves = 0
+        let subscription = collection.objectWillChange.sink { publications += 1 }
+        let observer = NotificationCenter.default.addObserver(forName: .libraryDataDidChange, object: manager, queue: nil) { _ in
+            saves += 1
+        }
+        defer {
+            subscription.cancel()
+            NotificationCenter.default.removeObserver(observer)
+        }
+        let results = (1...500).map(watchlistResult)
+        manager.applyTraktWatchlistPull(results + results)
+        await drainLibraryCallbacks()
+        XCTAssertEqual(collection.id, originalID)
+        XCTAssertEqual(collection.items.count, 501)
+        XCTAssertEqual(Array(collection.items.prefix(2)).map(\.dateAdded), [originalDate, originalDate])
+        XCTAssertEqual(Array(collection.items.dropFirst(2)).map { $0.searchResult.id }, Array(2...500))
+        XCTAssertEqual(publications, 1)
+        XCTAssertEqual(saves, 1)
+        manager.applyTraktWatchlistPull(results)
+        await drainLibraryCallbacks()
+        XCTAssertEqual(publications, 1)
+        XCTAssertEqual(saves, 1)
+    }
+
+    @MainActor
+    func testTraktWatchlistDoesNotOverwriteUnreadableStore() {
+        let profile = UUID()
+        let key = LibraryManager.collectionsKey(for: profile)
+        let original = Data("unreadable library".utf8)
+        UserDefaults.standard.set(original, forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let manager = LibraryManager(profileID: profile)
+        manager.applyTraktWatchlistPull([watchlistResult(1)])
+        XCTAssertEqual(UserDefaults.standard.data(forKey: key), original)
+        XCTAssertFalse(manager.collections.contains { $0.name == TrackerManager.traktWatchlistCollectionName })
+    }
+
+    private func watchlistResult(_ id: Int) -> TMDBSearchResult {
+        TMDBSearchResult(id: id, mediaType: "tv", title: nil, name: "Title \(id)", overview: nil,
+                         posterPath: nil, backdropPath: nil, releaseDate: nil, firstAirDate: nil,
+                         voteAverage: nil, popularity: 0, adult: false, genreIds: nil)
+    }
+
+    @MainActor
+    private func drainLibraryCallbacks() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
     func testSkipSegmentKeysRejectUnrepresentableTimes() {
         for value in [Double.nan, .infinity, -.infinity, -1, Double(Int.max), .greatestFiniteMagnitude] {
             XCTAssertEqual(SkipSegment(startTime: value, endTime: value, type: .intro).uniqueKey, "intro_unknown")

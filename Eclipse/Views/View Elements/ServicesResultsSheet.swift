@@ -6,6 +6,8 @@
 //
 
 import AVKit
+import CloudKit
+import Combine
 import SwiftUI
 import Kingfisher
 
@@ -30,22 +32,178 @@ private extension UIViewController {
 }
 #endif
 
-private struct ServicesSheetPresentationAnchor: UIViewRepresentable {
+struct ServicesSheetActivityState {
+    enum Transition: Equatable {
+        case none
+        case start
+        case resume
+        case pause
+    }
+
+    private(set) var isPresented = false
+    private(set) var isDismissed = false
+    private(set) var hasStarted = false
+    private var environmentIsActive = false
+    private var hasResolvedScene = false
+    private var owningSceneID: ObjectIdentifier?
+    private var owningSceneIsActive = false
+
+    var allowsWork: Bool {
+        hasResolvedScene ? owningSceneIsActive : environmentIsActive
+    }
+
+    private var isActive: Bool {
+        isPresented && !isDismissed && allowsWork
+    }
+
+    mutating func appear(environmentIsActive: Bool) -> Transition {
+        let wasActive = isActive
+        guard !isDismissed else { return .none }
+        isPresented = true
+        self.environmentIsActive = environmentIsActive
+        return transition(wasActive: wasActive)
+    }
+
+    mutating func updateEnvironment(isActive: Bool) -> Transition {
+        let wasActive = self.isActive
+        environmentIsActive = isActive
+        return transition(wasActive: wasActive)
+    }
+
+    mutating func updateScene(id: ObjectIdentifier?, isActive: Bool) -> Transition {
+        let wasActive = self.isActive
+        if id != nil {
+            hasResolvedScene = true
+        }
+        owningSceneID = id
+        owningSceneIsActive = id != nil && isActive
+        return transition(wasActive: wasActive)
+    }
+
+    mutating func sceneActivityChanged(id: ObjectIdentifier, isActive: Bool) -> Transition {
+        guard owningSceneID == id else { return .none }
+        return updateScene(id: id, isActive: isActive)
+    }
+
+    mutating func dismiss() {
+        isPresented = false
+        isDismissed = true
+    }
+
+    mutating func disappear() -> Transition {
+        let wasActive = isActive
+        isPresented = false
+        return transition(wasActive: wasActive)
+    }
+
+    private mutating func transition(wasActive: Bool) -> Transition {
+        guard !isDismissed else { return .none }
+        if isActive && !wasActive {
+            let result: Transition = hasStarted ? .resume : .start
+            hasStarted = true
+            return result
+        }
+        return wasActive && !isActive ? .pause : .none
+    }
+}
+
+struct WatchTogetherPlaybackHandoffIdentity: Equatable {
+    let sessionID: UUID?
+    let sessionGeneration: UInt64
+    let mediaRevision: UInt64?
+    let mediaIdentifier: String?
+}
+
+struct ServicesResolvedPlaybackHandoffState {
+    struct Operation: Equatable {
+        let id: UUID
+        let url: URL
+    }
+
+    enum Completion: Equatable {
+        case deliver
+        case discard
+        case ignore
+    }
+
+    private enum Phase {
+        case idle
+        case pending(Operation)
+        case claimed(Operation)
+        case finished(Operation, delivered: Bool)
+    }
+
+    private var phase = Phase.idle
+
+    mutating func begin(url: URL) -> Operation? {
+        switch phase {
+        case .idle, .pending:
+            break
+        case .claimed, .finished:
+            return nil
+        }
+        let operation = Operation(id: UUID(), url: url)
+        phase = .pending(operation)
+        return operation
+    }
+
+    mutating func claim(_ operation: Operation, isCurrent: Bool) -> Bool {
+        guard isCurrent, case .pending(let pending) = phase, pending == operation else { return false }
+        phase = .claimed(operation)
+        return true
+    }
+
+    mutating func complete(_ operation: Operation, isCurrent: Bool) -> Completion {
+        guard case .claimed(let claimed) = phase, claimed == operation else { return .ignore }
+        phase = .finished(operation, delivered: isCurrent)
+        return isCurrent ? .deliver : .discard
+    }
+
+    mutating func cancelPending(_ operation: Operation? = nil) {
+        guard case .pending(let pending) = phase,
+              operation == nil || operation == pending else { return }
+        phase = .idle
+    }
+
+    func retainsResource(at url: URL) -> Bool {
+        switch phase {
+        case .idle:
+            return false
+        case .pending(let operation), .claimed(let operation):
+            return operation.url == url
+        case .finished(let operation, let delivered):
+            return delivered && operation.url == url
+        }
+    }
+}
+
+struct ServicesSheetPresentationAnchor: UIViewRepresentable {
     let onResolve: (UIViewController) -> Void
+    let onSceneActivity: (ObjectIdentifier?, Bool) -> Void
 
     func makeUIView(context: Context) -> ProbeView {
         let view = ProbeView()
         view.onResolve = onResolve
+        view.onSceneActivity = onSceneActivity
         return view
     }
 
     func updateUIView(_ uiView: ProbeView, context: Context) {
         uiView.onResolve = onResolve
+        uiView.onSceneActivity = onSceneActivity
         uiView.resolveIfAttached()
+    }
+
+    static func dismantleUIView(_ uiView: ProbeView, coordinator: ()) {
+        uiView.tearDown()
     }
 
     final class ProbeView: UIView {
         var onResolve: ((UIViewController) -> Void)?
+        var onSceneActivity: ((ObjectIdentifier?, Bool) -> Void)?
+        private weak var observedScene: UIWindowScene?
+        private var sceneObservers: [NSObjectProtocol] = []
+        private var attachmentGeneration: UInt64 = 0
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
@@ -53,6 +211,7 @@ private struct ServicesSheetPresentationAnchor: UIViewRepresentable {
         }
 
         func resolveIfAttached() {
+            updateObservedScene()
             guard window != nil else { return }
             var responder: UIResponder? = self
             var nearestController: UIViewController?
@@ -68,10 +227,60 @@ private struct ServicesSheetPresentationAnchor: UIViewRepresentable {
                 responder = current
             }
             guard let controller = presentedSheetController ?? nearestController else { return }
+            let generation = attachmentGeneration
             DispatchQueue.main.async { [weak self, weak controller] in
-                guard let controller else { return }
-                self?.onResolve?(controller)
+                guard let self, self.attachmentGeneration == generation,
+                      self.window != nil, let controller else { return }
+                self.onResolve?(controller)
             }
+        }
+
+        private func updateObservedScene() {
+            let scene = window?.windowScene
+            guard scene !== observedScene else { return }
+            removeSceneObservers()
+            observedScene = scene
+            attachmentGeneration &+= 1
+            if let scene {
+                let events: [(Notification.Name, Bool)] = [
+                    (UIScene.didActivateNotification, true),
+                    (UIScene.willDeactivateNotification, false),
+                    (UIScene.didEnterBackgroundNotification, false)
+                ]
+                sceneObservers = events.map { name, active in
+                    NotificationCenter.default.addObserver(forName: name, object: scene, queue: .main) { [weak self, weak scene] _ in
+                        guard let self, let scene, self.window?.windowScene === scene else { return }
+                        self.reportSceneActivity(isActive: active)
+                    }
+                }
+            }
+            reportSceneActivity(isActive: scene?.activationState == .foregroundActive)
+        }
+
+        private func reportSceneActivity(isActive: Bool) {
+            let generation = attachmentGeneration
+            let sceneID = observedScene.map(ObjectIdentifier.init)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.attachmentGeneration == generation else { return }
+                self.onSceneActivity?(sceneID, isActive)
+            }
+        }
+
+        private func removeSceneObservers() {
+            sceneObservers.forEach(NotificationCenter.default.removeObserver)
+            sceneObservers.removeAll()
+        }
+
+        func tearDown() {
+            attachmentGeneration &+= 1
+            removeSceneObservers()
+            observedScene = nil
+            onResolve = nil
+            onSceneActivity = nil
+        }
+
+        deinit {
+            sceneObservers.forEach(NotificationCenter.default.removeObserver)
         }
     }
 }
@@ -122,6 +331,7 @@ private struct StremioStyleResolvedServiceStream: Identifiable {
     let option: StreamOption
     let topLevelSubtitles: [String]?
     let resolvedAt: Date
+    let displaySimilarity: Double
 }
 
 private struct StremioStyleServiceResolutionCandidate {
@@ -488,8 +698,49 @@ struct PlayerResolvedPlaybackRequest {
 }
 
 @MainActor
+final class ServiceResultRankingSnapshot {
+    struct RankedResult {
+        let result: SearchItem
+        let score: ServiceResultRankingContext.RankedSearchResult
+    }
+
+    let context: ServiceResultRankingContext
+    let results: [SearchItem]
+    let ranked: [RankedResult]
+    let highQuality: [SearchItem]
+    let lowQuality: [SearchItem]
+    let displayScores: [UUID: Double]
+    let authority = ProviderPlaybackScopeAuthority.capture()
+    let accountEpoch: UInt64
+
+    init(results: [SearchItem], scores: [ServiceResultRankingContext.RankedSearchResult], context: ServiceResultRankingContext, accountEpoch: UInt64 = 0) {
+        self.accountEpoch = accountEpoch
+        self.context = context
+        ranked = scores.prefix(300).map { RankedResult(result: results[$0.index], score: $0) }
+        self.results = results.count > 300 ? ranked.map(\.result) : results
+        let visible = ranked.prefix(80).filter {
+            !context.dropsMismatches || $0.score.initialSimilarity >= context.serviceResultMinimumSimilarity
+        }
+        highQuality = visible.filter { $0.score.initialSimilarity >= context.highQualityThreshold }.map(\.result)
+        lowQuality = visible.filter { $0.score.initialSimilarity < context.highQualityThreshold }.map(\.result)
+        displayScores = Dictionary(ranked.map { ($0.result.id, $0.score.displaySimilarity) }, uniquingKeysWith: { first, _ in first })
+    }
+}
+
+@MainActor
 final class ModulesSearchResultsViewModel: ObservableObject {
-    @Published var moduleResults: [UUID: [SearchItem]] = [:]
+    @Published private(set) var moduleResults: [UUID: [SearchItem]] = [:]
+    @Published private(set) var serviceRankingSnapshots: [UUID: ServiceResultRankingSnapshot] = [:]
+    @Published private(set) var pendingServiceRankings = Set<UUID>()
+    @Published private(set) var serviceRankingRevision: UInt64 = 0
+    private var serviceRankingGeneration = UUID()
+    private var serviceRankingContext: ServiceResultRankingContext?
+    private var rankingTasks: [UUID: Task<ServiceResultRankingSnapshot?, Never>] = [:]
+    private var latestRankingTaskIDs: [UUID: UUID] = [:]
+    private let rankingWorker: any ServiceResultRankingComputing
+    private let rankingAccountClock: MediaStateCaptureMutationClock
+    private var rankingAccountObservers = Set<AnyCancellable>()
+    var serviceRankingAccountEpoch: UInt64 { rankingAccountClock.revision }
     @Published var isSearching = true
     @Published var searchedServices: Set<UUID> = []
     @Published var failedServices: Set<UUID> = []
@@ -545,7 +796,117 @@ final class ModulesSearchResultsViewModel: ObservableObject {
     var pendingPlaybackAutoMode = false
     var pendingPlaybackRetryCount = 0
 
-    init() {
+    func updateRankingContext(_ context: ServiceResultRankingContext) {
+        guard context != serviceRankingContext else { return }
+        serviceRankingContext = context
+        for serviceID in Set(moduleResults.keys).union(latestRankingTaskIDs.keys) {
+            enqueueServiceResults(nil, serviceID: serviceID, merging: true)
+        }
+    }
+
+    func enqueueServiceResults(_ incoming: [SearchItem]?, serviceID: UUID, merging: Bool) {
+        let previousTask = latestRankingTaskIDs[serviceID].flatMap { rankingTasks[$0] }
+        let previousResults = currentServiceRankingSnapshot(for: serviceID)?.results ?? []
+        let generation = serviceRankingGeneration
+        let accountEpoch = rankingAccountClock.revision
+        let authority = ProviderPlaybackScopeAuthority.capture()
+        let taskID = UUID()
+        let worker = rankingWorker
+        pendingServiceRankings.insert(serviceID)
+        let task = Task { @MainActor [weak self] () -> ServiceResultRankingSnapshot? in
+            defer { self?.rankingTasks.removeValue(forKey: taskID) }
+            let previous = await previousTask?.value
+            guard !Task.isCancelled,
+                  self?.serviceRankingGeneration == generation,
+                  self?.rankingAccountClock.revision == accountEpoch,
+                  authority.isCurrent else { return nil }
+            if incoming == nil, self?.latestRankingTaskIDs[serviceID] != taskID {
+                return previous
+            }
+            if incoming == nil, let previous, previous.context == self?.serviceRankingContext,
+               previous.authority.isCurrent, previous.accountEpoch == accountEpoch {
+                self?.publishRankingSnapshot(previous, serviceID: serviceID, taskID: taskID)
+                return previous
+            }
+            let base = merging ? (previous?.results ?? previousResults) : []
+            var seen = Set(base.map(\.href))
+            let results = base + (incoming ?? []).filter { !merging || seen.insert($0.href).inserted }
+            let titles = results.map(\.title)
+            while let context = self?.serviceRankingContext {
+                guard let scores = try? await worker.rank(titles: titles, context: context),
+                      !Task.isCancelled,
+                      self?.serviceRankingGeneration == generation,
+                      self?.rankingAccountClock.revision == accountEpoch,
+                      authority.isCurrent else { return nil }
+                guard self?.serviceRankingContext == context else { continue }
+                let snapshot = ServiceResultRankingSnapshot(results: results, scores: scores, context: context, accountEpoch: accountEpoch)
+                self?.publishRankingSnapshot(snapshot, serviceID: serviceID, taskID: taskID)
+                return snapshot
+            }
+            return nil
+        }
+        rankingTasks[taskID] = task
+        latestRankingTaskIDs[serviceID] = taskID
+    }
+
+    private func publishRankingSnapshot(_ snapshot: ServiceResultRankingSnapshot, serviceID: UUID, taskID: UUID) {
+        guard latestRankingTaskIDs[serviceID] == taskID else { return }
+        serviceRankingSnapshots[serviceID] = snapshot
+        moduleResults[serviceID] = snapshot.results
+        latestRankingTaskIDs.removeValue(forKey: serviceID)
+        pendingServiceRankings.remove(serviceID)
+        serviceRankingRevision &+= 1
+    }
+
+    func awaitServiceRanking(_ serviceID: UUID) async -> ServiceResultRankingSnapshot? {
+        let generation = serviceRankingGeneration
+        let authority = ProviderPlaybackScopeAuthority.capture()
+        while let taskID = latestRankingTaskIDs[serviceID], let task = rankingTasks[taskID] {
+            _ = await task.value
+            guard !Task.isCancelled, serviceRankingGeneration == generation, authority.isCurrent else { return nil }
+            if latestRankingTaskIDs[serviceID] == taskID {
+                latestRankingTaskIDs.removeValue(forKey: serviceID)
+                pendingServiceRankings.remove(serviceID)
+            }
+        }
+        guard let snapshot = currentServiceRankingSnapshot(for: serviceID), snapshot.context == serviceRankingContext else { return nil }
+        return snapshot
+    }
+
+    func currentServiceRankingSnapshot(for serviceID: UUID) -> ServiceResultRankingSnapshot? {
+        guard let snapshot = serviceRankingSnapshots[serviceID], snapshot.authority.isCurrent,
+              snapshot.accountEpoch == rankingAccountClock.revision else { return nil }
+        return snapshot
+    }
+
+    func cancelServiceRankings() {
+        serviceRankingGeneration = UUID()
+        for task in rankingTasks.values { task.cancel() }
+        rankingTasks.removeAll()
+        latestRankingTaskIDs.removeAll()
+        if !pendingServiceRankings.isEmpty { isSearching = true }
+        pendingServiceRankings.removeAll()
+    }
+
+    func clearServiceResults() {
+        cancelServiceRankings()
+        moduleResults.removeAll()
+        serviceRankingSnapshots.removeAll()
+        serviceRankingRevision &+= 1
+    }
+
+    init(
+        rankingWorker: any ServiceResultRankingComputing = ServiceResultRankingWorker.shared,
+        rankingAccountClock: MediaStateCaptureMutationClock = MediaStateCaptureMutationClock()
+    ) {
+        self.rankingWorker = rankingWorker
+        self.rankingAccountClock = rankingAccountClock
+        let clock = rankingAccountClock
+        for name in [Notification.Name.CKAccountChanged, .NSUbiquityIdentityDidChange] {
+            NotificationCenter.default.publisher(for: name)
+                .sink { _ in clock.advance() }
+                .store(in: &rankingAccountObservers)
+        }
         let rawThreshold = ProfileSettingsStore.active.object(forKey: "highQualityThreshold") as? Double
         let repairedThreshold = ServicesHighQualityThresholdPolicy.sanitized(rawThreshold)
         highQualityThreshold = repairedThreshold
@@ -661,9 +1022,8 @@ struct ModulesSearchResultsSheet: View {
     @State private var serviceSearchTaskID: UUID?
 #endif
     @State private var isSheetActive = false
-    @State private var sceneAllowsWork = false
-
-    @State private var hasStartedSheetWork = false
+    @State private var sheetActivity = ServicesSheetActivityState()
+    @State private var resolvedPlaybackHandoff = ServicesResolvedPlaybackHandoffState()
     @State private var autoModeDownloadTask: Task<Void, Never>?
     @State private var serviceStreamExtractionRequest: JSCallbackDeadline<ServiceStreamExtractionResult>?
     @State private var serviceStreamExtractionGeneration: UUID?
@@ -743,6 +1103,24 @@ struct ModulesSearchResultsSheet: View {
 
     private var sheetWorkIsActive: Bool {
         isSheetActive && sceneAllowsWork
+    }
+
+    private var sceneAllowsWork: Bool {
+        sheetActivity.allowsWork
+    }
+
+    @MainActor
+    private func applySheetActivityTransition(_ transition: ServicesSheetActivityState.Transition) {
+        switch transition {
+        case .none:
+            break
+        case .start:
+            resumeSheetWorkAfterActivation(restartCompletedSearches: true)
+        case .resume:
+            resumeSheetWorkAfterActivation(restartCompletedSearches: false)
+        case .pause:
+            pauseSheetWorkForInactiveScene()
+        }
     }
 
     private var activeAutoModeRetrySession: AutoModeRetrySession? {
@@ -1110,7 +1488,7 @@ struct ModulesSearchResultsSheet: View {
     }
 
     private var searchStatusText: String {
-        let anySearching = viewModel.isSearching || viewModel.isSearchingStremio || isSearchingSkyStream
+        let anySearching = viewModel.isSearching || !viewModel.pendingServiceRankings.isEmpty || viewModel.isSearchingStremio || isSearchingSkyStream
             || isSearchingNuvio
         if anySearching {
             let completed = viewModel.searchedServices.count
@@ -1201,7 +1579,7 @@ struct ModulesSearchResultsSheet: View {
 
             Spacer()
 
-            if viewModel.isSearching || viewModel.isSearchingStremio || isSearchingSkyStream || isSearchingNuvio {
+            if viewModel.isSearching || !viewModel.pendingServiceRankings.isEmpty || viewModel.isSearchingStremio || isSearchingSkyStream || isSearchingNuvio {
                 LazyHStack(spacing: 8) {
                     EclipseLoadingIndicator()
                         .scaleEffect(0.8)
@@ -1521,6 +1899,7 @@ struct ModulesSearchResultsSheet: View {
 
     private var isStremioStyleSearchActive: Bool {
         viewModel.isSearching
+            || !viewModel.pendingServiceRankings.isEmpty
             || viewModel.isSearchingStremio
             || isSearchingSkyStream
             || isSearchingNuvio
@@ -1540,11 +1919,11 @@ struct ModulesSearchResultsSheet: View {
         for item in sortedResultItems {
             guard case .service(let service) = item,
                   stremioStyleServiceNeedsResolvedStreams(service),
-                  let results = viewModel.moduleResults[service.id] else {
+                  viewModel.moduleResults[service.id] != nil else {
                 continue
             }
 
-            let filtered = filterResults(for: results)
+            let filtered = filteredServiceResults(for: service.id)
             let sourceCandidates = Array(
                 (filtered.highQuality + filtered.lowQuality)
                     .prefix(Self.maxStremioStyleServiceCandidatesPerSource)
@@ -1643,10 +2022,10 @@ struct ModulesSearchResultsSheet: View {
                         serviceAttentionFailedCount: attention.failedCount
                     )
                 }
-                guard let results = viewModel.moduleResults[service.id] else {
+                guard viewModel.moduleResults[service.id] != nil else {
                     return StremioStyleSourcePlan(index: offset, item: item)
                 }
-                let filtered = filterResults(for: results)
+                let filtered = filteredServiceResults(for: service.id)
                 return StremioStyleSourcePlan(
                     index: offset,
                     item: item,
@@ -1808,10 +2187,7 @@ struct ModulesSearchResultsSheet: View {
     }
 
     private func stremioStyleServiceRow(result: SearchItem, service: Service) -> some View {
-        let similarity = max(
-            algorithmManager.calculateSimilarity(original: effectiveTitle, result: result.title),
-            originalTitle.map { algorithmManager.calculateSimilarity(original: $0, result: result.title) } ?? 0
-        )
+        let similarity = serviceDisplaySimilarity(result, serviceID: service.id)
 
         return Button {
 #if os(tvOS)
@@ -1863,10 +2239,7 @@ struct ModulesSearchResultsSheet: View {
     }
 
     private func stremioStyleResolvedServiceRow(_ resolved: StremioStyleResolvedServiceStream) -> some View {
-        let similarity = max(
-            algorithmManager.calculateSimilarity(original: effectiveTitle, result: resolved.result.title),
-            originalTitle.map { algorithmManager.calculateSimilarity(original: $0, result: resolved.result.title) } ?? 0
-        )
+        let similarity = resolved.displaySimilarity
 
         return Button {
             selectStremioStyleResolvedServiceStream(resolved)
@@ -2075,14 +2448,18 @@ struct ModulesSearchResultsSheet: View {
     private func serviceSection(service: Service) -> some View {
         let results = viewModel.moduleResults[service.id]
         let hasSearched = viewModel.searchedServices.contains(service.id)
-        let isCurrentlySearching = viewModel.isSearching && !hasSearched
+        let isCurrentlySearching = (viewModel.isSearching && !hasSearched) || viewModel.pendingServiceRankings.contains(service.id)
 
         if let results = results {
-            let filteredResults = filterResults(for: results)
+            let filteredResults = filteredServiceResults(for: service.id)
+            let isAwaitingRanking = viewModel.pendingServiceRankings.contains(service.id)
+                && filteredResults.highQuality.isEmpty && filteredResults.lowQuality.isEmpty
 
-            Section(header: serviceHeader(for: service, highQualityCount: filteredResults.highQuality.count, lowQualityCount: filteredResults.lowQuality.count, isSearching: false)) {
+            Section(header: serviceHeader(for: service, highQualityCount: filteredResults.highQuality.count, lowQualityCount: filteredResults.lowQuality.count, isSearching: isAwaitingRanking)) {
                 healthWarningRow(sourceId: SourceHealth.serviceId(service))
-                if results.isEmpty || (filteredResults.highQuality.isEmpty && filteredResults.lowQuality.isEmpty) {
+                if isAwaitingRanking {
+                    searchingRow
+                } else if results.isEmpty || (filteredResults.highQuality.isEmpty && filteredResults.lowQuality.isEmpty) {
                     noResultsRow
                 } else {
                     serviceResultsContent(filteredResults: filteredResults, service: service)
@@ -2221,7 +2598,7 @@ struct ModulesSearchResultsSheet: View {
                     viewModel.selectedResult = searchResult
                     viewModel.showingPlayAlert = true
 #endif
-                }, highQualityThreshold: viewModel.highQualityThreshold
+                }, highQualityThreshold: viewModel.highQualityThreshold, cachedSimilarity: serviceDisplaySimilarity(searchResult, serviceID: service.id)
             )
         }
 
@@ -2284,7 +2661,7 @@ struct ModulesSearchResultsSheet: View {
                         viewModel.selectedResult = searchResult
                         viewModel.showingPlayAlert = true
 #endif
-                    }, highQualityThreshold: viewModel.highQualityThreshold
+                    }, highQualityThreshold: viewModel.highQualityThreshold, cachedSimilarity: serviceDisplaySimilarity(searchResult, serviceID: service.id)
                 )
             }
         }
@@ -2548,19 +2925,36 @@ struct ModulesSearchResultsSheet: View {
         Text("Choose a subtitle track")
     }
 
-    private func filterResults(for results: [SearchItem]) -> (highQuality: [SearchItem], lowQuality: [SearchItem]) {
-        let sortedResults = rankedServiceResults(results).prefix(Self.maxVisibleServiceResultsPerService)
-        let visibleResults: [RankedSearchResult]
-        if shouldDropMismatchedServiceResults {
-            visibleResults = sortedResults.filter { $0.initialSimilarity >= serviceResultMinimumSimilarity }
-        } else {
-            visibleResults = Array(sortedResults)
-        }
-        let threshold = viewModel.highQualityThreshold
-        let highQuality = visibleResults.filter { $0.initialSimilarity >= threshold }.map { $0.result }
-        let lowQuality = visibleResults.filter { $0.initialSimilarity < threshold }.map { $0.result }
+    private func filteredServiceResults(for serviceID: UUID) -> (highQuality: [SearchItem], lowQuality: [SearchItem]) {
+        guard let snapshot = viewModel.currentServiceRankingSnapshot(for: serviceID) else { return ([], []) }
+        return (snapshot.highQuality, snapshot.lowQuality)
+    }
 
-        return (highQuality, lowQuality)
+    private func serviceDisplaySimilarity(_ result: SearchItem, serviceID: UUID) -> Double {
+        viewModel.currentServiceRankingSnapshot(for: serviceID)?.displayScores[result.id] ?? 0
+    }
+
+    private var serviceRankingContext: ServiceResultRankingContext {
+        ServiceResultRankingContext(
+            algorithm: algorithmManager.selectedAlgorithm,
+            localeIdentifier: Locale.current.identifier,
+            effectiveTitle: effectiveTitle,
+            mediaTitle: mediaTitle,
+            displayTitle: displayTitle,
+            originalTitle: originalTitle,
+            seasonTitleOverride: seasonTitleOverride,
+            animeSeasonTitle: animeSeasonTitle,
+            normalizedAnimeSequelTitle: normalizedAnimeSequelTitle,
+            strippedAnimeFallbackTitle: strippedAnimeFallbackTitle,
+            isAnimeContent: isAnimeContent,
+            isForcedWatchTogetherAnimePlayback: isForcedWatchTogetherAnimePlayback,
+            selectedEpisode: selectedEpisode.map {
+                .init(seasonNumber: $0.seasonNumber, episodeNumber: $0.episodeNumber)
+            },
+            serviceResultMinimumSimilarity: serviceResultMinimumSimilarity,
+            highQualityThreshold: viewModel.highQualityThreshold,
+            dropsMismatches: shouldDropMismatchedServiceResults
+        )
     }
 
     private var isAutoModeEnabled: Bool {
@@ -2588,60 +2982,6 @@ struct ModulesSearchResultsSheet: View {
 
     private func autoModeSourceId(for item: ResultItem) -> String {
         item.sourceId
-    }
-
-    private struct RankedSearchResult {
-        let index: Int
-        let result: SearchItem
-        let initialSimilarity: Double
-        let titleSimilarity: Double
-        let animeSeasonPreference: Int
-        let tieBreakScore: Int
-    }
-
-    private func rankedServiceResults(_ results: [SearchItem]) -> [RankedSearchResult] {
-        results.enumerated().map { index, result in
-            RankedSearchResult(
-                index: index,
-                result: result,
-                initialSimilarity: resultSimilarity(result),
-                titleSimilarity: titleRankingScore(result),
-                animeSeasonPreference: animeSeasonPreferenceScore(result),
-                tieBreakScore: resultTieBreakScore(result)
-            )
-        }
-        .sorted { lhs, rhs in
-            let lhsEligible = lhs.initialSimilarity >= serviceResultMinimumSimilarity
-            let rhsEligible = rhs.initialSimilarity >= serviceResultMinimumSimilarity
-
-            if lhsEligible != rhsEligible {
-                return lhsEligible && !rhsEligible
-            }
-
-            if lhsEligible && rhsEligible,
-               lhs.animeSeasonPreference != rhs.animeSeasonPreference {
-                return lhs.animeSeasonPreference > rhs.animeSeasonPreference
-            }
-
-            if lhsEligible && rhsEligible,
-               !scoresAreEquivalent(lhs.titleSimilarity, rhs.titleSimilarity) {
-                return lhs.titleSimilarity > rhs.titleSimilarity
-            }
-
-            if !scoresAreEquivalent(lhs.initialSimilarity, rhs.initialSimilarity) {
-                return lhs.initialSimilarity > rhs.initialSimilarity
-            }
-
-            if lhs.tieBreakScore != rhs.tieBreakScore {
-                return lhs.tieBreakScore > rhs.tieBreakScore
-            }
-
-            return lhs.index < rhs.index
-        }
-    }
-
-    private func scoresAreEquivalent(_ lhs: Double, _ rhs: Double) -> Bool {
-        abs(lhs - rhs) < 0.0001
     }
 
     private func normalizeTitle(_ title: String) -> String {
@@ -2720,111 +3060,8 @@ struct ModulesSearchResultsSheet: View {
         }
     }
 
-    private func titleRankingScore(_ result: SearchItem) -> Double {
-        rankingCandidates(for: result)
-            .map { titleSimilarityForRanking(expected: $0, result: result.title) }
-            .max() ?? resultSimilarity(result)
-    }
-
-    private func rankingCandidates(for result: SearchItem) -> [String] {
-        guard isAnimeContent || animeSeasonTitle != nil,
-              let alternate = originalTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !alternate.isEmpty,
-              serviceResultLooksLikeAlternateTitle(result, alternateTitle: alternate) else {
-            return titleRankingCandidates()
-        }
-
-        return [alternate]
-    }
-
-    private func serviceResultLooksLikeAlternateTitle(_ result: SearchItem, alternateTitle: String) -> Bool {
-        let displayScore = titleSimilarityForRanking(expected: sheetTitleBaseForMatching, result: result.title)
-        let alternateScore = titleSimilarityForRanking(expected: alternateTitle, result: result.title)
-        return alternateScore >= 0.82 && alternateScore > displayScore + 0.06
-    }
-
-    private func forcedWatchTogetherAnimeResultMatchesDestination(
-        _ result: SearchItem
-    ) -> Bool {
-        guard isForcedWatchTogetherAnimePlayback else { return true }
-        let resultKey = exactWatchTogetherAnimeTitleKey(result.title)
-        guard !resultKey.isEmpty else { return false }
-        let targetKeys = [
-            seasonTitleOverride,
-            Optional(effectiveTitle),
-            Optional(mediaTitle),
-            normalizedAnimeSequelTitle
-        ]
-        .compactMap { $0 }
-        .map(exactWatchTogetherAnimeTitleKey)
-        .filter { !$0.isEmpty }
-
-        return targetKeys.contains(resultKey)
-    }
-
-    private func exactWatchTogetherAnimeTitleKey(_ rawTitle: String) -> String {
-        func collapsedWhitespace(_ value: String) -> String {
-            value
-                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        var value = collapsedWhitespace(
-            rawTitle
-                .lowercased()
-                .replacingOccurrences(of: "’", with: "'")
-                .replacingOccurrences(of: "‘", with: "'")
-                .replacingOccurrences(of: "–", with: "-")
-                .replacingOccurrences(of: "—", with: "-")
-        )
-        let technicalSuffixes = [
-            " (english dub)", " [english dub]", " - english dub", " english dub",
-            " (english sub)", " [english sub]", " - english sub", " english sub",
-            " (dual audio)", " [dual audio]", " - dual audio", " dual audio",
-            " (multi audio)", " [multi audio]", " - multi audio", " multi audio",
-            " (uncensored)", " [uncensored]", " - uncensored", " uncensored",
-            " (remastered)", " [remastered]", " - remastered", " remastered",
-            " (dubbed)", " [dubbed]", " - dubbed", " dubbed",
-            " (subbed)", " [subbed]", " - subbed", " subbed",
-            " (dub)", " [dub]", " - dub", " dub",
-            " (sub)", " [sub]", " - sub", " sub",
-            " (1080p)", " [1080p]", " - 1080p", " 1080p",
-            " (720p)", " [720p]", " - 720p", " 720p",
-            " (4k)", " [4k]", " - 4k", " 4k",
-            " (hd)", " [hd]", " - hd", " hd"
-        ]
-        var removedSuffix = true
-        while removedSuffix {
-            removedSuffix = false
-            for suffix in technicalSuffixes where value.hasSuffix(suffix) {
-                value.removeLast(suffix.count)
-                value = collapsedWhitespace(value)
-                removedSuffix = true
-                break
-            }
-        }
-        return collapsedWhitespace(stripEpisodeSuffix(from: value))
-    }
-
-    private func titleSimilarityForRanking(expected: String, result: String) -> Double {
-        let expectedCanonical = normalizeTitleForRanking(expected)
-        let resultCanonical = normalizeTitleForRanking(result)
-
-        let rawSimilarity = algorithmManager.calculateSimilarity(original: expected, result: result)
-        let canonicalSimilarity = algorithmManager.calculateSimilarity(original: expectedCanonical, result: resultCanonical)
-        let tokenScore = tokenOverlapScore(expectedCanonical, resultCanonical)
-
-        var score = max(rawSimilarity, canonicalSimilarity) * 0.70 + tokenScore * 0.30
-
-        if !expectedCanonical.isEmpty {
-            if resultCanonical == expectedCanonical {
-                score += 0.15
-            } else if resultCanonical.contains(expectedCanonical) || expectedCanonical.contains(resultCanonical) {
-                score += 0.08
-            }
-        }
-
-        return max(0, score)
+    private func forcedWatchTogetherAnimeResultMatchesDestination(_ result: SearchItem) -> Bool {
+        serviceRankingContext.forcedWatchTogetherAnimeResultMatchesDestination(result.title)
     }
 
     private func normalizeTitleForRanking(_ title: String) -> String {
@@ -2835,203 +3072,32 @@ struct ModulesSearchResultsSheet: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func tokenOverlapScore(_ lhs: String, _ rhs: String) -> Double {
-        let ignored: Set<String> = ["a", "an", "and", "the", "of", "to", "in", "on", "tv", "series", "episode"]
-        let lhsTokens = Set(lhs.split(separator: " ").map(String.init).filter { $0.count > 1 && !ignored.contains($0) })
-        let rhsTokens = Set(rhs.split(separator: " ").map(String.init).filter { $0.count > 1 && !ignored.contains($0) })
-
-        guard !lhsTokens.isEmpty, !rhsTokens.isEmpty else { return 0 }
-        let shared = lhsTokens.intersection(rhsTokens).count
-        return Double(shared) / Double(max(lhsTokens.count, rhsTokens.count))
-    }
-
-    private func resultSimilarity(_ result: SearchItem) -> Double {
-        titleMatchCandidates()
-            .map { algorithmManager.calculateSimilarity(original: $0, result: result.title) }
-            .max() ?? 0.0
-    }
-
-    private enum AnimeSeasonPreferenceMarker: Hashable {
-        case season(Int)
-        case part(Int)
-    }
-
-    private func animeSeasonPreferenceScore(_ result: SearchItem) -> Int {
-        guard isAnimeContent || animeSeasonTitle != nil,
-              let seasonNumber = selectedEpisode?.seasonNumber,
-              seasonNumber > 1 else {
-            return 0
-        }
-
-        let expectedTitle = stripEpisodeSuffix(from: effectiveTitle)
-        let expectedMarkers = animeSeasonPreferenceMarkers(
-            in: expectedTitle,
-            terminalSeasonNumber: seasonNumber
-        )
-        guard !expectedMarkers.isEmpty else { return 0 }
-
-        let resultTitle = stripEpisodeSuffix(from: result.title)
-        return expectedMarkers.allSatisfy { animeResultTitle(resultTitle, matches: $0) } ? 1 : 0
-    }
-
-    private func animeSeasonPreferenceMarkers(
-        in title: String,
-        terminalSeasonNumber: Int? = nil
-    ) -> Set<AnimeSeasonPreferenceMarker> {
-        let normalized = normalizeTitle(title)
-        let tokens = normalized.split(separator: " ").map(String.init)
-        var markers = Set<AnimeSeasonPreferenceMarker>()
-
-        for (index, token) in tokens.enumerated() {
-            let nextToken = index + 1 < tokens.count ? tokens[index + 1] : nil
-
-            if token == "season", let nextToken, let number = Int(nextToken) {
-                markers.insert(.season(number))
-            } else if let number = markerNumber(after: "season", in: token) {
-                markers.insert(.season(number))
-            }
-
-            if token == "part", let nextToken, let number = Int(nextToken) {
-                markers.insert(.part(number))
-            } else if let number = markerNumber(after: "part", in: token) {
-                markers.insert(.part(number))
-            }
-
-            if nextToken == "season", let number = ordinalNumber(from: token) {
-                markers.insert(.season(number))
-            }
-        }
-
-        if markers.isEmpty,
-           let terminalSeasonNumber,
-           titleContainsTerminalAnimeSeasonNumber(normalized, seasonNumber: terminalSeasonNumber) {
-            markers.insert(.season(terminalSeasonNumber))
-        }
-
-        return markers
-    }
-
-    private func animeResultTitle(_ title: String, matches marker: AnimeSeasonPreferenceMarker) -> Bool {
-        let explicitMarkers = animeSeasonPreferenceMarkers(in: title)
-        if explicitMarkers.contains(marker) {
-            return true
-        }
-
-        guard explicitMarkers.isEmpty,
-              case let .season(seasonNumber) = marker else {
-            return false
-        }
-
-        return titleContainsTerminalAnimeSeasonNumber(title, seasonNumber: seasonNumber)
-    }
-
-    private func titleContainsTerminalAnimeSeasonNumber(_ title: String, seasonNumber: Int) -> Bool {
-        let patterns = [
-            "[a-z]\(seasonNumber)$",
-            "\\b\(seasonNumber)$"
-        ]
-        return patterns.contains { title.range(of: $0, options: .regularExpression) != nil }
-    }
-
-    private func markerNumber(after prefix: String, in token: String) -> Int? {
-        guard token.hasPrefix(prefix) else { return nil }
-        let suffix = token.dropFirst(prefix.count)
-        return suffix.isEmpty ? nil : Int(suffix)
-    }
-
-    private func ordinalNumber(from token: String) -> Int? {
-        for suffix in ["st", "nd", "rd", "th"] where token.hasSuffix(suffix) {
-            return Int(token.dropLast(suffix.count))
-        }
-        return nil
-    }
-
-    private func resultTieBreakScore(_ result: SearchItem) -> Int {
-        let normalizedResult = normalizeTitle(result.title)
-        let expectedTitles = titleMatchCandidates()
-            .map(normalizeTitle)
-            .filter { !$0.isEmpty }
-
-        var score = 0
-        for candidate in expectedTitles {
-            if normalizedResult == candidate {
-                score += 10
-            } else if normalizedResult.contains(candidate) || candidate.contains(normalizedResult) {
-                score += 4
-            }
-        }
-
-        if let episode = selectedEpisode {
-            let seasonEpisodeToken = "s\(episode.seasonNumber)e\(episode.episodeNumber)"
-            let episodeToken = "e\(episode.episodeNumber)"
-            if normalizedResult.contains(seasonEpisodeToken) || normalizedResult.contains(episodeToken) {
-                score += 3
-            }
-        }
-
-        if !sheetTitleBaseForMatching.isEmpty {
-            let sheetScore = algorithmManager.calculateSimilarity(original: sheetTitleBaseForMatching, result: result.title)
-            score += Int(sheetScore * 10)
-        }
-
-        return score
-    }
-
-    private func bestServiceResult(for service: Service) -> SearchItem? {
-        guard let results = viewModel.moduleResults[service.id], !results.isEmpty else { return nil }
-        let ranked = rankedServiceResults(results)
-        let best: RankedSearchResult?
-        if isForcedWatchTogetherAnimePlayback {
-            best = ranked.first { forcedWatchTogetherAnimeResultMatchesDestination($0.result) }
-        } else {
-            best = ranked.first
-        }
-        guard let best else { return nil }
-        guard shouldDropMismatchedServiceResults else { return best.result }
-        return best.initialSimilarity >= serviceResultMinimumSimilarity ? best.result : nil
+    private func bestServiceResult(for service: Service) async -> SearchItem? {
+        viewModel.updateRankingContext(serviceRankingContext)
+        guard let snapshot = await viewModel.awaitServiceRanking(service.id),
+              let best = snapshot.ranked.first(where: { $0.score.matchesForcedDestination }) else { return nil }
+        guard snapshot.context.dropsMismatches else { return best.result }
+        return best.score.initialSimilarity >= snapshot.context.serviceResultMinimumSimilarity ? best.result : nil
     }
 
 #if os(iOS)
-    private func highConfidenceServiceResult(for service: Service) -> SearchItem? {
-        guard let results = viewModel.moduleResults[service.id], !results.isEmpty else { return nil }
-        let ranked = rankedServiceResults(results)
-        let best: RankedSearchResult?
-        if isForcedWatchTogetherAnimePlayback {
-            best = ranked.first { forcedWatchTogetherAnimeResultMatchesDestination($0.result) }
-        } else {
-            best = ranked.first
-        }
-        guard let best,
+    private func highConfidenceServiceResult(for service: Service) async -> SearchItem? {
+        viewModel.updateRankingContext(serviceRankingContext)
+        guard let snapshot = await viewModel.awaitServiceRanking(service.id),
+              let best = snapshot.ranked.first(where: { $0.score.matchesForcedDestination }),
               ServicesSearchShortCircuitPolicy.accepts(
-                initialSimilarity: best.initialSimilarity,
-                titleSimilarity: best.titleSimilarity,
-                animeSeasonPreference: best.animeSeasonPreference,
-                minimumSimilarity: serviceResultMinimumSimilarity
-              ) else {
-            return nil
-        }
+                initialSimilarity: best.score.initialSimilarity,
+                titleSimilarity: best.score.titleSimilarity,
+                animeSeasonPreference: best.score.animeSeasonPreference,
+                minimumSimilarity: snapshot.context.serviceResultMinimumSimilarity
+              ) else { return nil }
         return best.result
     }
 #endif
 
-    private func retainedServiceResults(_ results: [SearchItem]) -> [SearchItem] {
-        guard results.count > Self.maxRetainedServiceResultsPerService else {
-            return results
-        }
-
-        return rankedServiceResults(results)
-            .prefix(Self.maxRetainedServiceResultsPerService)
-            .map { $0.result }
-    }
-
-    private func mergedServiceResults(existing: [SearchItem], additional: [SearchItem]) -> [SearchItem] {
-        guard !additional.isEmpty else {
-            return retainedServiceResults(existing)
-        }
-
-        var seenHrefs = Set(existing.map { $0.href })
-        let newResults = additional.filter { seenHrefs.insert($0.href).inserted }
-        return retainedServiceResults(existing + newResults)
+    private func publishServiceResults(_ results: [SearchItem], for serviceID: UUID, merging: Bool = false) {
+        viewModel.updateRankingContext(serviceRankingContext)
+        viewModel.enqueueServiceResults(results, serviceID: serviceID, merging: merging)
     }
 
     private func extraSettingsHiddenReason(
@@ -3844,6 +3910,8 @@ struct ModulesSearchResultsSheet: View {
 
     @MainActor
     private func beginNewManualSearchGeneration() {
+        resolvedPlaybackHandoff.cancelPending()
+        viewModel.cancelServiceRankings()
 #if os(iOS)
         cancelServiceSearch()
 #endif
@@ -3872,6 +3940,8 @@ struct ModulesSearchResultsSheet: View {
     @MainActor
     private func pauseSheetWorkForInactiveScene() {
         guard isSheetActive else { return }
+        resolvedPlaybackHandoff.cancelPending()
+        viewModel.cancelServiceRankings()
 
 #if os(iOS)
         cancelServiceSearch()
@@ -3898,6 +3968,7 @@ struct ModulesSearchResultsSheet: View {
         guard sheetWorkIsActive else { return }
 
         beginNewManualSearchGeneration()
+        viewModel.updateRankingContext(serviceRankingContext)
         resetStremioStyleServiceResolution()
         cancelAutoModeDownloadValidation()
         autoModeSelectionTask?.cancel()
@@ -4014,6 +4085,7 @@ struct ModulesSearchResultsSheet: View {
 
     @MainActor
     private func beginStremioStyleServiceResolution(service: Service, result: SearchItem) {
+        let displaySimilarity = serviceDisplaySimilarity(result, serviceID: service.id)
         let generation = stremioStyleServiceResolutionGeneration
         let key = stremioStyleServiceResolutionKey(service: service, result: result)
         guard case .queued = stremioStyleServiceResolutionStates[key],
@@ -4099,7 +4171,8 @@ struct ModulesSearchResultsSheet: View {
                                 result: result,
                                 option: option,
                                 topLevelSubtitles: streamResult.subtitles,
-                                resolvedAt: resolvedAt
+                                resolvedAt: resolvedAt,
+                                displaySimilarity: displaySimilarity
                             )
                         }
                         if resolved.isEmpty {
@@ -4197,6 +4270,9 @@ struct ModulesSearchResultsSheet: View {
 
     @MainActor
     private func runAutoModeSelection() async {
+        let searchGeneration = manualSearchGeneration
+        let scopeAuthority = ProviderPlaybackScopeAuthority.capture()
+        let accountEpoch = viewModel.serviceRankingAccountEpoch
         let orderedSelections = activeAutoModeItems.filter {
             !autoModeAttemptedSourceIds.contains($0.sourceId)
         }
@@ -4211,12 +4287,18 @@ struct ModulesSearchResultsSheet: View {
             inputs: orderedSelections,
             isCurrent: {
                 !autoModeCancelled && forcedWatchTogetherMediaIsCurrent()
+                    && isCurrentManualSearchGeneration(searchGeneration) && scopeAuthority.isCurrent
+                    && viewModel.serviceRankingAccountEpoch == accountEpoch
             },
             attempt: { item in
                 autoModeAttemptedSourceIds.insert(item.sourceId)
                 switch item {
                 case .service(let service):
-                    if let result = bestServiceResult(for: service) {
+                    if let result = await bestServiceResult(for: service) {
+                        guard isCurrentManualSearchGeneration(searchGeneration), scopeAuthority.isCurrent,
+                              viewModel.serviceRankingAccountEpoch == accountEpoch,
+                              !Task.isCancelled, !autoModeCancelled,
+                              forcedWatchTogetherMediaIsCurrent() else { return false }
                         await playContent(result, autoModeLaunch: true)
                         return true
                     }
@@ -4268,7 +4350,8 @@ struct ModulesSearchResultsSheet: View {
             }
         )
 
-        guard outcome == .exhausted else { return }
+        guard outcome == .exhausted, isCurrentManualSearchGeneration(searchGeneration), scopeAuthority.isCurrent,
+              viewModel.serviceRankingAccountEpoch == accountEpoch else { return }
 
         viewModel.streamError = "Auto Mode could not find a playable match in the selected sources. Try selecting more \(sourceKindList)."
         viewModel.showingStreamError = true
@@ -4310,7 +4393,14 @@ struct ModulesSearchResultsSheet: View {
     }
 
     @MainActor
-    private func deactivateSheetForDismissal() {
+    private func deactivateSheetForDismissal(permanently: Bool = true) {
+        resolvedPlaybackHandoff.cancelPending()
+        viewModel.cancelServiceRankings()
+        if permanently {
+            sheetActivity.dismiss()
+        } else {
+            _ = sheetActivity.disappear()
+        }
         isSheetActive = false
         if sceneAllowsWork {
             beginNewManualSearchGeneration()
@@ -4380,59 +4470,116 @@ struct ModulesSearchResultsSheet: View {
 
     @MainActor
     private func finishResolvedPlayback(_ request: PlayerResolvedPlaybackRequest) {
+        guard onResolvedPlaybackRequest != nil, sheetWorkIsActive,
+              let operation = resolvedPlaybackHandoff.begin(url: request.url) else {
+            discardResolvedPlayback(request)
+            return
+        }
+        let authority = ProviderPlaybackScopeAuthority.capture()
+        let accountEpoch = viewModel.serviceRankingAccountEpoch
+        let searchGeneration = manualSearchGeneration
+        let runToken = autoModeRunToken
+        let recoveryIdentity = autoModeRecoveryIdentity
+        let targetToken = requestToken
+        let watchTogetherIdentity = resolvedPlaybackWatchTogetherIdentity
+        let ownerIsCurrent = {
+            authority.isCurrent
+                && viewModel.serviceRankingAccountEpoch == accountEpoch
+                && autoModeRecoveryIdentity == recoveryIdentity
+                && playbackRecoveryIdentityIsCurrent
+                && requestToken == targetToken
+                && resolvedPlaybackWatchTogetherIdentity == watchTogetherIdentity
+                && forcedWatchTogetherSharedMediaMatchesCurrent()
+        }
+        let onPass = {
+            finishResolvedPlaybackAfterPreflight(
+                request,
+                operation: operation,
+                canClaim: !Task.isCancelled && sheetWorkIsActive
+                    && manualSearchGeneration == searchGeneration
+                    && autoModeRunToken == runToken && ownerIsCurrent(),
+                ownerIsCurrent: ownerIsCurrent
+            )
+        }
         guard let launchContext = request.launchContext,
               let probeTarget = autoModePreflightProbeTarget(
                   launchContext,
                   url: request.url,
                   headers: request.headers ?? [:]
               ) else {
-            finishResolvedPlaybackAfterPreflight(request)
+            onPass()
             return
         }
 
         runAutoModePreflight(
             url: probeTarget.url,
             headers: probeTarget.headers,
-            launchContext: launchContext
-        ) {
-            finishResolvedPlaybackAfterPreflight(request)
-        }
+            launchContext: launchContext,
+            onAbandon: {
+                resolvedPlaybackHandoff.cancelPending(operation)
+                discardResolvedPlayback(request)
+            },
+            onPass: onPass
+        )
     }
 
     @MainActor
-    private func finishResolvedPlaybackAfterPreflight(_ request: PlayerResolvedPlaybackRequest) {
-        guard let onResolvedPlaybackRequest else {
-            invalidateAbandonedSkyStreamProxy(
-                request.url,
-                launchContext: request.launchContext
-            )
-            return
-        }
-
-        guard sheetWorkIsActive else {
-            invalidateAbandonedSkyStreamProxy(
-                request.url,
-                launchContext: request.launchContext
-            )
+    private func finishResolvedPlaybackAfterPreflight(
+        _ request: PlayerResolvedPlaybackRequest,
+        operation: ServicesResolvedPlaybackHandoffState.Operation,
+        canClaim: Bool,
+        ownerIsCurrent: @escaping () -> Bool
+    ) {
+        guard let onResolvedPlaybackRequest,
+              resolvedPlaybackHandoff.claim(operation, isCurrent: canClaim) else {
+            resolvedPlaybackHandoff.cancelPending(operation)
+            discardResolvedPlayback(request)
             Logger.shared.log(
-                "ServicesResultsSheet: discarded resolved playback request because the source sheet is no longer active",
+                "ServicesResultsSheet: discarded resolved playback request because its handoff is no longer current",
                 type: "Player"
             )
             return
         }
         onPlaybackSelectionCommitted?()
+        deactivateSheetForDismissal()
+        let deliver = {
+            switch resolvedPlaybackHandoff.complete(operation, isCurrent: ownerIsCurrent()) {
+            case .deliver:
+                onResolvedPlaybackRequest(request)
+            case .discard:
+                discardResolvedPlayback(request)
+            case .ignore:
+                break
+            }
+        }
 
         if shouldDismissAutoModeSheetBeforePlayback {
             dismissAutoModeSheetBeforePlaybackIfNeeded { _ in
-                onResolvedPlaybackRequest(request)
+                deliver()
             }
             return
         }
 
         presentationMode.wrappedValue.dismiss()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            onResolvedPlaybackRequest(request)
+            deliver()
         }
+    }
+
+    @MainActor
+    private var resolvedPlaybackWatchTogetherIdentity: WatchTogetherPlaybackHandoffIdentity? {
+#if os(iOS)
+        guard forceAutomaticPlayback || watchTogetherExactHandoff else { return nil }
+        return WatchTogetherCoordinator.shared.playbackHandoffIdentity
+#else
+        return nil
+#endif
+    }
+
+    @MainActor
+    private func discardResolvedPlayback(_ request: PlayerResolvedPlaybackRequest) {
+        guard !resolvedPlaybackHandoff.retainsResource(at: request.url) else { return }
+        invalidateAbandonedSkyStreamProxy(request.url, launchContext: request.launchContext)
     }
 
     @MainActor
@@ -4620,7 +4767,7 @@ struct ModulesSearchResultsSheet: View {
         autoModeAttemptedSourceIds = activeAutoModeRetrySession?.attemptedSourceIds ?? []
         autoModeRetryScheduled = false
         autoModeLastFailureMessage = activeAutoModeRetrySession?.lastFailureMessage
-        viewModel.moduleResults.removeAll()
+        viewModel.clearServiceResults()
         clearAllStremioStreams()
 #if os(iOS) && !targetEnvironment(macCatalyst)
         skyStreamResults.removeAll()
@@ -4760,6 +4907,7 @@ struct ModulesSearchResultsSheet: View {
         runToken: AutoModeRunIdentity
     ) async -> [StremioStyleResolvedServiceStream] {
         guard isCurrentAutoModeQualityPreflight(runToken) else { return [] }
+        let displaySimilarity = serviceDisplaySimilarity(result, serviceID: service.id)
 
         let work = StremioStyleServiceResolutionWork(
             key: "auto-quality|\(runToken.generation.uuidString)|\(service.id.uuidString)|\(result.href)",
@@ -4802,7 +4950,8 @@ struct ModulesSearchResultsSheet: View {
                 result: result,
                 option: option,
                 topLevelSubtitles: streamResult.subtitles,
-                resolvedAt: resolvedAt
+                resolvedAt: resolvedAt,
+                displaySimilarity: displaySimilarity
             )
         }
     }
@@ -5277,7 +5426,12 @@ struct ModulesSearchResultsSheet: View {
         runToken: AutoModeRunIdentity? = nil,
         allowsCachedResult: Bool = false
     ) async -> SearchItem? {
+        let searchGeneration = manualSearchGeneration
+        let scopeAuthority = ProviderPlaybackScopeAuthority.capture()
+        let accountEpoch = viewModel.serviceRankingAccountEpoch
         func isCurrentRun() -> Bool {
+            guard isCurrentManualSearchGeneration(searchGeneration), scopeAuthority.isCurrent,
+                  viewModel.serviceRankingAccountEpoch == accountEpoch else { return false }
             if let runToken {
                 return isCurrentAutoModeQualityPreflight(runToken)
             }
@@ -5286,8 +5440,8 @@ struct ModulesSearchResultsSheet: View {
                 && forcedWatchTogetherMediaIsCurrent()
         }
 
-        if allowsCachedResult, let cached = bestServiceResult(for: service) {
-            return cached
+        if allowsCachedResult, let cached = await bestServiceResult(for: service) {
+            return isCurrentRun() ? cached : nil
         }
 
         var combined: [SearchItem] = []
@@ -5300,17 +5454,20 @@ struct ModulesSearchResultsSheet: View {
             guard isCurrentRun() else { return nil }
             let newResults = results.filter { seenHrefs.insert($0.href).inserted }
             combined.append(contentsOf: newResults)
-            combined = retainedServiceResults(combined)
-            viewModel.moduleResults[service.id] = combined
+            publishServiceResults(combined, for: service.id)
+            _ = await viewModel.awaitServiceRanking(service.id)
+            guard isCurrentRun() else { return nil }
+            combined = viewModel.moduleResults[service.id] ?? []
             viewModel.searchedServices.insert(service.id)
 #if os(iOS)
-            if let highConfidenceResult = highConfidenceServiceResult(for: service) {
-                return highConfidenceResult
+            if let highConfidenceResult = await highConfidenceServiceResult(for: service) {
+                return isCurrentRun() ? highConfidenceResult : nil
             }
 #endif
         }
 
-        return bestServiceResult(for: service)
+        let best = await bestServiceResult(for: service)
+        return isCurrentRun() ? best : nil
     }
 
     @MainActor
@@ -5549,6 +5706,7 @@ struct ModulesSearchResultsSheet: View {
         url: URL,
         headers: [String: String],
         launchContext: PlaybackLaunchContext,
+        onAbandon: (() -> Void)? = nil,
         onPass: @escaping () -> Void
     ) {
         guard let runToken = autoModeRunToken else {
@@ -5566,7 +5724,11 @@ struct ModulesSearchResultsSheet: View {
             var forwardedToPlayback = false
             defer {
                 if !forwardedToPlayback {
-                    launchContext.ephemeralProxyOwnership?.invalidate()
+                    if let onAbandon {
+                        onAbandon()
+                    } else {
+                        launchContext.ephemeralProxyOwnership?.invalidate()
+                    }
                 }
             }
             let startedAt = Date()
@@ -5735,7 +5897,7 @@ struct ModulesSearchResultsSheet: View {
         beginNewManualSearchGeneration()
         resetStremioStyleServiceResolution()
         showManualPicker = true
-        viewModel.moduleResults.removeAll()
+        viewModel.clearServiceResults()
         viewModel.stremioResults.removeAll()
         viewModel.stremioOutcomes.removeAll()
         viewModel.searchedServices.removeAll()
@@ -6045,7 +6207,7 @@ struct ModulesSearchResultsSheet: View {
 
         .interactiveDismissDisabled(onResolvedPlaybackRequest != nil)
         .background(
-            ServicesSheetPresentationAnchor { controller in
+            ServicesSheetPresentationAnchor(onResolve: { controller in
                 if sheetHostController !== controller {
                     sheetHostController = controller
                 }
@@ -6053,23 +6215,45 @@ struct ModulesSearchResultsSheet: View {
 
                     controller.isModalInPresentation = true
                 }
-            }
+            }, onSceneActivity: { sceneID, isActive in
+                let transition = sheetActivity.updateScene(id: sceneID, isActive: isActive)
+                applySheetActivityTransition(transition)
+            })
             .frame(width: 0, height: 0)
         )
         .onAppear {
+            guard !sheetActivity.isDismissed else { return }
             isSheetActive = true
-            sceneAllowsWork = scenePhase == .active
-            let shouldStartFresh = !hasStartedSheetWork
-            hasStartedSheetWork = true
-            resumeSheetWorkAfterActivation(restartCompletedSearches: shouldStartFresh)
+            let transition = sheetActivity.appear(environmentIsActive: scenePhase == .active)
+            applySheetActivityTransition(transition)
         }
         .onChangeComp(of: scenePhase) { _, newPhase in
-            sceneAllowsWork = newPhase == .active
-            if newPhase == .active {
-                resumeSheetWorkAfterActivation(restartCompletedSearches: false)
-            } else {
-                pauseSheetWorkForInactiveScene()
-            }
+            let transition = sheetActivity.updateEnvironment(isActive: newPhase == .active)
+            applySheetActivityTransition(transition)
+        }
+        .onChangeComp(of: serviceRankingContext) { _, context in
+            guard sheetWorkIsActive else { return }
+            viewModel.updateRankingContext(context)
+        }
+        .onChangeComp(of: viewModel.serviceRankingRevision) { _, _ in
+            guard sheetWorkIsActive else { return }
+            scheduleStremioStyleServiceResolutionAfterSearchUpdate()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .activeProfileDidChange)) { _ in
+            beginNewManualSearchGeneration()
+            viewModel.clearServiceResults()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .CKAccountChanged)) { _ in
+            beginNewManualSearchGeneration()
+            viewModel.clearServiceResults()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSUbiquityIdentityDidChange)) { _ in
+            beginNewManualSearchGeneration()
+            viewModel.clearServiceResults()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ServiceStoreScope.didChangeNotification)) { _ in
+            beginNewManualSearchGeneration()
+            viewModel.clearServiceResults()
         }
         .onChangeComp(of: requestToken) { _, _ in
             Logger.shared.log("ServicesResultsSheet request token changed: \(requestToken)", type: "Stream")
@@ -6085,7 +6269,7 @@ struct ModulesSearchResultsSheet: View {
             if autoModeOnly && !showManualPicker {
                 startAutoModeIfNeeded()
             } else {
-                viewModel.moduleResults.removeAll()
+                viewModel.clearServiceResults()
                 clearAllStremioStreams()
                 viewModel.searchedServices.removeAll()
                 viewModel.stremioSearchedAddons.removeAll()
@@ -6169,7 +6353,7 @@ struct ModulesSearchResultsSheet: View {
                 startAutoModeIfNeeded()
             } else {
                 resetStremioStyleServiceResolution()
-                viewModel.moduleResults.removeAll()
+                viewModel.clearServiceResults()
                 clearAllStremioStreams()
                 viewModel.searchedServices.removeAll()
                 viewModel.stremioSearchedAddons.removeAll()
@@ -6260,7 +6444,7 @@ struct ModulesSearchResultsSheet: View {
         }
 #endif
         .onDisappear {
-            deactivateSheetForDismissal()
+            deactivateSheetForDismissal(permanently: false)
         }
         .alert(downloadMode ? "Download Stream" : "Play Stream", isPresented: $viewModel.showingStremioPlayAlert) {
             Button(actionVerb) {
@@ -6383,7 +6567,7 @@ struct ModulesSearchResultsSheet: View {
                 onResult: { service, results in
                     Task { @MainActor in
                         guard self.isCurrentManualSearchGeneration(searchGeneration) else { return }
-                        self.viewModel.moduleResults[service.id] = self.retainedServiceResults(results ?? [])
+                        self.publishServiceResults(results ?? [], for: service.id)
                         self.viewModel.searchedServices.insert(service.id)
                         self.scheduleStremioStyleServiceResolutionAfterSearchUpdate()
 
@@ -6404,8 +6588,7 @@ struct ModulesSearchResultsSheet: View {
                                     Task { @MainActor in
                                         guard self.isCurrentManualSearchGeneration(searchGeneration) else { return }
                                         let additional = additionalResults ?? []
-                                        let existing = self.viewModel.moduleResults[service.id] ?? []
-                                        self.viewModel.moduleResults[service.id] = self.mergedServiceResults(existing: existing, additional: additional)
+                                        self.publishServiceResults(additional, for: service.id, merging: true)
                                         self.scheduleStremioStyleServiceResolutionAfterSearchUpdate()
 
                                         if additionalResults == nil {
@@ -6423,8 +6606,7 @@ struct ModulesSearchResultsSheet: View {
                                                     Task { @MainActor in
                                                         guard self.isCurrentManualSearchGeneration(searchGeneration) else { return }
                                                         let additional = additionalResults ?? []
-                                                        let existing = self.viewModel.moduleResults[service.id] ?? []
-                                                        self.viewModel.moduleResults[service.id] = self.mergedServiceResults(existing: existing, additional: additional)
+                                                        self.publishServiceResults(additional, for: service.id, merging: true)
                                                         self.scheduleStremioStyleServiceResolutionAfterSearchUpdate()
 
                                                         if additionalResults == nil {
@@ -6458,8 +6640,7 @@ struct ModulesSearchResultsSheet: View {
                                     Task { @MainActor in
                                         guard self.isCurrentManualSearchGeneration(searchGeneration) else { return }
                                         let additional = additionalResults ?? []
-                                        let existing = self.viewModel.moduleResults[service.id] ?? []
-                                        self.viewModel.moduleResults[service.id] = self.mergedServiceResults(existing: existing, additional: additional)
+                                        self.publishServiceResults(additional, for: service.id, merging: true)
                                         self.scheduleStremioStyleServiceResolutionAfterSearchUpdate()
 
                                         if additionalResults == nil {
@@ -6531,7 +6712,7 @@ struct ModulesSearchResultsSheet: View {
                             return
                         }
                         if isPrimaryQuery {
-                            self.viewModel.moduleResults[service.id] = self.retainedServiceResults(results ?? [])
+                            self.publishServiceResults(results ?? [], for: service.id)
                             self.viewModel.searchedServices.insert(service.id)
                             if results == nil {
                                 self.viewModel.failedServices.insert(service.id)
@@ -6540,11 +6721,7 @@ struct ModulesSearchResultsSheet: View {
                             }
                         } else {
                             let additional = results ?? []
-                            let existing = self.viewModel.moduleResults[service.id] ?? []
-                            self.viewModel.moduleResults[service.id] = self.mergedServiceResults(
-                                existing: existing,
-                                additional: additional
-                            )
+                            self.publishServiceResults(additional, for: service.id, merging: true)
                             if results == nil {
                                 self.viewModel.failedServices.insert(service.id)
                             }
@@ -6559,9 +6736,14 @@ struct ModulesSearchResultsSheet: View {
                       self.isCurrentManualSearchGeneration(searchGeneration) else {
                     return
                 }
-                remainingServices = remainingServices.filter {
-                    self.highConfidenceServiceResult(for: $0) == nil
+                var unresolvedServices: [Service] = []
+                for service in remainingServices {
+                    guard !Task.isCancelled, self.isCurrentManualSearchGeneration(searchGeneration) else { return }
+                    if await self.highConfidenceServiceResult(for: service) == nil {
+                        unresolvedServices.append(service)
+                    }
                 }
+                remainingServices = unresolvedServices
             }
         }
 #endif
@@ -10724,12 +10906,9 @@ struct CompactMediaResultRow: View {
     let episode: TMDBEpisode?
     let onTap: () -> Void
     let highQualityThreshold: Double
+    let cachedSimilarity: Double
 
-    private var similarityScore: Double {
-        let primarySimilarity = calculateSimilarity(original: originalTitle, result: result.title)
-        let alternativeSimilarity = alternativeTitle.map { calculateSimilarity(original: $0, result: result.title) } ?? 0.0
-        return max(primarySimilarity, alternativeSimilarity)
-    }
+    private var similarityScore: Double { cachedSimilarity }
 
     private func scoreColor(for similarityScore: Double) -> Color {
         if similarityScore >= highQualityThreshold { return .green }
@@ -10808,12 +10987,9 @@ struct EnhancedMediaResultRow: View {
     let episode: TMDBEpisode?
     let onTap: () -> Void
     let highQualityThreshold: Double
+    let cachedSimilarity: Double
 
-    private var similarityScore: Double {
-        let primarySimilarity = calculateSimilarity(original: originalTitle, result: result.title)
-        let alternativeSimilarity = alternativeTitle.map { calculateSimilarity(original: $0, result: result.title) } ?? 0.0
-        return max(primarySimilarity, alternativeSimilarity)
-    }
+    private var similarityScore: Double { cachedSimilarity }
 
     private func scoreColor(for similarityScore: Double) -> Color {
         if similarityScore >= highQualityThreshold { return .green }

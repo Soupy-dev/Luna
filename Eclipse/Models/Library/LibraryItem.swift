@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct LibraryItem: Codable, Identifiable {
+struct LibraryItem: Codable, Identifiable, Sendable {
 
     var id: String { searchResult.stableIdentity }
     let searchResult: TMDBSearchResult

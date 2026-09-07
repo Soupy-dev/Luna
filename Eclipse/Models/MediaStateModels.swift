@@ -1472,7 +1472,7 @@ enum MediaStateRecordName {
     }
 }
 
-struct MediaStateServiceSource: Codable, Equatable {
+struct MediaStateServiceSource: Codable, Sendable, Equatable {
     let id: UUID
     let url: String
     let jsonMetadata: String
@@ -1481,7 +1481,7 @@ struct MediaStateServiceSource: Codable, Equatable {
     let sortIndex: Int64
 }
 
-struct MediaStateStremioAddon: Codable, Equatable {
+struct MediaStateStremioAddon: Codable, Sendable, Equatable {
     let id: UUID
     let configuredURL: String
     let manifestJSON: String

@@ -45,6 +45,8 @@ struct MangaDetailView: View {
     @State private var chapterEngine = KanzenEngine()
     @State private var loadingChapters: Bool = false
     @State private var loadedChapters: [Chapters]?
+    @State private var chapterSnapshot: LegacyReaderChapterSnapshot?
+    @State private var chapterLoadGeneration = UUID()
     @State private var chapterLanguageIdx: Int = 0
     @State private var reverseChapters: Bool = false
     @State private var selectedChapterData: Chapter?
@@ -131,8 +133,12 @@ struct MangaDetailView: View {
         )
     }
 
+    private var selectedChapterSnapshot: LegacyReaderChapterSnapshot.Group? {
+        chapterSnapshot?.group(at: chapterLanguageIdx)
+    }
+
     private var currentChapterNumbers: [String]? {
-        chapterNumbers(from: loadedChapters)
+        chapterSnapshot?.latestChapterNumbers
     }
 
     private var selectedContentRoute: MangaContentRoute? {
@@ -225,6 +231,13 @@ struct MangaDetailView: View {
             }
         }
 
+        .onReceive(NotificationCenter.default.publisher(for: .activeProfileDidChange)) { _ in
+            selectedChapterData = nil
+            chapterLoadGeneration = UUID()
+            if loadingChapters, let selectedSource {
+                selectSource(selectedSource)
+            }
+        }
         .task {
             await resolveDetailsIfNeeded()
             await retryDetailsIfStale()
@@ -353,13 +366,9 @@ struct MangaDetailView: View {
             ActivityView(items: item.items)
         }
 
-        .onReceive(NotificationCenter.default.publisher(for: .activeProfileDidChange)) { _ in
-            selectedChapterData = nil
-        }
         .fullScreenCover(item: $selectedChapterData) { chapter in
-            if let chapters = loadedChapters, chapterLanguageIdx < chapters.count {
-                let chapterList = chapters[chapterLanguageIdx].chapters
-                let readerChapterList = readerChapters(from: chapterList)
+            if let group = selectedChapterSnapshot {
+                let readerChapterList = group.readerChapters
                 let selectedReaderChapter = readerChapterList.first {
                     $0.chapterNumber == chapter.chapterNumber
                 } ?? readerChapterList.first ?? chapter
@@ -865,6 +874,8 @@ struct MangaDetailView: View {
                         withAnimation {
                             selectedSource = nil
                             loadedChapters = nil
+                            chapterSnapshot = nil
+                            chapterLoadGeneration = UUID()
                             chapterLoadError = nil
                             loadingChapters = false
                             chapterLanguageIdx = 0
@@ -919,8 +930,9 @@ struct MangaDetailView: View {
 
     @ViewBuilder
     private func chapterListView(_ allChapters: [Chapters]) -> some View {
-        let selected = allChapters[chapterLanguageIdx]
-        let displayed: [Chapter] = reverseChapters ? Array(selected.chapters.reversed()) : selected.chapters
+        let group = selectedChapterSnapshot
+        let selected = group?.original ?? Chapters(language: "", chapters: [])
+        let displayed = reverseChapters ? (group?.reversed ?? []) : selected.chapters
 
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -1204,29 +1216,10 @@ struct MangaDetailView: View {
     private func readButton(chapters: [Chapter]) -> some View {
         let lastRead = progressManager.lastReadChapter(for: progressMangaId)
         let readChapters = progressManager.readChapters(for: progressMangaId)
-        let readKeys = Set(readChapters.map { ChapterIdentityNormalizer.key(for: $0) })
+        let readKeys = progressManager.normalizedReadChapterKeys(for: progressMangaId)
         let hasProgress = lastRead != nil || !readChapters.isEmpty
 
-        let targetChapter: Chapter? = {
-            if let lastRead = lastRead {
-
-                let lastReadKey = ChapterIdentityNormalizer.key(for: lastRead)
-                if !readKeys.contains(lastReadKey),
-                   let ch = chapters.first(where: {
-                    $0.chapterNumber == lastRead ||
-                    ChapterIdentityNormalizer.key(for: $0.chapterNumber) == lastReadKey
-                }) {
-                    return ch
-                }
-            }
-
-            if let unread = chronologicalChapters(chapters).first(where: {
-                !readKeys.contains(ChapterIdentityNormalizer.key(for: $0.chapterNumber))
-            }) {
-                return unread
-            }
-            return chronologicalChapters(chapters).first
-        }()
+        let targetChapter = selectedChapterSnapshot?.readingTarget(lastRead: lastRead, readKeys: readKeys)
 
         if let target = targetChapter {
             Button {
@@ -1256,49 +1249,16 @@ struct MangaDetailView: View {
         }
     }
 
-    private func chronologicalChapters(_ chapters: [Chapter]) -> [Chapter] {
-        chapters.sorted { lhs, rhs in
-            let lhsNumber = numericChapterValue(lhs.chapterNumber)
-            let rhsNumber = numericChapterValue(rhs.chapterNumber)
-            switch (lhsNumber, rhsNumber) {
-            case let (lhsValue?, rhsValue?):
-                if lhsValue != rhsValue { return lhsValue < rhsValue }
-                return lhs.idx < rhs.idx
-            case (.some, .none):
-                return true
-            case (.none, .some):
-                return false
-            case (.none, .none):
-                return lhs.idx > rhs.idx
-            }
-        }
-    }
 
-    private func numericChapterValue(_ text: String) -> Double? {
-        let pattern = #"(\d+(?:\.\d+)?)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let range = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: range)
-        guard let match = matches.last,
-              let valueRange = Range(match.range(at: 1), in: text) else { return nil }
-        return Double(text[valueRange])
-    }
-
-    private func readerChapters(from chapters: [Chapter]) -> [Chapter] {
-        ChapterIdentityNormalizer.deduplicatedChapters(chronologicalChapters(chapters), reindex: false).enumerated().map { index, chapter in
-            Chapter(
-                chapterNumber: chapter.chapterNumber,
-                idx: index,
-                chapterData: chapter.chapterData
-            )
-        }
-    }
 
     private func selectSource(_ match: SourceMatch) {
         selectedSource = match
         let owner = ProfileManager.shared.activeProfileID
+        let generation = UUID()
+        chapterLoadGeneration = generation
         loadingChapters = true
         loadedChapters = nil
+        chapterSnapshot = nil
         chapterLoadError = nil
         chapterLanguageIdx = 0
 
@@ -1307,16 +1267,23 @@ struct MangaDetailView: View {
                 let engine = KanzenEngine()
                 let script = try ModuleManager.shared.getModuleScript(module: match.module)
                 try await engine.loadScript(script, module: match.module)
-                guard selectedSource?.module.id == match.module.id,
+                guard chapterLoadGeneration == generation,
+                      selectedSource?.module.id == match.module.id,
                       selectedSource?.manga.mangaId == match.manga.mangaId else { return }
                 chapterEngine = engine
 
                 guard let result = try await engine.extractChapters(params: match.manga.mangaId) else {
+                    guard chapterLoadGeneration == generation else { return }
                     loadedChapters = []
+                    chapterSnapshot = nil
                     loadingChapters = false
                     return
                 }
+                guard chapterLoadGeneration == generation else { return }
                 let parsed = parsedLegacyChapters(result)
+                let snapshot = await LegacyReaderChapterSnapshot.prepare(parsed)
+                guard chapterLoadGeneration == generation else { return }
+                chapterSnapshot = snapshot
                 loadedChapters = parsed
                 loadingChapters = false
                 if !parsed.isEmpty, ProfileManager.shared.isStillActive(owner) {
@@ -1333,7 +1300,8 @@ struct MangaDetailView: View {
                     )
                 }
             } catch {
-                guard selectedSource?.module.id == match.module.id,
+                guard chapterLoadGeneration == generation,
+                      selectedSource?.module.id == match.module.id,
                       selectedSource?.manga.mangaId == match.manga.mangaId else { return }
                 loadingChapters = false
                 chapterLoadError = "Failed to load module: \(error.localizedDescription)"

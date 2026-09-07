@@ -15617,7 +15617,7 @@ private struct ScopedSettingsDefaults {
             }
             performOnMainThread {
                 let kanzenModuleManager = ModuleManager.shared
-                kanzenModuleManager.modules = restoredModules
+                kanzenModuleManager.replaceModulesForRestore(restoredModules)
                 kanzenModuleManager.saveModules()
             }
         }

@@ -29,8 +29,19 @@ final class UserRatingManager {
         case corrupt
     }
 
-    private var ratings: [Int: Double] = [:]
-    private var notes: [Int: String] = [:]
+    private var ratings: [Int: Double] = [:] {
+        didSet { mutationRevision &+= 1 }
+    }
+    private var notes: [Int: String] = [:] {
+        didSet { mutationRevision &+= 1 }
+    }
+    private var mutationRevision: UInt64 = 0
+
+    var mediaStateRevision: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return mutationRevision
+    }
 
     private var fileURL: URL
     private var activeProfileID: UUID
@@ -209,6 +220,7 @@ final class UserRatingManager {
                     Self.quarantineUnreadableStore(at: source, profileID: profileID)
                 }
                 try Self.clearUnreadableMarker(for: profileID)
+                mutationRevision &+= 1
                 didRestore = true
             } catch {
                 Logger.shared.log(
@@ -233,6 +245,7 @@ final class UserRatingManager {
             lock.unlock()
             return
         }
+        mutationRevision &+= 1
         try? FileManager.default.removeItem(at: Self.fileURL(for: profileID))
         try? Self.clearUnreadableMarker(for: profileID)
         lock.unlock()

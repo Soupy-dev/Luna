@@ -115,7 +115,15 @@ struct MangaProgress: Codable {
 final class MangaReadingProgressManager: ObservableObject {
     static let shared = MangaReadingProgressManager()
 
-    @Published private(set) var progressMap: [Int: MangaProgress] = [:]
+    @Published private(set) var progressMap: [Int: MangaProgress] = [:] {
+        didSet { contentRevision &+= 1 }
+    }
+
+    private let stateLock = NSRecursiveLock()
+    private var contentRevision: UInt64 = 0
+    private var importInvalidationGeneration: UInt64 = 0
+    private var defaults = UserDefaults.standard
+    private var readKeyCache: (mangaID: Int, revision: UInt64, keys: Set<String>)?
 
     private static let legacyStorageKey = "mangaReadingProgress"
 
@@ -130,6 +138,126 @@ final class MangaReadingProgressManager: ObservableObject {
         storageKey = Self.storageKey(for: profileID)
         Self.migrateLegacyStoreIfNeeded()
         load()
+    }
+
+    init(profileID: UUID, defaults: UserDefaults) {
+        activeProfileID = profileID
+        storageKey = Self.storageKey(for: profileID)
+        self.defaults = defaults
+        load()
+    }
+
+    struct ImportRecord: Sendable {
+        let mangaID: Int
+        let throughChapter: Int
+        let title: String?
+        let coverURL: String?
+        let totalChapters: Int?
+    }
+
+    struct PreparedImport {
+        let progress: [Int: MangaProgress]
+        let data: Data
+        let imported: Int
+        let rejected: Int
+    }
+
+    static func prepareImport(_ records: [ImportRecord], progress source: [Int: MangaProgress]) throws -> PreparedImport {
+        var progress = source
+        var imported = 0
+        var rejected = 0
+        let integerRegex = try NSRegularExpression(pattern: #"(\d+)"#)
+        for record in records {
+            try Task.checkCancellation()
+            guard record.throughChapter >= 1,
+                  TrackerRemoteProgressBoundary.canExpandMangaProgress(record.throughChapter) else {
+                rejected += 1
+                continue
+            }
+            var entry = progress[record.mangaID] ?? MangaProgress()
+            for chapter in 1...record.throughChapter {
+                if chapter.isMultiple(of: 1_024) { try Task.checkCancellation() }
+                entry.readChapterNumbers.insert(String(chapter))
+            }
+            var highest: Int?
+            for (offset, number) in entry.readChapterNumbers.enumerated() {
+                if offset.isMultiple(of: 1_024) { try Task.checkCancellation() }
+                guard let match = integerRegex.firstMatch(in: number, range: NSRange(number.startIndex..., in: number)),
+                      let range = Range(match.range(at: 1), in: number),
+                      let value = Int(number[range]) else { continue }
+                highest = max(highest ?? value, value)
+            }
+            entry.lastReadChapter = String(highest ?? record.throughChapter)
+            entry.lastReadDate = Date()
+            if let title = record.title { entry.title = title }
+            if let coverURL = record.coverURL { entry.coverURL = coverURL }
+            if let totalChapters = record.totalChapters { entry.totalChapters = totalChapters }
+            progress[record.mangaID] = entry
+            imported += 1
+        }
+        try Task.checkCancellation()
+        return PreparedImport(progress: progress, data: try JSONEncoder().encode(progress), imported: imported, rejected: rejected)
+    }
+
+    struct ImportSnapshot {
+        let owner: UUID
+        let key: String
+        let revision: UInt64
+        let invalidation: UInt64
+        let progress: [Int: MangaProgress]
+    }
+
+    func captureImport(owner: UUID, invalidation: UInt64?) throws -> ImportSnapshot? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard owner == activeProfileID,
+              invalidation == nil || invalidation == importInvalidationGeneration else { throw CancellationError() }
+        guard !activeStoreLoadFailed else { return nil }
+        return ImportSnapshot(owner: owner, key: storageKey, revision: contentRevision,
+                              invalidation: importInvalidationGeneration, progress: progressMap)
+    }
+
+    func commitImport(_ prepared: PreparedImport, snapshot: ImportSnapshot) throws -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard snapshot.owner == activeProfileID, snapshot.key == storageKey,
+              snapshot.invalidation == importInvalidationGeneration,
+              !activeStoreLoadFailed else { throw CancellationError() }
+        guard snapshot.revision == contentRevision else { return false }
+        if prepared.imported > 0 {
+            defaults.set(prepared.data, forKey: snapshot.key)
+            progressMap = prepared.progress
+        }
+        return true
+    }
+
+    @MainActor
+    func importChapters(
+        _ records: [ImportRecord],
+        owner: UUID,
+        validateAuthority: @MainActor () throws -> Void
+    ) async throws -> (imported: Int, rejected: Int) {
+        var invalidation: UInt64?
+        while true {
+            try Task.checkCancellation()
+            try validateAuthority()
+            guard let snapshot = try captureImport(owner: owner, invalidation: invalidation) else {
+                return (0, records.count)
+            }
+            invalidation = snapshot.invalidation
+            let worker = Task.detached(priority: .utility) {
+                try Self.prepareImport(records, progress: snapshot.progress)
+            }
+            let prepared = try await withTaskCancellationHandler(operation: {
+                try await worker.value
+            }, onCancel: { worker.cancel() })
+            try Task.checkCancellation()
+            try validateAuthority()
+            if try commitImport(prepared, snapshot: snapshot) {
+                return (prepared.imported, prepared.rejected)
+            }
+            await Task.yield()
+        }
     }
 
     static func storageKey(for profileID: UUID) -> String {
@@ -148,7 +276,10 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func switchProfile(to profileID: UUID) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard profileID != activeProfileID else { return }
+        importInvalidationGeneration &+= 1
         activeProfileID = profileID
         storageKey = Self.storageKey(for: profileID)
 
@@ -157,29 +288,54 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func discardStore(forProfile profileID: UUID) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard profileID != activeProfileID else { return }
-        UserDefaults.standard.removeObject(forKey: Self.storageKey(for: profileID))
+        defaults.removeObject(forKey: Self.storageKey(for: profileID))
     }
 
     func isChapterRead(mangaId: Int, chapterNumber: String) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard let progress = progressMap[mangaId] else { return false }
         return containsChapter(chapterNumber, in: progress.readChapterNumbers)
     }
 
     func readChapters(for mangaId: Int) -> Set<String> {
-        progressMap[mangaId]?.readChapterNumbers ?? []
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return progressMap[mangaId]?.readChapterNumbers ?? []
+    }
+
+    func normalizedReadChapterKeys(for mangaId: Int) -> Set<String> {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        if let cached = readKeyCache, cached.mangaID == mangaId, cached.revision == contentRevision {
+            return cached.keys
+        }
+        let keys = Set((progressMap[mangaId]?.readChapterNumbers ?? []).map {
+            ChapterIdentityNormalizer.key(for: $0)
+        })
+        readKeyCache = (mangaId, contentRevision, keys)
+        return keys
     }
 
     func lastReadChapter(for mangaId: Int) -> String? {
-        progressMap[mangaId]?.lastReadChapter
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return progressMap[mangaId]?.lastReadChapter
     }
 
     func pagePosition(mangaId: Int, chapterNumber: String) -> Int {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard let positions = progressMap[mangaId]?.pagePositions else { return 0 }
         return storedValue(in: positions, for: chapterNumber) ?? 0
     }
 
     func pagePosition(mangaId: Int, chapterNumber: String, forProfile profileID: UUID) -> Int {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard profileID != activeProfileID else {
             return pagePosition(mangaId: mangaId, chapterNumber: chapterNumber)
         }
@@ -188,6 +344,8 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func pageProgress(mangaId: Int, chapterNumber: String) -> (page: Int, total: Int)? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard let progress = progressMap[mangaId] else { return nil }
         let zeroBasedPage = storedValue(in: progress.pagePositions, for: chapterNumber)
         let total = storedValue(in: progress.pageCounts, for: chapterNumber)
@@ -197,15 +355,21 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func pageProgressLabel(mangaId: Int, chapterNumber: String) -> String? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard let pageProgress = pageProgress(mangaId: mangaId, chapterNumber: chapterNumber) else { return nil }
         return "Page \(pageProgress.page) of \(pageProgress.total)"
     }
 
     func progress(for mangaId: Int) -> MangaProgress? {
-        progressMap[mangaId]
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return progressMap[mangaId]
     }
 
     private func storedProgress(mangaId: Int, forProfile profileID: UUID) -> MangaProgress {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         if profileID == activeProfileID {
             return progressMap[mangaId] ?? MangaProgress()
         }
@@ -213,6 +377,8 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     private func commitProgress(_ entry: MangaProgress, mangaId: Int, forProfile profileID: UUID) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard profileID != activeProfileID else {
             progressMap[mangaId] = entry
             save()
@@ -220,7 +386,7 @@ final class MangaReadingProgressManager: ObservableObject {
         }
         let key = Self.storageKey(for: profileID)
         var map: [Int: MangaProgress] = [:]
-        if let data = UserDefaults.standard.data(forKey: key) {
+        if let data = defaults.data(forKey: key) {
 
             guard let decoded = try? JSONDecoder().decode([Int: MangaProgress].self, from: data) else {
                 ReaderLogger.shared.log(
@@ -233,10 +399,12 @@ final class MangaReadingProgressManager: ObservableObject {
         }
         map[mangaId] = entry
         guard let encoded = try? JSONEncoder().encode(map) else { return }
-        UserDefaults.standard.set(encoded, forKey: key)
+        defaults.set(encoded, forKey: key)
     }
 
     private func canSyncTracker(forProfile profileID: UUID) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard profileID == activeProfileID else {
             ReaderLogger.shared.log(
                 "Skipping tracker sync for profile \(profileID): no longer the active profile",
@@ -266,6 +434,8 @@ final class MangaReadingProgressManager: ObservableObject {
         readThreshold: Double = 0.8,
         forProfile profileID: UUID? = nil
     ) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         let owner = profileID ?? activeProfileID
         var progress = storedProgress(mangaId: mangaId, forProfile: owner)
         let safePageCount = pageCount.map { max($0, 0) }
@@ -322,6 +492,8 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func markChapterRead(mangaId: Int, chapterNumber: String, mangaTitle: String? = nil, coverURL: String? = nil, format: String? = nil, totalChapters: Int? = nil, latestChapterNumbers: [String]? = nil, moduleUUID: String? = nil, contentParams: String? = nil, isNovel: Bool? = nil, route: MangaContentRoute? = nil, trackerAniListId: Int? = nil, trackerMALId: Int? = nil, forProfile profileID: UUID? = nil) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         let owner = profileID ?? activeProfileID
         var progress = storedProgress(mangaId: mangaId, forProfile: owner)
         let uniqueLatestChapterNumbers = latestChapterNumbers.map(ChapterIdentityNormalizer.deduplicatedNumbers)
@@ -390,6 +562,9 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func markChapterUnread(mangaId: Int, chapterNumber: String) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        importInvalidationGeneration &+= 1
         guard var progress = progressMap[mangaId] else { return }
         removeChapter(chapterNumber, from: &progress.readChapterNumbers)
         progressMap[mangaId] = progress
@@ -397,6 +572,8 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func markAllRead(mangaId: Int, chapterNumbers: [String], mangaTitle: String? = nil, coverURL: String? = nil, format: String? = nil, totalChapters: Int? = nil, latestChapterNumbers: [String]? = nil, moduleUUID: String? = nil, contentParams: String? = nil, isNovel: Bool? = nil, route: MangaContentRoute? = nil, trackerAniListId: Int? = nil, trackerMALId: Int? = nil) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard !activeStoreLoadFailed else {
             ReaderLogger.shared.log(
                 "MangaReadingProgressManager: refusing to mark all chapters read for profile \(activeProfileID): its progress store is unreadable; preserving its bytes",
@@ -445,6 +622,8 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func updateSourceMetadata(mangaId: Int, title: String? = nil, coverURL: String? = nil, format: String? = nil, latestChapterNumbers: [String], route: MangaContentRoute? = nil, sourceRefreshError: String? = nil, forProfile profileID: UUID? = nil) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         let owner = profileID ?? activeProfileID
         var progress = storedProgress(mangaId: mangaId, forProfile: owner)
         let uniqueLatestChapterNumbers = ChapterIdentityNormalizer.deduplicatedNumbers(latestChapterNumbers)
@@ -460,6 +639,8 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func updateTrackerMatch(mangaId: Int, aniListId: Int?, malId: Int?, confidence: Double?) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard Thread.isMainThread else {
             DispatchQueue.main.async {
                 self.updateTrackerMatch(mangaId: mangaId, aniListId: aniListId, malId: malId, confidence: confidence)
@@ -491,6 +672,8 @@ final class MangaReadingProgressManager: ObservableObject {
 
     @discardableResult
     func bulkMarkChaptersReadForImport(mangaId: Int, throughChapter: Int, mangaTitle: String? = nil, coverURL: String? = nil, totalChapters: Int? = nil) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard throughChapter >= 1 else { return false }
         guard TrackerRemoteProgressBoundary.canExpandMangaProgress(throughChapter) else {
             ReaderLogger.shared.log(
@@ -525,6 +708,9 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func markAllUnread(mangaId: Int) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        importInvalidationGeneration &+= 1
         guard var progress = progressMap[mangaId] else { return }
         progress.readChapterNumbers.removeAll()
         progress.lastReadChapter = nil
@@ -533,6 +719,9 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func removeFromHistory(mangaId: Int) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        importInvalidationGeneration &+= 1
         guard var progress = progressMap[mangaId] else { return }
         progress.lastReadChapter = nil
         progress.lastReadDate = nil
@@ -543,6 +732,9 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func clearHistory() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        importInvalidationGeneration &+= 1
         guard progressMap.values.contains(where: { $0.lastReadDate != nil }) else { return }
         for mangaId in progressMap.keys {
             progressMap[mangaId]?.lastReadChapter = nil
@@ -554,9 +746,10 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     private static func loadProgress(
-        forKey key: String
+        forKey key: String,
+        defaults: UserDefaults = .standard
     ) -> (progress: [Int: MangaProgress], unreadable: Bool) {
-        guard let data = UserDefaults.standard.data(forKey: key) else {
+        guard let data = defaults.data(forKey: key) else {
             return ([:], false)
         }
         guard let decoded = try? JSONDecoder().decode([Int: MangaProgress].self, from: data) else {
@@ -570,7 +763,10 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     private func load() {
-        let loaded = Self.loadProgress(forKey: storageKey)
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        importInvalidationGeneration &+= 1
+        let loaded = Self.loadProgress(forKey: storageKey, defaults: defaults)
         activeStoreLoadFailed = loaded.unreadable
         progressMap = loaded.progress
         if loaded.unreadable {
@@ -582,23 +778,31 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     private func save() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard !activeStoreLoadFailed else { return }
         if let data = try? JSONEncoder().encode(progressMap) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+            defaults.set(data, forKey: storageKey)
         }
     }
 
     private func allowOverwritingUnreadableStore() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         activeStoreLoadFailed = false
     }
 
     func progress(forProfile profileID: UUID) -> [Int: MangaProgress] {
-        progressSnapshot(forProfile: profileID) ?? [:]
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return progressSnapshot(forProfile: profileID) ?? [:]
     }
 
     func progressSnapshot(forProfile profileID: UUID) -> [Int: MangaProgress]? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         let key = profileID == activeProfileID ? storageKey : Self.storageKey(for: profileID)
-        let loaded = Self.loadProgress(forKey: key)
+        let loaded = Self.loadProgress(forKey: key, defaults: defaults)
         guard !loaded.unreadable else {
             ReaderLogger.shared.log(
                 "MangaReadingProgressManager: profile \(profileID) has an unreadable progress store; preserving its bytes",
@@ -610,7 +814,10 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     func applyRestoredProgress(_ progress: [Int: MangaProgress], forProfile profileID: UUID) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard profileID != activeProfileID else {
+            importInvalidationGeneration &+= 1
             allowOverwritingUnreadableStore()
             progressMap = progress
             save()
@@ -618,23 +825,30 @@ final class MangaReadingProgressManager: ObservableObject {
             return
         }
         guard let data = try? JSONEncoder().encode(progress) else { return }
-        UserDefaults.standard.set(data, forKey: Self.storageKey(for: profileID))
+        defaults.set(data, forKey: Self.storageKey(for: profileID))
     }
 
     func recentlyReadMangaIds() -> [(id: Int, progress: MangaProgress)] {
-        progressMap
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return progressMap
             .filter { $0.value.lastReadDate != nil }
             .sorted { ($0.value.lastReadDate ?? .distantPast) > ($1.value.lastReadDate ?? .distantPast) }
             .map { (id: $0.key, progress: $0.value) }
     }
 
     func replaceProgressMapForRestore(_ newMap: [Int: MangaProgress]) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        importInvalidationGeneration &+= 1
         allowOverwritingUnreadableStore()
         progressMap = newMap
         save()
     }
 
     private func extractChapterNumber(from string: String) -> Int? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
 
         let pattern = #"(\d+)"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
@@ -644,6 +858,8 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     private func applyRoute(_ route: MangaContentRoute?, to progress: inout MangaProgress) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard let route else { return }
         progress.route = route
 
@@ -655,6 +871,8 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     private func chapterKeyCandidates(for chapterNumber: String) -> [String] {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         let trimmed = chapterNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = ChapterIdentityNormalizer.key(for: chapterNumber)
         var keys: [String] = []
@@ -665,6 +883,8 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     private func containsChapter(_ chapterNumber: String, in chapters: Set<String>) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         let candidates = Set(chapterKeyCandidates(for: chapterNumber))
         if !chapters.isDisjoint(with: candidates) {
             return true
@@ -675,12 +895,16 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     private func insertChapter(_ chapterNumber: String, into chapters: inout Set<String>) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         for key in chapterKeyCandidates(for: chapterNumber) {
             chapters.insert(key)
         }
     }
 
     private func removeChapter(_ chapterNumber: String, from chapters: inout Set<String>) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         let candidates = Set(chapterKeyCandidates(for: chapterNumber))
         let normalized = ChapterIdentityNormalizer.key(for: chapterNumber)
         chapters = chapters.filter { saved in
@@ -700,6 +924,8 @@ final class MangaReadingProgressManager: ObservableObject {
     }
 
     private func syncTrackerProgress(mangaId: Int, progress: MangaProgress, chapterNumber: Int, explicitTitle: String?, explicitTotalChapters: Int?) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         if mangaId > 0 {
             TrackerManager.shared.syncMangaProgress(
                 aniListId: mangaId,

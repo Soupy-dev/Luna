@@ -197,8 +197,8 @@ public final class SkyStreamPluginManager: ObservableObject {
     nonisolated private static let maximumPackageArchiveBytes = 20 * 1_024 * 1_024
     nonisolated private static let maximumManualBackupArchiveBytes = 64 * 1_024 * 1_024
     private static let maximumManualRestoreExpandedBytes: UInt64 = 256 * 1_024 * 1_024
-    private static let maximumRepositoryCount = 64
-    private static let maximumInstalledPluginCount = 128
+    nonisolated private static let maximumRepositoryCount = 64
+    nonisolated private static let maximumInstalledPluginCount = 128
     private static let maximumProviderStateCount = 256
     private static let maximumConcurrentPackageValidations = 4
     nonisolated private static let maximumPersistedStateBytes = 6 * 1_024 * 1_024
@@ -408,7 +408,7 @@ public final class SkyStreamPluginManager: ObservableObject {
         }
     }
 
-    struct SkySourceDefaultsSnapshot: Equatable {
+    struct SkySourceDefaultsSnapshot: Equatable, Sendable {
         var selectedIDs: [String]
         var orderIDs: [String]
         var explicitIDs: [String]?
@@ -635,7 +635,7 @@ public final class SkyStreamPluginManager: ObservableObject {
         return result
     }
 
-    private static func pluginByOverlayingSourceDefaults(
+    nonisolated private static func pluginByOverlayingSourceDefaults(
         _ plugin: SkyStreamInstalledPluginState,
         snapshot: SkySourceDefaultsSnapshot
     ) -> SkyStreamInstalledPluginState {
@@ -1806,6 +1806,52 @@ public final class SkyStreamPluginManager: ObservableObject {
         safeCloudBackupSnapshot(includingArchives: false)
     }
 
+    struct PrivateCloudMetadataCapture: Sendable {
+        let repositories: [SkyStreamSavedRepository]
+        let plugins: [SkyStreamInstalledPluginState]
+        let sourceDefaults: SkySourceDefaultsSnapshot
+    }
+
+    func privateCloudMetadataCapture() -> PrivateCloudMetadataCapture? {
+        guard isLoaded else { return nil }
+        return PrivateCloudMetadataCapture(
+            repositories: committedRepositories,
+            plugins: committedInstalledPlugins,
+            sourceDefaults: sourceDefaultsSnapshot()
+        )
+    }
+
+    nonisolated static func materializePrivateCloudMetadataCapture(
+        _ capture: PrivateCloudMetadataCapture
+    ) -> SkyStreamBackupSnapshot? {
+        var repositories: [SkyStreamRepositoryBackupSnapshot] = []
+        repositories.reserveCapacity(capture.repositories.count)
+        for repository in capture.repositories {
+            guard let value = backupRepository(repository),
+                  privateCloudRepositoryConfigurationIsCapturable(value) else { return nil }
+            repositories.append(value)
+        }
+        var plugins: [SkyStreamPluginBackupSnapshot] = []
+        plugins.reserveCapacity(capture.plugins.count)
+        for original in capture.plugins {
+            var plugin = pluginByOverlayingSourceDefaults(original, snapshot: capture.sourceDefaults)
+            guard privateCloudPluginConfigurationIsCapturable(plugin) else { return nil }
+            plugin.runtimeStorage = nil
+            plugins.append(SkyStreamPluginBackupSnapshot(
+                state: plugin,
+                archivePayload: nil,
+                payloadWasRedacted: true,
+                preferencesWereRedacted: false
+            ))
+        }
+        return SkyStreamBackupSnapshot(
+            repositories: repositories,
+            plugins: plugins,
+            isSafeCloudSnapshot: true,
+            privateCloudConfigurationIsComplete: true
+        )
+    }
+
     public func completePrivateCloudMetadataSnapshot() -> SkyStreamBackupSnapshot? {
         completePrivateCloudSnapshot(includingArchives: false)
     }
@@ -1814,7 +1860,7 @@ public final class SkyStreamPluginManager: ObservableObject {
         completePrivateCloudSnapshot(includingArchives: true)
     }
 
-    static func completePrivateCloudMetadataSnapshot(
+    nonisolated static func completePrivateCloudMetadataSnapshot(
         fromPersistedStateData data: Data
     ) -> SkyStreamBackupSnapshot? {
         guard data.count <= Self.maximumPersistedStateBytes,
@@ -1951,6 +1997,13 @@ public final class SkyStreamPluginManager: ObservableObject {
     private func completePrivateCloudSnapshot(
         includingArchives: Bool
     ) -> SkyStreamBackupSnapshot? {
+        if !includingArchives {
+            return Self.materializePrivateCloudMetadataCapture(PrivateCloudMetadataCapture(
+                repositories: committedRepositories,
+                plugins: committedInstalledPlugins,
+                sourceDefaults: sourceDefaultsSnapshot()
+            ))
+        }
         var repositorySnapshots: [SkyStreamRepositoryBackupSnapshot] = []
         repositorySnapshots.reserveCapacity(committedRepositories.count)
         for repository in committedRepositories {
@@ -4437,7 +4490,7 @@ public final class SkyStreamPluginManager: ObservableObject {
         Logger.shared.log(details.joined(separator: " "), type: "SkyStream")
     }
 
-    private static func currentProviderPairs(
+    nonisolated private static func currentProviderPairs(
         for manifest: SkyStreamPluginManifest
     ) -> [(provider: SkyStreamPluginProvider?, sourceID: String)] {
         guard let providers = manifest.providers, !providers.isEmpty else {
@@ -4767,7 +4820,7 @@ public final class SkyStreamPluginManager: ObservableObject {
         }
     }
 
-    private static func privateCloudPluginConfigurationIsCapturable(
+    nonisolated private static func privateCloudPluginConfigurationIsCapturable(
         _ plugin: SkyStreamInstalledPluginState
     ) -> Bool {
         var boundedState = plugin
@@ -4795,7 +4848,7 @@ public final class SkyStreamPluginManager: ObservableObject {
             } ?? true)
     }
 
-    private static func privateCloudRepositoryConfigurationIsCapturable(
+    nonisolated private static func privateCloudRepositoryConfigurationIsCapturable(
         _ repository: SkyStreamRepositoryBackupSnapshot
     ) -> Bool {
         guard isSafeHTTPSURL(repository.sourceURL),
@@ -4821,7 +4874,7 @@ public final class SkyStreamPluginManager: ObservableObject {
         ].contains { lowercase.contains($0) }
     }
 
-    private static func backupRepository(
+    nonisolated private static func backupRepository(
         _ repository: SkyStreamSavedRepository
     ) -> SkyStreamRepositoryBackupSnapshot? {
         guard isSafeHTTPSURL(repository.sourceURL),
@@ -4849,7 +4902,7 @@ public final class SkyStreamPluginManager: ObservableObject {
         return snapshot
     }
 
-    private static func isSafeHTTPSURL(_ rawValue: String) -> Bool {
+    nonisolated private static func isSafeHTTPSURL(_ rawValue: String) -> Bool {
         guard let components = URLComponents(string: rawValue),
               components.scheme?.lowercased() == "https",
               components.user == nil,
@@ -5087,7 +5140,7 @@ public final class SkyStreamPluginManager: ObservableObject {
         nil
     }
 
-    static func completePrivateCloudMetadataSnapshot(
+    nonisolated static func completePrivateCloudMetadataSnapshot(
         fromPersistedStateData data: Data
     ) -> SkyStreamBackupSnapshot? {
         nil
@@ -5135,11 +5188,15 @@ public final class SkyStreamPluginManager: ObservableObject {
         }
     }
 
-    public func opaqueMediaStateSnapshotData() -> Data? {
-        guard let data = Self.boundedData(
+    func opaqueMediaStateSnapshotDataWithoutValidation() -> Data? {
+        Self.boundedData(
             at: Self.mediaStateOpaqueURL,
             maximumBytes: SkyStreamMediaStateDocument.maximumPayloadBytes
-        ),
+        )
+    }
+
+    public func opaqueMediaStateSnapshotData() -> Data? {
+        guard let data = opaqueMediaStateSnapshotDataWithoutValidation(),
               (try? SkyStreamMediaStateDocument.decodeMetadataOnly(data)) != nil else {
             return nil
         }

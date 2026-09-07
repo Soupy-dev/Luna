@@ -1,11 +1,61 @@
 import CloudKit
 import Combine
 import CoreData
+import CoreFoundation
 import CryptoKit
 import Foundation
 #if canImport(UIKit)
 import UIKit
 #endif
+
+final class MediaStateCaptureMutationClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation: UInt64 = 0
+
+    var revision: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return generation
+    }
+
+    func advance() {
+        lock.lock()
+        generation &+= 1
+        lock.unlock()
+    }
+}
+
+struct MediaStateAutomaticCaptureState: Sendable {
+    private(set) var generation: UInt64 = 0
+    private(set) var needsRetry = false
+
+    mutating func invalidate(hasWorker: Bool) {
+        generation &+= 1
+        if hasWorker { needsRetry = true }
+    }
+
+    mutating func request() {
+        needsRetry = true
+    }
+
+    mutating func begin() {
+        needsRetry = false
+    }
+
+    func shouldSchedule(isAllowed: Bool, hasWorker: Bool) -> Bool {
+        needsRetry && isAllowed && !hasWorker
+    }
+
+    static func pendingNamesForStaging(
+        in archive: MediaStateLocalArchive,
+        isDurable: Bool,
+        archiveRevision: UInt64,
+        durableRevision: UInt64
+    ) -> Set<String> {
+        guard isDurable, archiveRevision == durableRevision else { return [] }
+        return archive.pendingLocalRecordNames
+    }
+}
 
 enum MediaStateTrackerSnapshotRestorePolicy {
     struct Change {
@@ -748,7 +798,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
     private static let subscriptionID = "EclipseMediaStateChanges"
     private static let maxPayloadBytes = MediaStateEnvelope.maximumPayloadBytes
 
-    private static let maximumArchiveBytes = 256 * 1_024 * 1_024
+    nonisolated private static let maximumArchiveBytes = 256 * 1_024 * 1_024
     private static let maximumAccountBoundaryRecoveryBytes =
         maximumArchiveBytes + (8 * 1_024 * 1_024)
 
@@ -774,7 +824,18 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var engine: CKSyncEngine?
-    private var archive: MediaStateLocalArchive
+    private var archive: MediaStateLocalArchive {
+        didSet {
+            archiveRevision &+= 1
+            isArchiveStateDurable = false
+        }
+    }
+    private var archiveRevision: UInt64 = 0
+    private var durableArchiveRevision: UInt64 = 0
+    private var automaticCaptureState = MediaStateAutomaticCaptureState()
+    private let localCaptureMutationClock = MediaStateCaptureMutationClock()
+    private var automaticCaptureWorker: Task<PreparedAutomaticCapture, Error>?
+    private var automaticCaptureWorkerID: UUID?
 
     private var isArchiveStateDurable = true
 
@@ -784,21 +845,41 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
     private var localArchiveUnavailableDetail = "Media state storage is temporarily unavailable."
     private var started = false
     private var isPreparingEngine = false
-    private var accountPreparationGeneration = 0
-    private var isAccountRevalidationInProgress = false
+    private var accountPreparationGeneration = 0 {
+        didSet { invalidateAutomaticCapture() }
+    }
+    private var isAccountRevalidationInProgress = false {
+        didSet { invalidateAutomaticCapture() }
+    }
     private var accountRevalidationTask: Task<Void, Never>?
     private var accountRevalidationPassID: UUID?
-    private var initialFetchCompleted = false
-    private var isTrustedOfflineCacheActive = false
-    private var initialLocalStatePolicy: MediaStateInitialLocalStatePolicy = .migrateLocalState
-    private var isAccountIsolationInProgress = false
-    private var verifiedAccountRecordName: String?
-    private var suppressedDefaultRecordNames: Set<String> = []
-    private var pendingAccountBoundaryPayloadHashes: [String: String] = [:]
+    private var initialFetchCompleted = false {
+        didSet { invalidateAutomaticCapture() }
+    }
+    private var isTrustedOfflineCacheActive = false {
+        didSet { invalidateAutomaticCapture() }
+    }
+    private var initialLocalStatePolicy: MediaStateInitialLocalStatePolicy = .migrateLocalState {
+        didSet { invalidateAutomaticCapture() }
+    }
+    private var isAccountIsolationInProgress = false {
+        didSet { invalidateAutomaticCapture() }
+    }
+    private var verifiedAccountRecordName: String? {
+        didSet { invalidateAutomaticCapture() }
+    }
+    private var suppressedDefaultRecordNames: Set<String> = [] {
+        didSet { invalidateAutomaticCapture() }
+    }
+    private var pendingAccountBoundaryPayloadHashes: [String: String] = [:] {
+        didSet { invalidateAutomaticCapture() }
+    }
     private var lastAppliedSkyStreamPayloadHashes: [String: String] = [:]
     private var inFlightSkyStreamPayloadHashes: [String: String] = [:]
     private var lastSkyStreamMetadataEncodingFailure: String?
-    private var isApplyingRemoteState = false
+    private var isApplyingRemoteState = false {
+        didSet { invalidateAutomaticCapture() }
+    }
     private var hasDeferredRemoteApply = false
 
     private var hasDeferredDestructiveAccountIsolation = false
@@ -807,10 +888,14 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
 
     private var isSignedOutIdentityConfirmed = false
 
-    private var isWholeSnapshotRestoreInProgress = false
+    private var isWholeSnapshotRestoreInProgress = false {
+        didSet { invalidateAutomaticCapture() }
+    }
     private(set) var preservesTrackerAccountsDuringLegacySnapshotRestore = false
 
-    private var isPreparedRecoverySyncSuspended = false
+    private var isPreparedRecoverySyncSuspended = false {
+        didSet { invalidateAutomaticCapture() }
+    }
     private var preparedRecoverySuspensionTransactionID: UUID?
     private var isPreparedRecoverySyncBlocked: Bool {
         isLocalArchiveUnavailable
@@ -822,8 +907,12 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
             || archive.pendingAccountIsolationTarget != nil
     }
 
-    private var isDeletingRemoteMediaState = false
-    private var isRemoteTransportModeActive = false
+    private var isDeletingRemoteMediaState = false {
+        didSet { invalidateAutomaticCapture() }
+    }
+    private var isRemoteTransportModeActive = false {
+        didSet { invalidateAutomaticCapture() }
+    }
     private var captureTask: Task<Void, Never>?
     private var explicitSyncTask: Task<Void, Never>?
     private var explicitSyncPassID: UUID?
@@ -3263,6 +3352,13 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
             UserDefaults.didChangeNotification
         ]
 
+        let mutationClock = localCaptureMutationClock
+        for name in names + [.activeProfileDidChange, .profileListDidChange] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { _ in
+                mutationClock.advance()
+            })
+        }
+
         for name in names {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
                 guard UserRatingManager.notificationBelongsToActiveProfile(notification) else {
@@ -3466,7 +3562,506 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         _ = persistArchive()
     }
 
+    struct AutomaticCaptureVersion: Equatable, Sendable {
+        let generation: UInt64
+        let archiveRevision: UInt64
+        let notificationRevision: UInt64
+        let accountGeneration: Int
+        let verifiedOwner: String?
+        let archiveOwner: String?
+        let libraryRevision: UInt64
+        let ratingRevision: UInt64
+        let catalogRevision: UInt64
+        let rosterGeneration: UInt64
+        let activeProfileID: UUID
+        let playbackLease: MediaStatePlaybackLeaseSnapshot
+    }
+
+    struct CaptureProfileInput: Sendable {
+        let profileID: UUID
+        let library: [CapturedLibraryCollection]?
+        let ratings: CapturedRatings?
+        let catalogs: [Catalog]?
+    }
+
+    indirect enum CapturedPropertyListValue: Equatable, Sendable {
+        case string(String)
+        case data(Data)
+        case date(UInt64)
+        case boolean(Bool)
+        case integer(Int64)
+        case unsignedInteger(UInt64)
+        case float(UInt32)
+        case real(UInt64)
+        case array([CapturedPropertyListValue])
+        case dictionary([String: CapturedPropertyListValue])
+
+        init?(_ value: Any) {
+            switch value {
+            case let value as String: self = .string(value)
+            case let value as Data: self = .data(value)
+            case let value as Date: self = .date(value.timeIntervalSinceReferenceDate.bitPattern)
+            case let value as NSNumber:
+                if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                    self = .boolean(value.boolValue)
+                } else {
+                    switch String(cString: value.objCType) {
+                    case "f": self = .float(value.floatValue.bitPattern)
+                    case "d": self = .real(value.doubleValue.bitPattern)
+                    case "Q": self = .unsignedInteger(value.uint64Value)
+                    default: self = .integer(value.int64Value)
+                    }
+                }
+            case let value as [Any]:
+                var captured: [CapturedPropertyListValue] = []
+                captured.reserveCapacity(value.count)
+                for element in value {
+                    guard let element = Self(element) else { return nil }
+                    captured.append(element)
+                }
+                self = .array(captured)
+            case let value as [String: Any]:
+                var captured: [String: CapturedPropertyListValue] = [:]
+                for (key, element) in value {
+                    guard let element = Self(element) else { return nil }
+                    captured[key] = element
+                }
+                self = .dictionary(captured)
+            default: return nil
+            }
+        }
+
+        var value: Any {
+            switch self {
+            case .string(let value): return value
+            case .data(let value): return value
+            case .date(let value): return Date(timeIntervalSinceReferenceDate: Double(bitPattern: value))
+            case .boolean(let value): return NSNumber(value: value)
+            case .integer(let value): return NSNumber(value: value)
+            case .unsignedInteger(let value): return NSNumber(value: value)
+            case .float(let value): return NSNumber(value: Float(bitPattern: value))
+            case .real(let value): return NSNumber(value: Double(bitPattern: value))
+            case .array(let value): return value.map(\.value)
+            case .dictionary(let value): return value.mapValues(\.value)
+            }
+        }
+
+        func isWireEquivalent(to other: Self) -> Bool {
+            switch (self, other) {
+            case (.float(let left), .real(let right)):
+                return Double(Float(bitPattern: left)).bitPattern == right
+            case (.real(let left), .float(let right)):
+                return left == Double(Float(bitPattern: right)).bitPattern
+            case (.array(let left), .array(let right)):
+                return left.count == right.count && zip(left, right).allSatisfy { $0.isWireEquivalent(to: $1) }
+            case (.dictionary(let left), .dictionary(let right)):
+                return left.count == right.count && left.allSatisfy { key, value in
+                    right[key].map { value.isWireEquivalent(to: $0) } ?? false
+                }
+            default: return self == other
+            }
+        }
+    }
+
+    struct CapturedSetting: Equatable, Sendable {
+        let key: String
+        let scope: MediaStateSettingScope
+        let value: CapturedPropertyListValue
+    }
+
+    enum CapturedNuvioMetadata: Sendable {
+        case unavailable
+        case persisted(Data?)
+
+        var preparedData: Data? {
+            switch self {
+            case .unavailable: return nil
+            case .persisted(let data):
+#if os(iOS) && !targetEnvironment(macCatalyst)
+                return BackupData.nuvioMetadataForMediaState(persistedValue: data)
+#else
+                return nil
+#endif
+            }
+        }
+    }
+
+    struct CapturedAutomaticServiceSources: Sendable {
+        let sources: CapturedServiceSources?
+        let nuvio: CapturedNuvioMetadata
+    }
+
+    enum CapturedSkyStreamMetadata: Sendable {
+        case unavailable
+        case pending(Data)
+        case persisted(Data?)
+        case opaque(Data)
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        case active(SkyStreamPluginManager.PrivateCloudMetadataCapture)
+#endif
+    }
+
+    enum SkyStreamEncodingOutcome: Sendable {
+        case unchanged
+        case success
+        case failure(String)
+    }
+
+    struct AutomaticCaptureInput: Sendable {
+        let version: AutomaticCaptureVersion
+        let now: Date
+        let initialSnapshot: LocalSnapshot
+        let profiles: [CaptureProfileInput]
+        let progress: ProgressManager.MediaStateSnapshot
+        let settings: [String: CapturedSetting]
+        var profileRecords: [Profile] = []
+        var serviceSources: [UUID: CapturedAutomaticServiceSources] = [:]
+        var skyStream: [UUID: CapturedSkyStreamMetadata] = [:]
+        let archive: MediaStateLocalArchive
+        let suppressedDefaultRecordNames: Set<String>
+        let defaultRecordNames: Set<String>
+        let tombstoneAuthority: CaptureTombstoneAuthority
+        let pendingAccountBoundaryPayloadHashes: [String: String]
+        let isolatesIncomingAccount: Bool
+    }
+
+    struct PreparedAutomaticCapture: Sendable {
+        let reconciled: ReconciledLocalCapture
+        let data: Data
+        var skyStreamEncodingOutcomes: [SkyStreamEncodingOutcome] = []
+    }
+
+    private func automaticCaptureVersion() -> AutomaticCaptureVersion {
+        AutomaticCaptureVersion(
+            generation: automaticCaptureState.generation,
+            archiveRevision: archiveRevision,
+            notificationRevision: localCaptureMutationClock.revision,
+            accountGeneration: accountPreparationGeneration,
+            verifiedOwner: verifiedAccountRecordName,
+            archiveOwner: archive.accountOwnerRecordName,
+            libraryRevision: LibraryManager.shared.mediaStateRevision,
+            ratingRevision: UserRatingManager.shared.mediaStateRevision,
+            catalogRevision: CatalogManager.shared.mediaStateRevision,
+            rosterGeneration: ProfileManager.shared.rosterGeneration,
+            activeProfileID: ProfileManager.shared.activeProfileID,
+            playbackLease: MediaStatePlaybackLease.snapshot
+        )
+    }
+
+    private var allowsAutomaticLocalCapture: Bool {
+        !isPreparedRecoverySyncBlocked
+            && !hasPendingAccountIsolationJournal
+            && MediaStateLocalCapturePolicy.capturesLocalChanges(
+                initialFetchCompleted: initialFetchCompleted,
+                isTrustedOfflineCacheActive: isTrustedOfflineCacheActive,
+                isRemoteTransportModeActive: isRemoteTransportModeActive
+            )
+            && !isApplyingRemoteState
+            && !isWholeSnapshotRestoreInProgress
+            && !isAccountIsolationInProgress
+            && !isAccountRevalidationInProgress
+            && !isDeletingRemoteMediaState
+            && !MediaStatePlaybackLease.isActive
+    }
+
+    private func invalidateAutomaticCapture(reschedule: Bool = true) {
+        automaticCaptureState.invalidate(hasWorker: automaticCaptureWorker != nil)
+        automaticCaptureWorker?.cancel()
+        if reschedule, automaticCaptureState.shouldSchedule(
+            isAllowed: allowsAutomaticLocalCapture,
+            hasWorker: automaticCaptureWorker != nil
+        ) {
+            scheduleLocalCapture()
+        }
+    }
+
+    private func captureSettings(profileIDs: [UUID]) -> [String: CapturedSetting] {
+        var settings: [String: CapturedSetting] = [:]
+        captureSettingValues(to: &settings, profileID: nil)
+        for profileID in profileIDs {
+            captureSettingValues(to: &settings, profileID: profileID)
+        }
+        return settings
+    }
+
+    private func makeAutomaticCaptureInput() -> AutomaticCaptureInput {
+        let version = automaticCaptureVersion()
+        let now = Date()
+        var snapshot = LocalSnapshot()
+        var profiles: [CaptureProfileInput] = []
+        var profileRecords: [Profile] = []
+        var serviceSources: [UUID: CapturedAutomaticServiceSources] = [:]
+        var skyStream: [UUID: CapturedSkyStreamMetadata] = [:]
+        if let authoritativeProfiles = ProfileManager.shared.profilesForMediaStateSync {
+            profileRecords = authoritativeProfiles
+            for profile in authoritativeProfiles {
+                let library = LibraryManager.shared.collections(forProfile: profile.id)
+                    .map { $0.map(CapturedLibraryCollection.init) }
+                let ratings = UserRatingManager.shared.ratingsAndNotes(forProfile: profile.id)
+                    .map { CapturedRatings(ratings: $0.ratings, notes: $0.notes) }
+                profiles.append(CaptureProfileInput(
+                    profileID: profile.id,
+                    library: library,
+                    ratings: ratings,
+                    catalogs: CatalogManager.shared.catalogsForMediaStateSync(forProfile: profile.id)
+                ))
+                if !ProfileSettingsStore.sharesServices || profile.id == ProfileManager.defaultProfileID {
+                    serviceSources[profile.id] = CapturedAutomaticServiceSources(
+                        sources: capturedServiceSources(forProfile: profile.id, includeNuvioMetadata: false),
+                        nuvio: capturedRawNuvioMetadata(forProfile: profile.id)
+                    )
+                }
+            }
+            for profileID in MediaStateSkyStreamScopePolicy.profileIDs(
+                from: authoritativeProfiles.map(\.id),
+                sharesServices: ProfileSettingsStore.sharesServices
+            ) {
+                skyStream[profileID] = capturedSkyStreamMetadata(forProfile: profileID)
+            }
+        } else {
+            snapshot.unreadableRecordNames.formUnion(archive.lastLocalRecordNames.filter { name in
+                guard let kind = MediaStateRecordName.kind(from: name) else { return false }
+                return kind == .profile || kind.isProfileScoped
+            })
+        }
+        let profileIDs = profiles.map(\.profileID)
+        return AutomaticCaptureInput(
+            version: version,
+            now: now,
+            initialSnapshot: snapshot,
+            profiles: profiles,
+            progress: ProgressManager.shared.captureForMediaStateSync(profileIDs: profileIDs),
+            settings: captureSettings(profileIDs: profileIDs),
+            profileRecords: profileRecords,
+            serviceSources: serviceSources,
+            skyStream: skyStream,
+            archive: archive,
+            suppressedDefaultRecordNames: suppressedDefaultRecordNames,
+            defaultRecordNames: defaultRecordNamesForInitialMigration(),
+            tombstoneAuthority: captureTombstoneAuthority(),
+            pendingAccountBoundaryPayloadHashes: pendingAccountBoundaryPayloadHashes,
+            isolatesIncomingAccount: initialLocalStatePolicy == .isolateIncomingAccount
+        )
+    }
+
+    nonisolated static func prepareAutomaticCapture(_ input: AutomaticCaptureInput) throws -> PreparedAutomaticCapture {
+        try Task.checkCancellation()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        encoder.outputFormatting = [.sortedKeys]
+        var snapshot = input.initialSnapshot
+        addProfileRecords(input.profileRecords, to: &snapshot.records)
+        addCapturedSettingRecords(input.settings, to: &snapshot.records, priorRecords: input.archive.records)
+        for (profileID, inputSources) in input.serviceSources {
+            try Task.checkCancellation()
+            let name = MediaStateRecordName.make(
+                kind: .setting, identifier: MediaStateServiceSourcesPayload.settingKey, profileID: profileID
+            )
+            let captured = inputSources.sources.map {
+                CapturedServiceSources(services: $0.services, addons: $0.addons, nuvioPluginsData: inputSources.nuvio.preparedData)
+            }
+            if !addCapturedServiceSourcesRecord(captured, existing: input.archive.records[name], to: &snapshot.records, profileID: profileID),
+               input.archive.lastLocalRecordNames.contains(name) {
+                snapshot.unreadableRecordNames.insert(name)
+            }
+        }
+        var skyStreamEncodingOutcomes: [SkyStreamEncodingOutcome] = []
+        for (profileID, capture) in input.skyStream {
+            try Task.checkCancellation()
+            let name = MediaStateSkyStreamScopePolicy.recordName(for: profileID)
+            let (payload, outcome) = preparedSkyStreamMetadata(capture)
+            skyStreamEncodingOutcomes.append(outcome)
+            if let payload {
+                snapshot.records[name] = MediaStateEnvelope(
+                    recordName: name, kind: .skyStreamMetadata, payload: payload, modifiedAt: .distantPast
+                )
+            } else if let existing = input.archive.records[name], !existing.isDeleted,
+                      let metadata = try? SkyStreamMediaStateDocument.decodeMetadataOnly(existing.payload),
+                      let canonical = try? SkyStreamMediaStateDocument.encodeMetadataOnly(metadata) {
+                var retained = existing
+                retained.payload = canonical
+                snapshot.records[name] = retained
+            } else if input.archive.lastLocalRecordNames.contains(name) {
+                snapshot.unreadableRecordNames.insert(name)
+            }
+        }
+        for profile in input.profiles {
+            try Task.checkCancellation()
+            let libraryCaptured = profile.library.map {
+                addLibraryRecords($0, to: &snapshot.records, profileID: profile.profileID, encoder: encoder)
+            } ?? false
+            preserveUnreadableCapture(
+                libraryCaptured,
+                kinds: [.libraryCollection, .libraryMembership],
+                profileID: profile.profileID,
+                priorNames: input.archive.lastLocalRecordNames,
+                snapshot: &snapshot
+            )
+            let progressCaptured = input.progress.profiles[profile.profileID].map {
+                let progress = ProgressPersistencePolicy.sanitizedResult(
+                    $0,
+                    preservingDeviceLocalReferences: true,
+                    now: input.now
+                ).value
+                return addProgressRecords(progress, to: &snapshot.records, profileID: profile.profileID, encoder: encoder)
+            } ?? false
+            preserveUnreadableCapture(
+                progressCaptured,
+                kinds: [.movieProgress, .episodeProgress, .showMetadata, .hiddenUpNext],
+                profileID: profile.profileID,
+                priorNames: input.archive.lastLocalRecordNames,
+                snapshot: &snapshot
+            )
+            let ratingsCaptured = profile.ratings.map {
+                addRatingRecords($0, to: &snapshot.records, profileID: profile.profileID, encoder: encoder)
+            } ?? false
+            preserveUnreadableCapture(
+                ratingsCaptured,
+                kinds: [.rating],
+                profileID: profile.profileID,
+                priorNames: input.archive.lastLocalRecordNames,
+                snapshot: &snapshot
+            )
+            let catalogsCaptured = profile.catalogs.map {
+                addCatalogRecord($0, to: &snapshot.records, profileID: profile.profileID, encoder: encoder)
+            } ?? false
+            preserveUnreadableCapture(
+                catalogsCaptured,
+                kinds: [.catalogOrder],
+                profileID: profile.profileID,
+                priorNames: input.archive.lastLocalRecordNames,
+                snapshot: &snapshot
+            )
+        }
+        guard var reconciled = reconcileLocalCapture(
+            snapshot: snapshot,
+            archive: input.archive,
+            now: input.now,
+            suppressedDefaultRecordNames: input.suppressedDefaultRecordNames,
+            defaultRecordNames: input.defaultRecordNames,
+            tombstoneAuthority: input.tombstoneAuthority,
+            cancellable: true
+        ) else { throw CancellationError() }
+        if input.isolatesIncomingAccount {
+            reconciled.archive.suppressedLocalRecordPayloadHashes.merge(
+                input.pendingAccountBoundaryPayloadHashes,
+                uniquingKeysWith: { _, incoming in incoming }
+            )
+        }
+        try Task.checkCancellation()
+        let data = try encoder.encode(reconciled.archive)
+        guard data.count <= Self.maximumArchiveBytes else {
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+        try Task.checkCancellation()
+        return PreparedAutomaticCapture(reconciled: reconciled, data: data, skyStreamEncodingOutcomes: skyStreamEncodingOutcomes)
+    }
+
+    nonisolated private static func preserveUnreadableCapture(
+        _ wasCaptured: Bool,
+        kinds: Set<MediaStateKind>,
+        profileID: UUID,
+        priorNames: Set<String>,
+        snapshot: inout LocalSnapshot
+    ) {
+        guard !wasCaptured else { return }
+        snapshot.unreadableRecordNames.formUnion(priorNames.filter { name in
+            guard let kind = MediaStateRecordName.kind(from: name), kinds.contains(kind) else { return false }
+            return MediaStateRecordName.profileID(from: name) == profileID
+        })
+    }
+
+    private func beginAutomaticLocalCapture() {
+        captureTask = nil
+        guard allowsAutomaticLocalCapture else {
+            if MediaStatePlaybackLease.isActive { hasPlaybackDeferredLocalCapture = true }
+            return
+        }
+        guard automaticCaptureWorker == nil else {
+            automaticCaptureState.request()
+            return
+        }
+        automaticCaptureState.begin()
+        let input = makeAutomaticCaptureInput()
+        guard input.version == automaticCaptureVersion(),
+              ProgressManager.shared.mediaStateSnapshotIsCurrent(input.progress) else {
+            scheduleLocalCapture()
+            return
+        }
+        let workerID = UUID()
+        let worker = Task.detached(priority: .utility) {
+            try Self.prepareAutomaticCapture(input)
+        }
+        automaticCaptureWorkerID = workerID
+        automaticCaptureWorker = worker
+        Task { [weak self] in
+            let result = await worker.result
+            guard let self, self.automaticCaptureWorkerID == workerID else { return }
+            self.automaticCaptureWorker = nil
+            self.automaticCaptureWorkerID = nil
+            switch result {
+            case .success(let prepared):
+                guard self.allowsAutomaticLocalCapture,
+                      input.version == self.automaticCaptureVersion(),
+                      ProgressManager.shared.mediaStateSnapshotIsCurrent(input.progress),
+                      Date() >= input.now,
+                      input.settings == self.captureSettings(profileIDs: input.profiles.map(\.profileID)),
+                      input.version == self.automaticCaptureVersion() else {
+                    if self.allowsAutomaticLocalCapture { self.scheduleLocalCapture() }
+                    else if MediaStatePlaybackLease.isActive { self.hasPlaybackDeferredLocalCapture = true }
+                    return
+                }
+                for outcome in prepared.skyStreamEncodingOutcomes {
+                    self.applySkyStreamEncodingOutcome(outcome)
+                }
+                self.archive = prepared.reconciled.archive
+                self.suppressedDefaultRecordNames = prepared.reconciled.suppressedDefaultRecordNames
+                guard self.persistPreparedArchive(prepared.data) else {
+                    self.automaticCaptureState.request()
+                    return
+                }
+                self.stageDurableLocalCapture()
+            case .failure(let error):
+                if !(error is CancellationError) {
+                    self.automaticCaptureState.request()
+                    Logger.shared.log("MediaStateSync: failed to prepare local capture: \(error.localizedDescription)", type: "iCloud")
+                    return
+                }
+            }
+            if self.automaticCaptureState.shouldSchedule(
+                isAllowed: self.allowsAutomaticLocalCapture,
+                hasWorker: self.automaticCaptureWorker != nil
+            ) {
+                self.scheduleLocalCapture()
+            }
+        }
+    }
+
+    private func stageDurableLocalCapture() {
+        guard isArchiveStateDurable, durableArchiveRevision == archiveRevision,
+              !isPreparedRecoverySyncBlocked,
+              !hasPendingAccountIsolationJournal,
+              !isAccountIsolationInProgress else { return }
+        let names = MediaStateAutomaticCaptureState.pendingNamesForStaging(
+            in: archive,
+            isDurable: isArchiveStateDurable,
+            archiveRevision: archiveRevision,
+            durableRevision: durableArchiveRevision
+        )
+        guard !names.isEmpty else { return }
+        if MediaStateSyncBootstrap.isCloudKitSyncEnabled, let activeEngine = engine {
+            stageRecordSaves(names, on: activeEngine)
+        }
+#if os(iOS)
+        if isRemoteTransportModeActive {
+            MediaStateRemoteTransportCoordinator.shared.scheduleDeferredSync(reason: "local-change")
+        }
+#endif
+    }
+
     private func scheduleLocalCapture() {
+        invalidateAutomaticCapture(reschedule: false)
+        automaticCaptureState.request()
         guard !isPreparedRecoverySyncBlocked,
               !hasPendingAccountIsolationJournal,
               MediaStateLocalCapturePolicy.capturesLocalChanges(
@@ -3495,7 +4090,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
                 self.hasPlaybackDeferredLocalCapture = true
                 return
             }
-            _ = self.captureAndQueueLocalChanges()
+            self.beginAutomaticLocalCapture()
         }
     }
 
@@ -3516,6 +4111,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         forAccountIdentityRevalidation: Bool = false,
         persistenceResult: ((Bool) -> Void)? = nil
     ) -> [String] {
+        invalidateAutomaticCapture(reschedule: false)
         guard !isLocalArchiveUnavailable,
               (!isPreparedRecoverySyncBlocked || forPreparedRecoveryTransaction),
               !hasPendingAccountIsolationJournal,
@@ -3534,9 +4130,56 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         }
         let now = Date()
         let snapshot = buildLocalSnapshot()
+        guard let reconciled = Self.reconcileLocalCapture(
+            snapshot: snapshot,
+            archive: archive,
+            now: now,
+            suppressedDefaultRecordNames: suppressedDefaultRecordNames,
+            defaultRecordNames: defaultRecordNamesForInitialMigration(in: snapshot.records),
+            tombstoneAuthority: captureTombstoneAuthority()
+        ) else {
+            persistenceResult?(false)
+            return []
+        }
+        archive = reconciled.archive
+        suppressedDefaultRecordNames = reconciled.suppressedDefaultRecordNames
+        let pendingNames = reconciled.pendingNames
+        let persisted = persistArchive()
+        persistenceResult?(persisted)
+        guard persisted else { return pendingNames }
+        automaticCaptureState.begin()
+        if queueChanges {
+            queueRecordSaves(pendingNames)
+        }
+#if os(iOS)
+        if queueChanges, !pendingNames.isEmpty, isRemoteTransportModeActive {
+            MediaStateRemoteTransportCoordinator.shared.scheduleDeferredSync(reason: "local-change")
+        }
+#endif
+        return pendingNames
+    }
+
+    struct ReconciledLocalCapture: Sendable {
+        var archive: MediaStateLocalArchive
+        let suppressedDefaultRecordNames: Set<String>
+        let pendingNames: [String]
+    }
+
+    nonisolated static func reconcileLocalCapture(
+        snapshot: LocalSnapshot,
+        archive sourceArchive: MediaStateLocalArchive,
+        now: Date,
+        suppressedDefaultRecordNames sourceSuppressedNames: Set<String>,
+        defaultRecordNames: Set<String>,
+        tombstoneAuthority: CaptureTombstoneAuthority,
+        cancellable: Bool = false
+    ) -> ReconciledLocalCapture? {
+        var archive = sourceArchive
+        var suppressedDefaultRecordNames = sourceSuppressedNames
         var current = snapshot.records
         var invalidLocalRecordNames = Set<String>()
         for (recordName, envelope) in Array(current) {
+            if cancellable && Task.isCancelled { return nil }
 
             var validationCandidate = envelope
             validationCandidate.modifiedAt = now
@@ -3553,10 +4196,11 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
                 )
             }
         }
-        let currentlyDefaultRecordNames = defaultRecordNamesForInitialMigration(in: current)
+        let currentlyDefaultRecordNames = defaultRecordNames.intersection(current.keys)
         var pendingNames: [String] = []
 
         for (recordName, candidate) in current {
+            if cancellable && Task.isCancelled { return nil }
             if let suppressedHash = archive.suppressedLocalRecordPayloadHashes[recordName] {
                 guard Self.payloadSHA256(candidate.payload) != suppressedHash else {
                     continue
@@ -3587,7 +4231,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
                 changed.modifiedAt = now
                 changed.revision = MediaStateEnvelope.nextRevision(after: existing.revision)
                 changed.systemFields = existing.systemFields
-                let isExplicitReset = progressWasExplicitlyReset(from: existing, to: candidate)
+                let isExplicitReset = Self.progressWasExplicitlyReset(from: existing, to: candidate)
                 changed.isExplicitReset = isExplicitReset
                 if isExplicitReset {
                     changed.resetAt = now
@@ -3631,8 +4275,9 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
             .subtracting(snapshot.unreadableRecordNames)
             .subtracting(invalidLocalRecordNames)
         for recordName in removedNames {
+            if cancellable && Task.isCancelled { return nil }
             guard let existing = archive.records[recordName] else { continue }
-            guard mayTombstoneVanishedRecord(named: recordName, kind: existing.kind) else { continue }
+            guard tombstoneAuthority.allows(recordName, kind: existing.kind) else { continue }
             archive.records[recordName] = existing.tombstone(at: now)
             pendingNames.append(recordName)
         }
@@ -3641,21 +4286,16 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
             .union(snapshot.unreadableRecordNames)
             .union(invalidLocalRecordNames)
         archive.pendingLocalRecordNames.formUnion(pendingNames)
-        let persisted = persistArchive()
-        persistenceResult?(persisted)
-        guard persisted else { return pendingNames }
-        if queueChanges {
-            queueRecordSaves(pendingNames)
-        }
-#if os(iOS)
-        if queueChanges, !pendingNames.isEmpty, isRemoteTransportModeActive {
-            MediaStateRemoteTransportCoordinator.shared.scheduleDeferredSync(reason: "local-change")
-        }
-#endif
-        return pendingNames
+        return ReconciledLocalCapture(
+            archive: archive,
+            suppressedDefaultRecordNames: suppressedDefaultRecordNames,
+            pendingNames: pendingNames
+        )
     }
 
-    private func progressWasExplicitlyReset(from existing: MediaStateEnvelope, to candidate: MediaStateEnvelope) -> Bool {
+    nonisolated private static func progressWasExplicitlyReset(from existing: MediaStateEnvelope, to candidate: MediaStateEnvelope) -> Bool {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
         guard existing.kind == .movieProgress || existing.kind == .episodeProgress else { return false }
         guard !candidate.isCompleted else { return false }
 
@@ -3712,7 +4352,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         activeEngine.state.add(pendingRecordZoneChanges: changes)
     }
 
-    private struct LocalSnapshot {
+    struct LocalSnapshot: Sendable {
         var records: [String: MediaStateEnvelope] = [:]
         var unreadableRecordNames: Set<String> = []
 
@@ -3782,7 +4422,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
             return snapshot
         }
 
-        addProfileRecords(authoritativeProfiles, to: &snapshot.records)
+        Self.addProfileRecords(authoritativeProfiles, to: &snapshot.records)
         for profile in authoritativeProfiles {
 
             preserveIfUnreadable(
@@ -3858,42 +4498,51 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         return snapshot
     }
 
-    private func mayTombstoneVanishedRecord(named recordName: String, kind: MediaStateKind) -> Bool {
-        let owner: UUID?
-        switch kind {
-        case .profile:
-            owner = MediaStateRecordName.identifier(from: recordName).flatMap(UUID.init(uuidString:))
-        case _ where kind.isProfileScoped:
-            owner = MediaStateRecordName.profileID(from: recordName)
-        default:
-            return true
-        }
-        guard let owner else { return true }
-        guard ProfileManager.shared.profiles.contains(where: { $0.id == owner }) else {
-            return ProfileManager.shared.wasDeletedLocally(owner)
-        }
-        if kind == .setting {
-            if MediaStateRecordName.identifier(from: recordName)
-                == MediaStateServiceSourcesPayload.settingKey {
+    struct CaptureTombstoneAuthority: Sendable {
+        let profileIDs: Set<UUID>
+        let locallyDeletedProfileIDs: Set<UUID>
+        let enabledSettingKeys: Set<String>
+
+        func allows(_ recordName: String, kind: MediaStateKind) -> Bool {
+            let owner: UUID?
+            switch kind {
+            case .profile:
+                owner = MediaStateRecordName.identifier(from: recordName).flatMap(UUID.init(uuidString:))
+            case _ where kind.isProfileScoped:
+                owner = MediaStateRecordName.profileID(from: recordName)
+            default:
                 return true
             }
-            guard EclipseSettingsSyncPreference.isEnabled,
-                  let key = MediaStateRecordName.identifier(from: recordName),
-                  MediaStateSettingRegistry.scope(for: key)?.appliesToCurrentPlatform == true else {
-                return false
+            guard let owner else { return true }
+            guard profileIDs.contains(owner) else {
+                return locallyDeletedProfileIDs.contains(owner)
             }
-            if EclipseSettingsRegistry.scope(for: key) == .services,
-               !MediaStateServicesSettingSyncPolicy.participatesInGlobalSync(
-                   sharesServices: ProfileSettingsStore.sharesServices
-               ) {
-                return false
+            if kind == .setting {
+                guard let key = MediaStateRecordName.identifier(from: recordName) else { return false }
+                return key == MediaStateServiceSourcesPayload.settingKey || enabledSettingKeys.contains(key)
             }
+            return true
         }
-        return true
+    }
+
+    private func captureTombstoneAuthority() -> CaptureTombstoneAuthority {
+        let keys = MediaStateSettingRegistry.allKeys.filter { key in
+            guard EclipseSettingsSyncPreference.isEnabled,
+                  MediaStateSettingRegistry.scope(for: key)?.appliesToCurrentPlatform == true else { return false }
+            return EclipseSettingsRegistry.scope(for: key) != .services
+                || MediaStateServicesSettingSyncPolicy.participatesInGlobalSync(
+                    sharesServices: ProfileSettingsStore.sharesServices
+                )
+        }
+        return CaptureTombstoneAuthority(
+            profileIDs: Set(ProfileManager.shared.profiles.map(\.id)),
+            locallyDeletedProfileIDs: ProfileManager.shared.locallyDeletedProfileIDs,
+            enabledSettingKeys: Set(keys)
+        )
     }
 
     private func defaultRecordNamesForInitialMigration(
-        in snapshot: [String: MediaStateEnvelope]
+        in snapshot: [String: MediaStateEnvelope]? = nil
     ) -> Set<String> {
         var result: Set<String> = []
 
@@ -3913,7 +4562,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
                         identifier: "bookmarks",
                         profileID: profile.id
                     )
-                    if snapshot[name] != nil {
+                    if snapshot == nil || snapshot?[name] != nil {
                         result.insert(name)
                     }
                 }
@@ -3925,7 +4574,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
                     identifier: "home",
                     profileID: profile.id
                 )
-                if snapshot[name] != nil {
+                if snapshot == nil || snapshot?[name] != nil {
                     result.insert(name)
                 }
             }
@@ -3953,7 +4602,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
                 let hasExplicitValue = persistentSettingKeys.contains(key)
                 guard !hasExplicitValue else { continue }
                 let name = MediaStateRecordName.make(kind: .setting, identifier: key)
-                if snapshot[name] != nil { result.insert(name) }
+                if snapshot == nil || snapshot?[name] != nil { result.insert(name) }
                 continue
             }
             for profile in ProfileManager.shared.profiles {
@@ -3966,14 +4615,14 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
                     identifier: key,
                     profileID: profile.id
                 )
-                if snapshot[name] != nil { result.insert(name) }
+                if snapshot == nil || snapshot?[name] != nil { result.insert(name) }
             }
         }
 
         return result
     }
 
-    private struct LibraryCollectionPayload: Codable {
+    private struct LibraryCollectionPayload: Codable, Sendable {
         let id: UUID
         let key: String
         let name: String
@@ -3981,7 +4630,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         let order: Int
     }
 
-    private struct LibraryMembershipPayload: Codable {
+    private struct LibraryMembershipPayload: Codable, Sendable {
         let collectionKey: String
         let item: LibraryItem
 
@@ -3999,23 +4648,23 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         let payload: LibraryMembershipPayload
     }
 
-    private struct RatingPayload: Codable {
+    private struct RatingPayload: Codable, Sendable {
         let tmdbID: Int
         let rating: Double?
         let note: String?
     }
 
-    private struct BooleanPayload: Codable {
+    private struct BooleanPayload: Codable, Sendable {
         let value: Bool
     }
 
-    private func addProfileRecords(
+    nonisolated private static func addProfileRecords(
         _ profiles: [Profile],
         to result: inout [String: MediaStateEnvelope]
     ) {
         for profile in profiles {
             guard let data = MediaStateEnvelope.stableProfileData(profile) else { continue }
-            guard data.count <= Self.maxPayloadBytes else {
+            guard data.count <= MediaStateEnvelope.maximumPayloadBytes else {
                 Logger.shared.log(
                     "MediaStateSync: profile record skipped because its payload is too large id=\(profile.id)",
                     type: "iCloud"
@@ -4035,14 +4684,44 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         }
     }
 
+    struct CapturedLibraryCollection: Sendable {
+        let id: UUID
+        let key: String
+        let name: String
+        let description: String?
+        let items: [LibraryItem]
+
+        init(_ collection: LibraryCollection) {
+            id = collection.id
+            key = collection.name.caseInsensitiveCompare("Bookmarks") == .orderedSame
+                ? "bookmarks" : collection.id.uuidString.lowercased()
+            name = collection.name
+            description = collection.description
+            items = collection.items
+        }
+    }
+
     @discardableResult
     private func addLibraryRecords(to result: inout [String: MediaStateEnvelope], profileID: UUID) -> Bool {
-        guard let storedCollections = LibraryManager.shared.collections(forProfile: profileID) else {
-            return false
-        }
+        guard let collections = LibraryManager.shared.collections(forProfile: profileID) else { return false }
+        return Self.addLibraryRecords(
+            collections.map(CapturedLibraryCollection.init),
+            to: &result,
+            profileID: profileID,
+            encoder: encoder
+        )
+    }
+
+    @discardableResult
+    nonisolated private static func addLibraryRecords(
+        _ storedCollections: [CapturedLibraryCollection],
+        to result: inout [String: MediaStateEnvelope],
+        profileID: UUID,
+        encoder: JSONEncoder
+    ) -> Bool {
         var capturedEveryItem = true
         for (order, collection) in storedCollections.enumerated() {
-            let collectionKey = mediaCollectionKey(collection)
+            let collectionKey = collection.key
             let payload = LibraryCollectionPayload(
                 id: collection.id,
                 key: collectionKey,
@@ -4103,9 +4782,17 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
 
     @discardableResult
     private func addProgressRecords(to result: inout [String: MediaStateEnvelope], profileID: UUID) -> Bool {
-        guard let progress = ProgressManager.shared.progressData(forProfile: profileID) else {
-            return false
-        }
+        guard let progress = ProgressManager.shared.progressData(forProfile: profileID) else { return false }
+        return Self.addProgressRecords(progress, to: &result, profileID: profileID, encoder: encoder)
+    }
+
+    @discardableResult
+    nonisolated private static func addProgressRecords(
+        _ progress: ProgressData,
+        to result: inout [String: MediaStateEnvelope],
+        profileID: UUID,
+        encoder: JSONEncoder
+    ) -> Bool {
         for movie in progress.movieProgress {
             var sanitizedMovie = movie
             sanitizedMovie.lastHref = nil
@@ -4173,11 +4860,29 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         return true
     }
 
+    struct CapturedRatings: Sendable {
+        let ratings: [String: Double]
+        let notes: [String: String]
+    }
+
     @discardableResult
     private func addRatingRecords(to result: inout [String: MediaStateEnvelope], profileID: UUID) -> Bool {
-        guard let store = UserRatingManager.shared.ratingsAndNotes(forProfile: profileID) else {
-            return false
-        }
+        guard let store = UserRatingManager.shared.ratingsAndNotes(forProfile: profileID) else { return false }
+        return Self.addRatingRecords(
+            CapturedRatings(ratings: store.ratings, notes: store.notes),
+            to: &result,
+            profileID: profileID,
+            encoder: encoder
+        )
+    }
+
+    @discardableResult
+    nonisolated private static func addRatingRecords(
+        _ store: CapturedRatings,
+        to result: inout [String: MediaStateEnvelope],
+        profileID: UUID,
+        encoder: JSONEncoder
+    ) -> Bool {
         let ratings = store.ratings
         let notes = store.notes
         let identifiers = Set(ratings.keys).union(notes.keys)
@@ -4198,6 +4903,43 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
 
     private func addSettingRecords(
         to result: inout [String: MediaStateEnvelope],
+        profileID: UUID?
+    ) {
+        var settings: [String: CapturedSetting] = [:]
+        captureSettingValues(to: &settings, profileID: profileID)
+        Self.addCapturedSettingRecords(settings, to: &result, priorRecords: archive.records)
+    }
+
+    nonisolated static func addCapturedSettingRecords(
+        _ settings: [String: CapturedSetting],
+        to result: inout [String: MediaStateEnvelope],
+        priorRecords: [String: MediaStateEnvelope] = [:]
+    ) {
+        for (name, setting) in settings {
+            let value = MediaStateSettingValueValidator.capturableLocalValue(
+                setting.value.value, forKey: setting.key
+            )
+            let data: Data
+            if let previous = priorRecords[name], !previous.isDeleted,
+               previous.payload.count <= MediaStateEnvelope.maximumPayloadBytes,
+               let previousValue = try? PropertyListSerialization.propertyList(from: previous.payload, options: [], format: nil),
+               let previousCapture = CapturedPropertyListValue(previousValue),
+               let currentCapture = CapturedPropertyListValue(value),
+               currentCapture.isWireEquivalent(to: previousCapture) {
+                data = previous.payload
+            } else {
+                guard let encoded = encodedPropertyList(for: value) else { continue }
+                data = encoded
+            }
+            result[name] = MediaStateEnvelope(
+                recordName: name, kind: .setting, payload: data,
+                modifiedAt: .distantPast, settingScope: setting.scope
+            )
+        }
+    }
+
+    private func captureSettingValues(
+        to result: inout [String: CapturedSetting],
         profileID: UUID?
     ) {
         guard EclipseSettingsSyncPreference.isEnabled else { return }
@@ -4229,9 +4971,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
                 defaults = ProfileSettingsStore.device
             }
             guard let value = defaults.object(forKey: key),
-                  let data = propertyListData(
-                    for: MediaStateSettingValueValidator.capturableLocalValue(value, forKey: key)
-                  ) else {
+                  let captured = CapturedPropertyListValue(value) else {
                 continue
             }
 
@@ -4240,13 +4980,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
                 identifier: key,
                 profileID: storageScope == .profile ? profileID : nil
             )
-            result[name] = MediaStateEnvelope(
-                recordName: name,
-                kind: .setting,
-                payload: data,
-                modifiedAt: .distantPast,
-                settingScope: platformScope
-            )
+            result[name] = CapturedSetting(key: key, scope: platformScope, value: captured)
         }
     }
 
@@ -4255,7 +4989,24 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         to result: inout [String: MediaStateEnvelope],
         profileID: UUID
     ) -> Bool {
-        guard let captured = capturedServiceSources(forProfile: profileID) else { return false }
+        let name = MediaStateRecordName.make(
+            kind: .setting, identifier: MediaStateServiceSourcesPayload.settingKey, profileID: profileID
+        )
+        return Self.addCapturedServiceSourcesRecord(
+            capturedServiceSources(forProfile: profileID), existing: archive.records[name],
+            to: &result, profileID: profileID
+        )
+    }
+
+    nonisolated static func addCapturedServiceSourcesRecord(
+        _ captured: CapturedServiceSources?,
+        existing: MediaStateEnvelope?,
+        to result: inout [String: MediaStateEnvelope],
+        profileID: UUID
+    ) -> Bool {
+        guard let captured else { return false }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
         guard var payload = MediaStateServiceSourcesPayload.captured(
             services: captured.services,
             stremioAddons: captured.addons,
@@ -4267,7 +5018,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
             profileID: profileID
         )
         if payload.nuvioPluginsData == nil,
-           let existing = archive.records[name], !existing.isDeleted,
+           let existing, !existing.isDeleted,
            let existingData = MediaStateSettingValueValidator.validatedValue(
                from: existing.payload,
                forKey: MediaStateServiceSourcesPayload.settingKey
@@ -4279,7 +5030,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
             payload.nuvioPluginsData = existingPayload.nuvioPluginsData
         }
         guard let canonical = MediaStateServiceSourcesPayload.canonicalData(payload),
-              let data = propertyListData(for: canonical),
+              let data = encodedPropertyList(for: canonical),
               data.count <= MediaStateEnvelope.maximumPayloadBytes else {
             return false
         }
@@ -4293,18 +5044,18 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         return true
     }
 
-    private struct CapturedServiceSources {
+    struct CapturedServiceSources: Sendable {
         let services: [MediaStateServiceSource]
         let addons: [MediaStateStremioAddon]
         let nuvioPluginsData: Data?
     }
 
-    private func capturedServiceSources(forProfile profileID: UUID) -> CapturedServiceSources? {
+    private func capturedServiceSources(forProfile profileID: UUID, includeNuvioMetadata: Bool = true) -> CapturedServiceSources? {
         if !FileManager.default.fileExists(atPath: ServiceStoreScope.storeURL(for: profileID).path) {
             return CapturedServiceSources(
                 services: [],
                 addons: [],
-                nuvioPluginsData: capturedNuvioMetadata(forProfile: profileID)
+                nuvioPluginsData: includeNuvioMetadata ? capturedNuvioMetadata(forProfile: profileID) : nil
             )
         }
         typealias Captured = ([MediaStateServiceSource], [MediaStateStremioAddon])
@@ -4369,8 +5120,21 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         return CapturedServiceSources(
             services: values.0,
             addons: values.1,
-            nuvioPluginsData: capturedNuvioMetadata(forProfile: profileID)
+            nuvioPluginsData: includeNuvioMetadata ? capturedNuvioMetadata(forProfile: profileID) : nil
         )
+    }
+
+    private func capturedRawNuvioMetadata(forProfile profileID: UUID) -> CapturedNuvioMetadata {
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        let settingsStore = ProfileSettingsStore.sharesServices
+            ? UserDefaults.standard
+            : ProfileSettingsStore.shared.store(for: profileID)
+        guard let value = settingsStore.object(forKey: "nuvioPluginsState.v2") else { return .persisted(nil) }
+        guard let data = value as? Data else { return .unavailable }
+        return .persisted(data)
+#else
+        return .unavailable
+#endif
     }
 
     private func capturedNuvioMetadata(forProfile profileID: UUID) -> Data? {
@@ -4388,8 +5152,18 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
 
     @discardableResult
     private func addCatalogRecord(to result: inout [String: MediaStateEnvelope], profileID: UUID) -> Bool {
-        guard let catalogs = CatalogManager.shared.catalogsForMediaStateSync(forProfile: profileID),
-              let data = try? encoder.encode(catalogs) else { return false }
+        guard let catalogs = CatalogManager.shared.catalogsForMediaStateSync(forProfile: profileID) else { return false }
+        return Self.addCatalogRecord(catalogs, to: &result, profileID: profileID, encoder: encoder)
+    }
+
+    @discardableResult
+    nonisolated private static func addCatalogRecord(
+        _ catalogs: [Catalog],
+        to result: inout [String: MediaStateEnvelope],
+        profileID: UUID,
+        encoder: JSONEncoder
+    ) -> Bool {
+        guard let data = try? encoder.encode(catalogs) else { return false }
         let name = MediaStateRecordName.make(kind: .catalogOrder, identifier: "home", profileID: profileID)
         result[name] = MediaStateEnvelope(
             recordName: name,
@@ -4429,75 +5203,100 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
     }
 
     private func localSkyStreamMetadataPayload(forProfile profileID: UUID) -> Data? {
+        let (payload, outcome) = Self.preparedSkyStreamMetadata(capturedSkyStreamMetadata(forProfile: profileID))
+        applySkyStreamEncodingOutcome(outcome)
+        return payload
+    }
+
+    private func capturedSkyStreamMetadata(forProfile profileID: UUID) -> CapturedSkyStreamMetadata {
         let settings = ProfileSettingsStore.sharesServices
             ? UserDefaults.standard
             : ProfileSettingsStore.shared.store(for: profileID)
-        if let pendingValue = settings.object(
-            forKey: SkyStreamPluginManager.pendingSafeCloudSnapshotKey
-        ) {
-            guard let pendingData = pendingValue as? Data,
-                  pendingData.count <= 50_000_000 else { return nil }
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            guard let pending = try? decoder.decode(
-                SkyStreamBackupSnapshot.self,
-                from: pendingData
-            ) else { return nil }
-            return canonicalSkyStreamMetadataPayload(pending)
+        if let pendingValue = settings.object(forKey: SkyStreamPluginManager.pendingSafeCloudSnapshotKey) {
+            guard let data = pendingValue as? Data, data.count <= 50_000_000 else { return .unavailable }
+            return .pending(data)
         }
 #if os(iOS) && !targetEnvironment(macCatalyst)
-        guard PlatformCapabilities.current.supportsSkyStreamPlugins else { return nil }
+        guard PlatformCapabilities.current.supportsSkyStreamPlugins else { return .unavailable }
         let targetStoreURL = ServiceStoreScope.storeURL(for: profileID).standardizedFileURL
         if targetStoreURL == ServiceStoreScope.activeStoreURL.standardizedFileURL {
-            let manager = SkyStreamPluginManager.shared
-            guard manager.isLoaded,
-                  let snapshot = manager.completePrivateCloudMetadataSnapshot() else {
-                return nil
-            }
-            return canonicalSkyStreamMetadataPayload(snapshot)
+            guard let capture = SkyStreamPluginManager.shared.privateCloudMetadataCapture() else { return .unavailable }
+            return .active(capture)
         }
-
-        guard FileManager.default.fileExists(atPath: targetStoreURL.path) else {
-            return canonicalSkyStreamMetadataPayload(emptySkyStreamMetadataSnapshot())
-        }
-        let captured = ServiceStoreScope.withReadOnlyStore(
-            forProfile: profileID
-        ) { context -> Result<Data?, Error> in
+        guard FileManager.default.fileExists(atPath: targetStoreURL.path) else { return .persisted(nil) }
+        let captured = ServiceStoreScope.withReadOnlyStore(forProfile: profileID) { context -> Result<Data?, Error> in
             Result {
-                let request = NSFetchRequest<NSManagedObject>(
-                    entityName: "SkyStreamStateEntity"
-                )
-                request.predicate = NSPredicate(
-                    format: "id == %@",
-                    SkyStreamStateEntity.singletonID
-                )
+                let request = NSFetchRequest<NSManagedObject>(entityName: "SkyStreamStateEntity")
+                request.predicate = NSPredicate(format: "id == %@", SkyStreamStateEntity.singletonID)
                 request.fetchLimit = 1
                 guard let entity = try context.fetch(request).first else { return nil }
                 guard let json = entity.value(forKey: "jsonState") as? String,
-                      let data = json.data(using: .utf8),
-                      data.count <= 8 * 1_024 * 1_024 else {
+                      let data = json.data(using: .utf8), data.count <= 8 * 1_024 * 1_024 else {
                     throw CocoaError(.fileReadCorruptFile)
                 }
                 return data
             }
         }
-        guard case .success(let persistedData)? = captured else { return nil }
-        guard let persistedData else {
-            return canonicalSkyStreamMetadataPayload(emptySkyStreamMetadataSnapshot())
-        }
-        guard let snapshot = SkyStreamPluginManager
-            .completePrivateCloudMetadataSnapshot(fromPersistedStateData: persistedData) else {
-            return nil
-        }
-        return canonicalSkyStreamMetadataPayload(snapshot)
+        guard case .success(let data)? = captured else { return .unavailable }
+        return .persisted(data)
 #else
-        guard profileID == ProfileManager.defaultProfileID else { return nil }
-        guard let data = SkyStreamPluginManager.shared.opaqueMediaStateSnapshotData(),
-              let snapshot = try? SkyStreamMediaStateDocument.decodeMetadataOnly(data) else {
-            return nil
-        }
-        return canonicalSkyStreamMetadataPayload(snapshot)
+        guard profileID == ProfileManager.defaultProfileID,
+              let data = SkyStreamPluginManager.shared.opaqueMediaStateSnapshotDataWithoutValidation() else { return .unavailable }
+        return .opaque(data)
 #endif
+    }
+
+    nonisolated static func preparedSkyStreamMetadata(
+        _ capture: CapturedSkyStreamMetadata
+    ) -> (Data?, SkyStreamEncodingOutcome) {
+        let snapshot: SkyStreamBackupSnapshot?
+        switch capture {
+        case .unavailable: return (nil, .unchanged)
+        case .pending(let data):
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            snapshot = try? decoder.decode(SkyStreamBackupSnapshot.self, from: data)
+        case .persisted(let data):
+            if let data {
+                snapshot = SkyStreamPluginManager.completePrivateCloudMetadataSnapshot(fromPersistedStateData: data)
+            } else {
+                snapshot = SkyStreamBackupSnapshot(
+                    repositories: [], plugins: [], createdAt: Date(timeIntervalSince1970: 0),
+                    isSafeCloudSnapshot: true, privateCloudConfigurationIsComplete: true
+                )
+            }
+        case .opaque(let data):
+            snapshot = try? SkyStreamMediaStateDocument.decodeMetadataOnly(data)
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        case .active(let capture):
+            snapshot = SkyStreamPluginManager.materializePrivateCloudMetadataCapture(capture)
+#endif
+        }
+        guard let snapshot else { return (nil, .unchanged) }
+#if os(iOS)
+        guard let safe = BackupData.skyStreamSnapshotForExperimentalCloudSync(snapshot) else { return (nil, .unchanged) }
+#else
+        let safe = snapshot
+#endif
+        do {
+            return (try SkyStreamMediaStateDocument.encodeMetadataOnly(safe), .success)
+        } catch {
+            return (nil, .failure(String(reflecting: error)))
+        }
+    }
+
+    private func applySkyStreamEncodingOutcome(_ outcome: SkyStreamEncodingOutcome) {
+        switch outcome {
+        case .unchanged: break
+        case .success: lastSkyStreamMetadataEncodingFailure = nil
+        case .failure(let failure):
+            guard lastSkyStreamMetadataEncodingFailure != failure else { return }
+            lastSkyStreamMetadataEncodingFailure = failure
+            Logger.shared.log(
+                "SkyStream CloudKit metadata capture omitted; prior account record retained error=\(failure)",
+                type: "iCloud"
+            )
+        }
     }
 
     private func canonicalSkyStreamMetadataPayload(
@@ -4518,16 +5317,6 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
             logSkyStreamMetadataEncodingFailureOnce(error)
             return nil
         }
-    }
-
-    private func emptySkyStreamMetadataSnapshot() -> SkyStreamBackupSnapshot {
-        SkyStreamBackupSnapshot(
-            repositories: [],
-            plugins: [],
-            createdAt: Date(timeIntervalSince1970: 0),
-            isSafeCloudSnapshot: true,
-            privateCloudConfigurationIsComplete: true
-        )
     }
 
     private func logSkyStreamMetadataEncodingFailureOnce(_ error: Error) {
@@ -5501,7 +6290,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
         }
     }
 
-    private static func payloadSHA256(_ data: Data) -> String {
+    nonisolated private static func payloadSHA256(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -5511,7 +6300,7 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
             : collection.id.uuidString.lowercased()
     }
 
-    private func propertyListData(for value: Any) -> Data? {
+    nonisolated private static func encodedPropertyList(for value: Any) -> Data? {
         guard PropertyListSerialization.propertyList(value, isValidFor: .binary) else { return nil }
         return try? PropertyListSerialization.data(fromPropertyList: value, format: .binary, options: 0)
     }
@@ -6069,6 +6858,18 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
 
     @discardableResult
     private func persistArchive() -> Bool {
+        guard !isLocalArchiveUnavailable else { return persistPreparedArchive(nil) }
+        if initialLocalStatePolicy == .isolateIncomingAccount {
+            archive.suppressedLocalRecordPayloadHashes.merge(
+                pendingAccountBoundaryPayloadHashes,
+                uniquingKeysWith: { _, incoming in incoming }
+            )
+        }
+        return persistPreparedArchive(nil)
+    }
+
+    @discardableResult
+    private func persistPreparedArchive(_ preparedData: Data?) -> Bool {
         guard !isLocalArchiveUnavailable else {
             Logger.shared.log(
                 "MediaStateSync: refused to overwrite an existing unavailable media-state archive",
@@ -6077,21 +6878,16 @@ final class MediaStateSyncManager: NSObject, ObservableObject {
             return false
         }
 
-        if initialLocalStatePolicy == .isolateIncomingAccount {
-            archive.suppressedLocalRecordPayloadHashes.merge(
-                pendingAccountBoundaryPayloadHashes,
-                uniquingKeysWith: { _, incoming in incoming }
-            )
-        }
         isArchiveStateDurable = false
         do {
             try Self.ensureStorageDirectory()
-            let data = try encoder.encode(archive)
+            let data = try preparedData ?? encoder.encode(archive)
             guard data.count <= Self.maximumArchiveBytes else {
                 throw CocoaError(.fileWriteOutOfSpace)
             }
             try data.write(to: Self.archiveURL, options: .atomic)
             isArchiveStateDurable = true
+            durableArchiveRevision = archiveRevision
             return true
         } catch {
             Logger.shared.log("Failed to persist media state cache: \(error.localizedDescription)", type: "iCloud")

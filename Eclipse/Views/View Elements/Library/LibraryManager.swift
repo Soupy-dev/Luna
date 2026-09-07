@@ -19,6 +19,7 @@ final class LibraryManager: ObservableObject {
 
     @Published private(set) var collections: [LibraryCollection] = [] {
         didSet {
+            advanceMediaStateRevision()
             collections.forEach { observeCollection($0) }
             save()
         }
@@ -29,6 +30,10 @@ final class LibraryManager: ObservableObject {
     private var collectionsKey: String
     private var activeProfileID: UUID
     private var collectionCancellables: [UUID: AnyCancellable] = [:]
+    private var collectionObservationGeneration = UUID()
+    private let mediaStateRevisionLock = NSLock()
+    private var mutationRevision: UInt64 = 0
+    private var collectionSavePending = false
     private var cancellables = Set<AnyCancellable>()
 
     private var isSwitchingProfile = false
@@ -37,8 +42,23 @@ final class LibraryManager: ObservableObject {
 
     var isApplyingTraktWatchlistSync = false
 
-    private init() {
-        let profileID = ProfileManager.shared.activeProfileID
+    var mediaStateRevision: UInt64 {
+        mediaStateRevisionLock.lock()
+        defer { mediaStateRevisionLock.unlock() }
+        return mutationRevision
+    }
+
+    private func advanceMediaStateRevision() {
+        mediaStateRevisionLock.lock()
+        mutationRevision &+= 1
+        mediaStateRevisionLock.unlock()
+    }
+
+    private convenience init() {
+        self.init(profileID: ProfileManager.shared.activeProfileID)
+    }
+
+    init(profileID: UUID) {
         activeProfileID = profileID
         collectionsKey = Self.collectionsKey(for: profileID)
         Self.migrateLegacyStoreIfNeeded()
@@ -65,10 +85,14 @@ final class LibraryManager: ObservableObject {
 
     func switchProfile(to profileID: UUID) {
         guard profileID != activeProfileID else { return }
+        if collectionSavePending {
+            save()
+        }
         isSwitchingProfile = true
         activeProfileID = profileID
         collectionsKey = Self.collectionsKey(for: profileID)
         collectionCancellables.removeAll()
+        collectionObservationGeneration = UUID()
         if let loaded = Self.loadCollections(forKey: collectionsKey, profileID: profileID) {
             collections = loaded
 
@@ -96,6 +120,7 @@ final class LibraryManager: ObservableObject {
 
     func discardStore(forProfile profileID: UUID) {
         guard profileID != activeProfileID else { return }
+        advanceMediaStateRevision()
         UserDefaults.standard.removeObject(forKey: Self.collectionsKey(for: profileID))
     }
 
@@ -230,6 +255,7 @@ final class LibraryManager: ObservableObject {
         }
         if let data = try? JSONEncoder().encode(collections) {
             UserDefaults.standard.set(data, forKey: collectionsKey)
+            collectionSavePending = false
         }
         NotificationCenter.default.post(name: .libraryDataDidChange, object: self)
     }
@@ -238,6 +264,7 @@ final class LibraryManager: ObservableObject {
 
         storeLoadFailed = false
         collectionCancellables.removeAll()
+        collectionObservationGeneration = UUID()
         collections = Self.normalizedCollections(newCollections, forProfile: activeProfileID)
         collections.forEach { observeCollection($0) }
     }
@@ -249,6 +276,7 @@ final class LibraryManager: ObservableObject {
         }
         let resolved = Self.normalizedCollections(newCollections, forProfile: profileID)
         guard let data = try? JSONEncoder().encode(resolved) else { return }
+        advanceMediaStateRevision()
         UserDefaults.standard.set(data, forKey: Self.collectionsKey(for: profileID))
     }
 
@@ -328,23 +356,28 @@ final class LibraryManager: ObservableObject {
             )
             return
         }
-        guard let index = ensureTraktWatchlistCollectionIndex() else { return }
         isApplyingTraktWatchlistSync = true
         defer { isApplyingTraktWatchlistSync = false }
+        let collection = collections.first { $0.name == TrackerManager.traktWatchlistCollectionName }
+        var items = collection?.items ?? []
+        let initialCount = items.count
+        var identities = Set(items.map(\.id))
         for result in results {
-            let item = LibraryItem(searchResult: result)
-            if !collections[index].items.contains(where: { $0.id == item.id }) {
-                collections[index].items.append(item)
+            if identities.insert(result.stableIdentity).inserted {
+                items.append(LibraryItem(searchResult: result))
             }
         }
-    }
-
-    private func ensureTraktWatchlistCollectionIndex() -> Int? {
-        if let idx = collections.firstIndex(where: { $0.name == TrackerManager.traktWatchlistCollectionName }) {
-            return idx
+        if let collection {
+            if items.count != initialCount {
+                collection.items = items
+            }
+        } else {
+            collections.append(LibraryCollection(
+                name: TrackerManager.traktWatchlistCollectionName,
+                items: items,
+                description: "Synced with your Trakt watchlist"
+            ))
         }
-        createCollection(name: TrackerManager.traktWatchlistCollectionName, description: "Synced with your Trakt watchlist")
-        return collections.firstIndex(where: { $0.name == TrackerManager.traktWatchlistCollectionName })
     }
 
     func moveCollections(from source: IndexSet, to destination: Int) {
@@ -396,11 +429,19 @@ final class LibraryManager: ObservableObject {
     private func observeCollection(_ collection: LibraryCollection) {
         if collectionCancellables[collection.id] != nil { return }
 
+        let owner = activeProfileID
+        let generation = collectionObservationGeneration
         let cancellable = collection.objectWillChange
-            .sink { [weak self] _ in
+            .sink { [weak self, weak collection] _ in
+                self?.advanceMediaStateRevision()
+                self?.collectionSavePending = true
                 DispatchQueue.main.async {
-                    self?.objectWillChange.send()
-                    self?.save()
+                    guard let self, let collection,
+                          self.activeProfileID == owner,
+                          self.collectionObservationGeneration == generation,
+                          self.collections.contains(where: { $0 === collection }) else { return }
+                    self.objectWillChange.send()
+                    self.save()
                 }
             }
 

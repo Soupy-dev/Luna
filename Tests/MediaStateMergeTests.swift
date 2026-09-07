@@ -1,4 +1,5 @@
 import CloudKit
+import CryptoKit
 import UIKit
 import XCTest
 @testable import Eclipse
@@ -23,6 +24,29 @@ private actor MediaStateCloudLaneProbe {
 
 private enum MediaStateCloudKitTaskContextProbe {
     @TaskLocal static var isInsideDelegateCallback = false
+}
+
+private actor MediaStateCaptureTestBarrier {
+    private var parked: CheckedContinuation<Void, Never>?
+    private var observer: CheckedContinuation<Void, Never>?
+
+    func park() async {
+        await withCheckedContinuation { continuation in
+            parked = continuation
+            observer?.resume()
+            observer = nil
+        }
+    }
+
+    func waitUntilParked() async {
+        guard parked == nil else { return }
+        await withCheckedContinuation { observer = $0 }
+    }
+
+    func release() {
+        parked?.resume()
+        parked = nil
+    }
 }
 
 final class MediaStateMergeTests: XCTestCase {
@@ -3705,4 +3729,631 @@ final class MediaStateMergeTests: XCTestCase {
             dateAdded: dateAdded
         )
     }
+    func testProgressNormalizationChangeReportMatchesCanonicalPersistence() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        for seed in 0..<48 {
+            var value = ProgressData()
+            for index in 1...12 {
+                var movie = MovieProgressEntry(id: index, title: "Movie \(index)")
+                movie.lastUpdated = now.addingTimeInterval(-Double(index))
+                movie.currentTime = Double(index)
+                movie.totalDuration = seed.isMultiple(of: 3) ? 1 : 100
+                if seed.isMultiple(of: 5) { movie.lastHref = "https://example.invalid/\(index)" }
+                value.movieProgress.append(movie)
+                var episode = EpisodeProgressEntry(showId: 501, seasonNumber: 1, episodeNumber: index)
+                episode.lastUpdated = movie.lastUpdated
+                episode.totalDuration = 100
+                value.episodeProgress.append(episode)
+            }
+            if seed.isMultiple(of: 2) { value.movieProgress.reverse() }
+            if seed.isMultiple(of: 3) { value.episodeProgress.reverse() }
+            if seed.isMultiple(of: 4), let first = value.movieProgress.first {
+                value.movieProgress.append(first)
+            }
+            if seed.isMultiple(of: 6), let first = value.episodeProgress.first {
+                value.episodeProgress.append(first)
+            }
+            value.showMetadata[501] = ShowMetadata(showId: 501, title: "Show", posterURL: nil)
+            value.hiddenUpNextShowIds = seed.isMultiple(of: 7) ? [0, 501] : [501]
+            if seed.isMultiple(of: 8) {
+                value.showMetadata[502] = ShowMetadata(showId: 503, title: "Invalid key", posterURL: nil)
+            }
+            let keepReferences = !seed.isMultiple(of: 5)
+            let normalized = ProgressPersistencePolicy.sanitizedResult(
+                value,
+                preservingDeviceLocalReferences: keepReferences,
+                now: now
+            )
+            XCTAssertEqual(
+                normalized.didChange,
+                try encoder.encode(value) != encoder.encode(normalized.value),
+                "Normalization change report diverged for fixture \(seed)"
+            )
+            XCTAssertFalse(ProgressPersistencePolicy.sanitizedResult(
+                normalized.value,
+                preservingDeviceLocalReferences: keepReferences,
+                now: now
+            ).didChange)
+        }
+    }
+
+    func testProgressNormalizationRechecksClocksAndSignedZero() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var value = ProgressData()
+        var movie = MovieProgressEntry(id: 17, title: "Clock")
+        movie.lastUpdated = now.addingTimeInterval(MediaStateEnvelopeValidator.maximumFutureClockSkew + 1)
+        movie.currentTime = -0.0
+        movie.totalDuration = -0.0
+        value.movieProgress = [movie]
+        let rejected = ProgressPersistencePolicy.sanitizedResult(value, preservingDeviceLocalReferences: true, now: now)
+        XCTAssertTrue(rejected.didChange)
+        XCTAssertTrue(rejected.value.movieProgress.isEmpty)
+        XCTAssertEqual(rejected.validUntil, now.addingTimeInterval(1))
+        XCTAssertTrue(ProgressManager.preparationClockIsCurrent(
+            now: now,
+            validatedAt: now,
+            validUntil: rejected.validUntil
+        ))
+        XCTAssertFalse(ProgressManager.preparationClockIsCurrent(
+            now: now.addingTimeInterval(1),
+            validatedAt: now,
+            validUntil: rejected.validUntil
+        ))
+        XCTAssertFalse(ProgressManager.preparationClockIsCurrent(
+            now: now.addingTimeInterval(-1),
+            validatedAt: now,
+            validUntil: nil
+        ))
+        let accepted = ProgressPersistencePolicy.sanitizedResult(
+            value,
+            preservingDeviceLocalReferences: true,
+            now: now.addingTimeInterval(2)
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        XCTAssertEqual(accepted.didChange, try encoder.encode(value) != encoder.encode(accepted.value))
+        var invalid = value
+        invalid.movieProgress[0].currentTime = .nan
+        let invalidResult = ProgressPersistencePolicy.sanitizedResult(
+            invalid,
+            preservingDeviceLocalReferences: true,
+            now: now.addingTimeInterval(2)
+        )
+        XCTAssertTrue(invalidResult.didChange)
+        XCTAssertTrue(invalidResult.value.movieProgress.isEmpty)
+    }
+
+    func testProgressFlushDoesNotWaitForPreparationAndRejectsPreRestoreBytes() throws {
+        let owner = UUID()
+        let queue = DispatchQueue(label: "test.progress.preparation.restore")
+        queue.suspend()
+        var resumed = false
+        let manager = ProgressManager(profileID: owner, preparationQueue: queue)
+        let url = ProgressManager.progressFileURL(for: owner)
+        defer {
+            if !resumed { queue.resume() }
+            queue.sync {}
+            manager.flushPendingSave()
+            try? FileManager.default.removeItem(at: url)
+        }
+        manager.bulkMarkEpisodesAsWatched(showId: 71, seasonNumber: 1, throughEpisode: 3, owner: owner)
+        let staleLookup = manager.captureEpisodeLookup(showID: 71)
+        let staleCapture = manager.captureForMediaStateSync(profileIDs: [owner])
+        XCTAssertEqual(staleLookup.entries.count, 3)
+        var restored = ProgressData()
+        var replacement = EpisodeProgressEntry(showId: 72, seasonNumber: 1, episodeNumber: 1)
+        replacement.lastUpdated = Date(timeIntervalSince1970: 1_700_000_000)
+        restored.episodeProgress = [replacement]
+        XCTAssertTrue(manager.replaceProgressDataForRestore(restored, expectedProfileID: owner))
+        XCTAssertFalse(manager.episodeLookupIsCurrent(staleLookup))
+        XCTAssertFalse(manager.mediaStateSnapshotIsCurrent(staleCapture))
+        manager.flushPendingSave()
+        queue.resume()
+        resumed = true
+        queue.sync {}
+        manager.flushPendingSave()
+        let persisted = try JSONDecoder().decode(ProgressData.self, from: Data(contentsOf: url))
+        XCTAssertEqual(persisted.episodeProgress.map(\.showId), [72])
+        let before = try FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? NSNumber
+        manager.flushPendingSave()
+        let after = try FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? NSNumber
+        XCTAssertNotNil(before)
+        XCTAssertEqual(before, after, "A clean synchronous flush should retain the same durable file")
+    }
+
+    func testFailedProgressFlushKeepsRevisionDirtyForRetry() throws {
+        let owner = UUID()
+        let queue = DispatchQueue(label: "test.progress.preparation.failed-write")
+        queue.suspend()
+        let manager = ProgressManager(profileID: owner, preparationQueue: queue)
+        let url = ProgressManager.progressFileURL(for: owner)
+        defer {
+            queue.resume()
+            queue.sync {}
+            manager.flushPendingSave()
+            try? FileManager.default.removeItem(at: url)
+        }
+        manager.bulkMarkEpisodesAsWatched(showId: 81, seasonNumber: 1, throughEpisode: 2, owner: owner)
+        _ = manager.captureEpisodeLookup(showID: 81)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        manager.flushPendingSave()
+        try FileManager.default.removeItem(at: url)
+        manager.flushPendingSave()
+        let persisted = try JSONDecoder().decode(ProgressData.self, from: Data(contentsOf: url))
+        XCTAssertEqual(persisted.episodeProgress.count, 2)
+        XCTAssertTrue(persisted.episodeProgress.allSatisfy(\.isWatched))
+    }
+
+    func testProgressCaptureRejectsProfileRoundTripAndInactiveRestore() throws {
+        let owner = UUID()
+        let other = UUID()
+        let manager = ProgressManager(profileID: owner)
+        defer {
+            manager.flushPendingSave()
+            try? FileManager.default.removeItem(at: ProgressManager.progressFileURL(for: owner))
+            try? FileManager.default.removeItem(at: ProgressManager.progressFileURL(for: other))
+        }
+        let lookup = manager.captureEpisodeLookup(showID: 91)
+        let captured = manager.captureForMediaStateSync(profileIDs: [owner, other])
+        XCTAssertTrue(manager.applyRestoredProgressData(ProgressData(), forProfile: other))
+        XCTAssertFalse(manager.mediaStateSnapshotIsCurrent(captured))
+        manager.switchProfile(to: other)
+        manager.switchProfile(to: owner)
+        XCTAssertFalse(manager.episodeLookupIsCurrent(lookup))
+    }
+
+    @available(iOS 17.0, tvOS 17.0, *)
+    private func automaticCaptureFixture(
+        owner: UUID,
+        archive: MediaStateLocalArchive,
+        progress: ProgressData,
+        now: Date,
+        library: [MediaStateSyncManager.CapturedLibraryCollection]? = nil,
+        settings: [String: MediaStateSyncManager.CapturedSetting] = [:]
+    ) -> MediaStateSyncManager.AutomaticCaptureInput {
+        MediaStateSyncManager.AutomaticCaptureInput(
+            version: MediaStateSyncManager.AutomaticCaptureVersion(
+                generation: 4,
+                archiveRevision: 7,
+                notificationRevision: 11,
+                accountGeneration: 3,
+                verifiedOwner: "owner",
+                archiveOwner: "owner",
+                libraryRevision: 1,
+                ratingRevision: 2,
+                catalogRevision: 3,
+                rosterGeneration: 4,
+                activeProfileID: owner,
+                playbackLease: MediaStatePlaybackLeaseSnapshot(generation: 8, isActive: false)
+            ),
+            now: now,
+            initialSnapshot: MediaStateSyncManager.LocalSnapshot(),
+            profiles: [MediaStateSyncManager.CaptureProfileInput(
+                profileID: owner,
+                library: library,
+                ratings: nil,
+                catalogs: nil
+            )],
+            progress: ProgressManager.MediaStateSnapshot(
+                revision: 9,
+                profiles: [owner: progress],
+                unreadableProfileIDs: []
+            ),
+            settings: settings,
+            archive: archive,
+            suppressedDefaultRecordNames: [],
+            defaultRecordNames: [],
+            tombstoneAuthority: MediaStateSyncManager.CaptureTombstoneAuthority(
+                profileIDs: [owner],
+                locallyDeletedProfileIDs: [],
+                enabledSettingKeys: []
+            ),
+            pendingAccountBoundaryPayloadHashes: [:],
+            isolatesIncomingAccount: false
+        )
+    }
+
+    @available(iOS 17.0, tvOS 17.0, *)
+    func testCapturedPropertyListSettingsPreserveExistingWireBytesAndOwnTheirValues() throws {
+        let mutable = NSMutableArray(array: ["initial", NSNumber(value: 2)])
+        let values: [Any] = [
+            "setting", Data([0, 1, 255]), Date(timeIntervalSince1970: 1234),
+            NSNumber(value: true), NSNumber(value: Int64.min), NSNumber(value: UInt64.max),
+            NSNumber(value: 1.25), NSNumber(value: Float(1.1)), NSNumber(value: -0.0), mutable,
+            ["nested": ["text", NSNumber(value: 4)], "bytes": Data([7])] as [String: Any]
+        ]
+        for value in values {
+            let captured = try XCTUnwrap(MediaStateSyncManager.CapturedPropertyListValue(value))
+            let original = try PropertyListSerialization.data(fromPropertyList: value, format: .binary, options: 0)
+            let rebuilt = try PropertyListSerialization.data(fromPropertyList: captured.value, format: .binary, options: 0)
+            let decodedOriginal = try PropertyListSerialization.propertyList(from: original, options: [], format: nil)
+            let decodedRebuilt = try PropertyListSerialization.propertyList(from: rebuilt, options: [], format: nil)
+            let originalCapture = try XCTUnwrap(MediaStateSyncManager.CapturedPropertyListValue(decodedOriginal))
+            let rebuiltCapture = try XCTUnwrap(MediaStateSyncManager.CapturedPropertyListValue(decodedRebuilt))
+            XCTAssertTrue(originalCapture.isWireEquivalent(to: rebuiltCapture))
+            if !(value is [String: Any]) { XCTAssertEqual(rebuilt, original) }
+        }
+        let captured = try XCTUnwrap(MediaStateSyncManager.CapturedPropertyListValue(mutable))
+        mutable.add("later")
+        XCTAssertEqual((captured.value as? [Any])?.count, 2)
+        let key = "defaultPlaybackSpeed"
+        let name = MediaStateRecordName.make(kind: .setting, identifier: key)
+        let raw = try XCTUnwrap(MediaStateSyncManager.CapturedPropertyListValue(NSNumber(value: true)))
+        var records: [String: MediaStateEnvelope] = [:]
+        MediaStateSyncManager.addCapturedSettingRecords([name: .init(key: key, scope: .shared, value: raw)], to: &records)
+        let expected = try PropertyListSerialization.data(
+            fromPropertyList: MediaStateSettingValueValidator.capturableLocalValue(NSNumber(value: true), forKey: key),
+            format: .binary, options: 0
+        )
+        XCTAssertEqual(records[name]?.payload, expected)
+        XCTAssertNotEqual(raw, MediaStateSyncManager.CapturedPropertyListValue(NSNumber(value: 1.0)))
+    }
+
+    @available(iOS 17.0, tvOS 17.0, *)
+    func testUnchangedDictionarySettingRetainsPriorPayloadBytesAndAuthorship() async throws {
+        let owner = UUID()
+        let key = "tvOSServiceSourceActivationOverrides"
+        let name = MediaStateRecordName.make(kind: .setting, identifier: key, profileID: owner)
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let original: [String: Any] = ["one": true, "two": false, "three": true]
+        let bytes = try PropertyListSerialization.data(fromPropertyList: original, format: .binary, options: 0)
+        let prior = MediaStateEnvelope(recordName: name, kind: .setting, payload: bytes, modifiedAt: now, revision: 17, settingScope: .tvOS)
+        let reordered: [String: Any] = ["three": true, "two": false, "one": true]
+        let capture = try XCTUnwrap(MediaStateSyncManager.CapturedPropertyListValue(reordered))
+        let input = automaticCaptureFixture(
+            owner: owner,
+            archive: MediaStateLocalArchive(records: [name: prior], lastLocalRecordNames: [name]),
+            progress: ProgressData(), now: now.addingTimeInterval(100),
+            settings: [name: .init(key: key, scope: .tvOS, value: capture)]
+        )
+        let prepared = try await Task.detached { try MediaStateSyncManager.prepareAutomaticCapture(input) }.value
+        XCTAssertEqual(prepared.reconciled.archive.records[name], prior)
+        XCTAssertTrue(prepared.reconciled.pendingNames.isEmpty)
+    }
+
+    @available(iOS 17.0, tvOS 17.0, *)
+    func testAutomaticWorkerCompilesCapturedProfileAndPrivateSourceValuesWithoutRestamping() async throws {
+        let owner = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let profile = Profile(id: owner, name: "Captured profile", createdAt: now)
+        let source = MediaStateServiceSource(
+            id: UUID(), url: "https://example.invalid/source.json", jsonMetadata: "{}",
+            jsScript: "const fixture = true;", isActive: true, sortIndex: 0
+        )
+        let captured = MediaStateSyncManager.CapturedServiceSources(services: [source], addons: [], nuvioPluginsData: nil)
+        var expected: [String: MediaStateEnvelope] = [:]
+        XCTAssertTrue(MediaStateSyncManager.addCapturedServiceSourcesRecord(captured, existing: nil, to: &expected, profileID: owner))
+        var input = automaticCaptureFixture(
+            owner: owner, archive: MediaStateLocalArchive(records: [:], lastLocalRecordNames: []),
+            progress: ProgressData(), now: now
+        )
+        input.profileRecords = [profile]
+        input.serviceSources = [owner: .init(sources: captured, nuvio: .unavailable)]
+        let capturedInput = input
+        let prepared = try await Task.detached { try MediaStateSyncManager.prepareAutomaticCapture(capturedInput) }.value
+        let profileName = MediaStateRecordName.make(kind: .profile, identifier: owner.uuidString.lowercased())
+        XCTAssertEqual(prepared.reconciled.archive.records[profileName]?.payload, MediaStateEnvelope.stableProfileData(profile))
+        for (name, record) in expected {
+            XCTAssertEqual(prepared.reconciled.archive.records[name]?.payload, record.payload)
+        }
+        var retry = automaticCaptureFixture(owner: owner, archive: prepared.reconciled.archive, progress: ProgressData(), now: now.addingTimeInterval(10))
+        retry.profileRecords = input.profileRecords
+        retry.serviceSources = input.serviceSources
+        let capturedRetry = retry
+        let unchanged = try await Task.detached { try MediaStateSyncManager.prepareAutomaticCapture(capturedRetry) }.value
+        XCTAssertEqual(unchanged.reconciled.archive.records, prepared.reconciled.archive.records)
+        XCTAssertTrue(unchanged.reconciled.pendingNames.isEmpty)
+    }
+
+#if os(iOS) && !targetEnvironment(macCatalyst)
+    @available(iOS 17.0, *)
+    func testSkyStreamRawCaptureMaterializesSameMetadataAsPendingDocument() async throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let repository = SkyStreamSavedRepository(
+            sourceURL: "https://example.invalid/plugins.json", kind: .pluginList, name: "Fixture",
+            pluginListURLs: ["https://example.invalid/plugins.json"], plugins: [], lastRefreshedAt: now
+        )
+        let capture = SkyStreamPluginManager.PrivateCloudMetadataCapture(
+            repositories: [repository], plugins: [], sourceDefaults: .init(selectedIDs: [], orderIDs: [], explicitIDs: nil)
+        )
+        let materialized = try XCTUnwrap(SkyStreamPluginManager.materializePrivateCloudMetadataCapture(capture))
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let pending = try encoder.encode(materialized)
+        let (activeBytes, pendingBytes) = await Task.detached {
+            (MediaStateSyncManager.preparedSkyStreamMetadata(.active(capture)).0,
+             MediaStateSyncManager.preparedSkyStreamMetadata(.pending(pending)).0)
+        }.value
+        XCTAssertNotNil(activeBytes)
+        XCTAssertEqual(activeBytes, pendingBytes)
+        let decoded = try SkyStreamMediaStateDocument.decodeMetadataOnly(XCTUnwrap(activeBytes))
+        XCTAssertEqual(decoded.repositories.count, 1)
+        XCTAssertNil(decoded.repositories.first?.lastRefreshedAt)
+        XCTAssertEqual(decoded.createdAt, Date(timeIntervalSince1970: 0))
+    }
+#endif
+
+    @available(iOS 17.0, tvOS 17.0, *)
+    func testAutomaticCaptureFailedPersistenceRetainsPendingNamesForUnchangedRetry() async throws {
+        let owner = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        var movie = MovieProgressEntry(id: 641, title: "Pending write")
+        movie.lastUpdated = now
+        var progress = ProgressData()
+        progress.movieProgress = [movie]
+        let firstInput = automaticCaptureFixture(
+            owner: owner,
+            archive: MediaStateLocalArchive(records: [:], lastLocalRecordNames: []),
+            progress: progress,
+            now: now
+        )
+        let first = try await Task.detached {
+            try MediaStateSyncManager.prepareAutomaticCapture(firstInput)
+        }.value
+        XCTAssertFalse(first.reconciled.pendingNames.isEmpty)
+        XCTAssertTrue(MediaStateAutomaticCaptureState.pendingNamesForStaging(
+            in: first.reconciled.archive, isDurable: false,
+            archiveRevision: 8, durableRevision: 7
+        ).isEmpty)
+        let retryInput = automaticCaptureFixture(
+            owner: owner, archive: first.reconciled.archive,
+            progress: progress, now: now.addingTimeInterval(10)
+        )
+        let retry = try await Task.detached {
+            try MediaStateSyncManager.prepareAutomaticCapture(retryInput)
+        }.value
+        XCTAssertTrue(retry.reconciled.pendingNames.isEmpty)
+        let persisted = try wireDecode(MediaStateLocalArchive.self, from: retry.data)
+        XCTAssertEqual(persisted.records, first.reconciled.archive.records)
+        XCTAssertEqual(MediaStateAutomaticCaptureState.pendingNamesForStaging(
+            in: persisted, isDurable: true, archiveRevision: 9, durableRevision: 9
+        ), Set(first.reconciled.pendingNames))
+        XCTAssertTrue(MediaStateAutomaticCaptureState.pendingNamesForStaging(
+            in: persisted, isDurable: true, archiveRevision: 10, durableRevision: 9
+        ).isEmpty)
+    }
+
+    func testAutomaticCaptureInvalidationRetainsRetryUntilLifecycleResumes() async throws {
+        var state = MediaStateAutomaticCaptureState()
+        state.request()
+        XCTAssertTrue(state.shouldSchedule(isAllowed: true, hasWorker: false))
+        state.begin()
+        let capturedGeneration = state.generation
+        let barrier = MediaStateCaptureTestBarrier()
+        let task = Task.detached {
+            await barrier.park()
+            try Task.checkCancellation()
+        }
+        await barrier.waitUntilParked()
+        state.invalidate(hasWorker: true)
+        task.cancel()
+        XCTAssertNotEqual(state.generation, capturedGeneration)
+        XCTAssertFalse(state.shouldSchedule(isAllowed: false, hasWorker: true))
+        await barrier.release()
+        do {
+            try await task.value
+            XCTFail("Invalidated capture must not complete")
+        } catch is CancellationError {
+        }
+        XCTAssertTrue(state.needsRetry)
+        XCTAssertFalse(state.shouldSchedule(isAllowed: false, hasWorker: false))
+        state.invalidate(hasWorker: false)
+        XCTAssertTrue(state.shouldSchedule(isAllowed: true, hasWorker: false))
+        state.begin()
+        state.invalidate(hasWorker: false)
+        XCTAssertFalse(state.shouldSchedule(isAllowed: true, hasWorker: false))
+    }
+
+    @available(iOS 17.0, tvOS 17.0, *)
+    @MainActor
+    func testLargeAutomaticCaptureSeparatesValueCaptureFromWorkerPreparation() async throws {
+        XCTAssertTrue(Thread.isMainThread)
+        for count in [10_000, 30_000] {
+            let owner = UUID()
+            let now = Date()
+            var progress = ProgressData()
+            progress.episodeProgress = (0..<count).map { index in
+                var episode = EpisodeProgressEntry(showId: index / 100 + 1, seasonNumber: 1, episodeNumber: index % 100 + 1)
+                episode.currentTime = 1_400
+                episode.totalDuration = 1_400
+                episode.isWatched = true
+                episode.lastUpdated = now
+                return episode
+            }
+            let captureStarted = DispatchTime.now().uptimeNanoseconds
+            let input = automaticCaptureFixture(
+                owner: owner,
+                archive: MediaStateLocalArchive(records: [:], lastLocalRecordNames: []),
+                progress: progress,
+                now: now
+            )
+            let captureNanoseconds = DispatchTime.now().uptimeNanoseconds - captureStarted
+            let (prepared, preparationNanoseconds) = try await Task.detached(priority: .utility) {
+                XCTAssertFalse(Thread.isMainThread)
+                let started = DispatchTime.now().uptimeNanoseconds
+                let prepared = try MediaStateSyncManager.prepareAutomaticCapture(input)
+                return (prepared, DispatchTime.now().uptimeNanoseconds - started)
+            }.value
+            XCTAssertEqual(prepared.reconciled.archive.records.values.filter { $0.kind == .episodeProgress }.count, count)
+            XCTAssertEqual(prepared.reconciled.archive.pendingLocalRecordNames.count, count)
+            print("MediaStateCapture episodes=\(count) main_DTO_construction_ms=\(Double(captureNanoseconds) / 1_000_000) worker_prepare_ms=\(Double(preparationNanoseconds) / 1_000_000) archive_bytes=\(prepared.data.count)")
+        }
+    }
+
+    @available(iOS 17.0, tvOS 17.0, *)
+    func testAutomaticCaptureUsesWireDatesPreservesUnreadableDomainsAndResetLineage() async throws {
+        let owner = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        var watched = MovieProgressEntry(id: 401, title: "Reset me")
+        watched.lastUpdated = now.addingTimeInterval(-10)
+        watched.currentTime = 100
+        watched.totalDuration = 100
+        watched.isWatched = true
+        let movieName = MediaStateRecordName.make(kind: .movieProgress, identifier: "401", profileID: owner)
+        let ratingName = MediaStateRecordName.make(kind: .rating, identifier: "401", profileID: owner)
+        let previous = MediaStateEnvelope(
+            recordName: movieName,
+            kind: .movieProgress,
+            payload: try wireEncode(watched),
+            modifiedAt: watched.lastUpdated,
+            revision: 8,
+            isCompleted: true
+        )
+        let rating = MediaStateEnvelope(
+            recordName: ratingName,
+            kind: .rating,
+            payload: try JSONSerialization.data(withJSONObject: ["tmdbID": 401, "rating": 4]),
+            modifiedAt: watched.lastUpdated
+        )
+        let archive = MediaStateLocalArchive(
+            records: [movieName: previous, ratingName: rating],
+            lastLocalRecordNames: [movieName, ratingName],
+            accountOwnerRecordName: "owner"
+        )
+        var current = watched
+        current.currentTime = 0
+        current.isWatched = false
+        current.lastUpdated = now
+        current.lastHref = "https://example.invalid/private-playback"
+        current.lastContentReference = .service(sourceID: "service:fixture", href: "private-playback")
+        var progress = ProgressData()
+        progress.movieProgress = [current]
+        let input = automaticCaptureFixture(owner: owner, archive: archive, progress: progress, now: now)
+        let prepared = try await Task.detached {
+            try MediaStateSyncManager.prepareAutomaticCapture(input)
+        }.value
+        let decoded = try wireDecode(MediaStateLocalArchive.self, from: prepared.data)
+        let reset = try XCTUnwrap(decoded.records[movieName])
+        XCTAssertEqual(reset.modifiedAt, now)
+        XCTAssertEqual(reset.resetAt, now)
+        XCTAssertEqual(reset.revision, 9)
+        XCTAssertTrue(reset.isExplicitReset)
+        XCTAssertFalse(reset.isCompleted)
+        let restoredMovie = try wireDecode(MovieProgressEntry.self, from: reset.payload)
+        XCTAssertEqual(restoredMovie.lastUpdated, now)
+        XCTAssertNil(restoredMovie.lastHref)
+        XCTAssertNil(restoredMovie.lastContentReference)
+        XCTAssertEqual(decoded.records[ratingName], rating)
+        XCTAssertTrue(decoded.lastLocalRecordNames.contains(ratingName))
+        XCTAssertEqual(Set(prepared.reconciled.pendingNames), [movieName])
+        XCTAssertEqual(decoded.pendingLocalRecordNames, [movieName])
+        current.lastHref = nil
+        current.lastContentReference = nil
+        var expected = previous
+        expected.payload = try wireEncode(current)
+        expected.modifiedAt = now
+        expected.revision = 9
+        expected.isCompleted = false
+        expected.isExplicitReset = true
+        expected.resetAt = now
+        XCTAssertEqual(reset, expected)
+    }
+
+    @available(iOS 17.0, tvOS 17.0, *)
+    func testAutomaticCaptureDeepCopiesLibraryCollectionBeforeWorkerRuns() async throws {
+        let owner = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let collection = LibraryCollection(
+            name: "Captured name",
+            items: [libraryItem(id: 17, mediaType: "movie", dateAdded: now)],
+            description: "Captured description"
+        )
+        let snapshot = MediaStateSyncManager.CapturedLibraryCollection(collection)
+        let input = automaticCaptureFixture(
+            owner: owner,
+            archive: MediaStateLocalArchive(records: [:], lastLocalRecordNames: []),
+            progress: ProgressData(),
+            now: now,
+            library: [snapshot]
+        )
+        collection.name = "New name"
+        collection.description = "New description"
+        collection.items = []
+        let prepared = try await Task.detached {
+            try MediaStateSyncManager.prepareAutomaticCapture(input)
+        }.value
+        let collections = prepared.reconciled.archive.records.values.filter { $0.kind == .libraryCollection }
+        let memberships = prepared.reconciled.archive.records.values.filter { $0.kind == .libraryMembership }
+        XCTAssertEqual(collections.count, 1)
+        XCTAssertEqual(memberships.count, 1)
+        let payload = try XCTUnwrap(collections.first?.payload)
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+        XCTAssertEqual(fields["name"] as? String, "Captured name")
+        XCTAssertEqual(fields["description"] as? String, "Captured description")
+    }
+
+    @available(iOS 17.0, tvOS 17.0, *)
+    func testAutomaticCaptureCancellationBeforeWorkProducesNoPreparedArchive() async throws {
+        let owner = UUID()
+        let input = automaticCaptureFixture(
+            owner: owner,
+            archive: MediaStateLocalArchive(records: [:], lastLocalRecordNames: []),
+            progress: ProgressData(),
+            now: Date()
+        )
+        let barrier = MediaStateCaptureTestBarrier()
+        let task = Task.detached {
+            await barrier.park()
+            return try MediaStateSyncManager.prepareAutomaticCapture(input)
+        }
+        await barrier.waitUntilParked()
+        task.cancel()
+        await barrier.release()
+        do {
+            _ = try await task.value
+            XCTFail("Cancelled preparation must not produce bytes for commit")
+        } catch is CancellationError {
+        }
+    }
+
+    @available(iOS 17.0, tvOS 17.0, *)
+    func testLocalCapturePreservesSuppressedAndNeverAppliedPayloadAuthority() throws {
+        let owner = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        var local = MovieProgressEntry(id: 501, title: "Local")
+        local.lastUpdated = now.addingTimeInterval(-20)
+        var peer = local
+        peer.currentTime = 95
+        peer.totalDuration = 100
+        peer.isWatched = true
+        let payload = try wireEncode(local)
+        let hash = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+        for isDeferred in [false, true] {
+            let name = MediaStateRecordName.make(kind: .movieProgress, identifier: "501", profileID: owner)
+            let remote = MediaStateEnvelope(
+                recordName: name,
+                kind: .movieProgress,
+                payload: try wireEncode(peer),
+                modifiedAt: now.addingTimeInterval(-5),
+                revision: 11,
+                isCompleted: true
+            )
+            var archive = MediaStateLocalArchive(records: [name: remote], lastLocalRecordNames: [name])
+            if isDeferred { archive.deferredApplyManagerPayloadHashes[name] = hash }
+            else { archive.suppressedLocalRecordPayloadHashes[name] = hash }
+            let snapshot = MediaStateSyncManager.LocalSnapshot(records: [name: MediaStateEnvelope(
+                recordName: name,
+                kind: .movieProgress,
+                payload: payload,
+                modifiedAt: local.lastUpdated
+            )])
+            let result = try XCTUnwrap(MediaStateSyncManager.reconcileLocalCapture(
+                snapshot: snapshot,
+                archive: archive,
+                now: now,
+                suppressedDefaultRecordNames: [],
+                defaultRecordNames: [],
+                tombstoneAuthority: MediaStateSyncManager.CaptureTombstoneAuthority(
+                    profileIDs: [owner], locallyDeletedProfileIDs: [], enabledSettingKeys: []
+                )
+            ))
+            XCTAssertEqual(result.archive.records[name], remote)
+            XCTAssertTrue(result.pendingNames.isEmpty)
+            XCTAssertEqual(result.archive.deferredApplyManagerPayloadHashes, archive.deferredApplyManagerPayloadHashes)
+            XCTAssertEqual(result.archive.suppressedLocalRecordPayloadHashes, archive.suppressedLocalRecordPayloadHashes)
+        }
+    }
+
 }

@@ -2196,14 +2196,7 @@ class ServiceManager: ObservableObject {
             if let start = rc.firstIndex(of: "["), let end = rc.firstIndex(of: "]"), end > start {
                 let optsSub = rc[rc.index(after: start)..<end]
                 let rawOpts = optsSub.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                let cleaned = rawOpts.map { opt -> String in
-                    var s = opt.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if let first = s.first, let last = s.last,
-                       "\"'“”‘’".contains(first), "\"'“”‘’".contains(last) {
-                        s = String(s[s.index(after: s.startIndex)..<s.index(before: s.endIndex)])
-                    }
-                    return s
-                }.filter { !$0.isEmpty }
+                let cleaned = rawOpts.map(strippingSettingQuotes).filter { !$0.isEmpty }
 
                 if !cleaned.isEmpty {
                     options = cleaned
@@ -2223,19 +2216,19 @@ class ServiceManager: ObservableObject {
         return ServiceSetting(key: key, value: cleanValue, type: type, comment: comment, options: options)
     }
 
-    nonisolated private static func determineSettingType(from valueString: String) -> (ServiceSetting.SettingType, String) {
-        func stripQuotes(_ s: String) -> String {
-            var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            if t.count >= 2, let first = t.first, let last = t.last,
-               "\"'“”‘’".contains(first), "\"'“”‘’".contains(last) {
-                t = String(t[t.index(after: t.startIndex)..<t.index(before: t.endIndex)])
-            }
-            return t
+    nonisolated private static func strippingSettingQuotes(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2, let first = trimmed.first, let last = trimmed.last,
+              "\"'“”‘’".contains(first), "\"'“”‘’".contains(last) else {
+            return trimmed
         }
+        return String(trimmed.dropFirst().dropLast())
+    }
 
+    nonisolated private static func determineSettingType(from valueString: String) -> (ServiceSetting.SettingType, String) {
         let trimmed = valueString.trimmingCharacters(in: .whitespacesAndNewlines)
         if let first = trimmed.first, let last = trimmed.last, "\"'“”‘’".contains(first) && "\"'“”‘’".contains(last) {
-            return (.string, stripQuotes(trimmed))
+            return (.string, strippingSettingQuotes(trimmed))
         } else if valueString.lowercased() == "true" || valueString.lowercased() == "false" {
             return (.bool, valueString.lowercased())
         } else if valueString.contains(".") {
@@ -2243,7 +2236,7 @@ class ServiceManager: ObservableObject {
         } else if Int(valueString) != nil {
             return (.int, valueString)
         } else {
-            return (.string, stripQuotes(valueString))
+            return (.string, strippingSettingQuotes(valueString))
         }
     }
 

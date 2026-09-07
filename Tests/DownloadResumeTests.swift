@@ -3,6 +3,91 @@ import XCTest
 @testable import Eclipse
 
 final class DownloadResumeTests: XCTestCase {
+    func testEpisodeLookupAvoidsCheckingUnrelatedDownloadFiles() {
+        let items = (1...500).map { episodeDownload(id: "other-\($0)", episode: $0) }
+        let snapshot = EpisodeDownloadLookupSnapshot(items: items, providerAliasesByTMDBID: [:], revision: 7)
+        var checks = 0
+        for episode in 501...1500 {
+            let result = snapshot.matchingEpisodeDownloadItem(
+                tmdbId: 1, seasonNumber: 1, episodeNumber: episode,
+                playbackContext: episodeContext(episode: episode)
+            ) { _ in
+                checks += 1
+                return true
+            }
+            XCTAssertNil(result)
+        }
+        XCTAssertEqual(checks, 0)
+        XCTAssertEqual(snapshot.revision, 7)
+    }
+
+    func testEpisodeLookupPreservesLegacyExactAndOrderedFallback() {
+        let exactID = DownloadManager.downloadID(tmdbId: 1, isMovie: false, seasonNumber: 1, episodeNumber: 4)
+        var exact = episodeDownload(id: exactID, episode: 4)
+        exact.episodePlaybackContext = nil
+        let fallback = episodeDownload(id: "fallback", episode: 4)
+        let later = episodeDownload(id: "later", episode: 4)
+        let snapshot = EpisodeDownloadLookupSnapshot(items: [exact, fallback, later], providerAliasesByTMDBID: [:], revision: 0)
+        let context = episodeContext(episode: 4, provider: 123)
+        XCTAssertEqual(snapshot.matchingEpisodeDownloadItem(
+            tmdbId: 1, seasonNumber: 1, episodeNumber: 4, playbackContext: context,
+            accepting: { _ in true }
+        )?.id, exactID)
+        XCTAssertEqual(snapshot.matchingEpisodeDownloadItem(
+            tmdbId: 1, seasonNumber: 1, episodeNumber: 4, playbackContext: context,
+            accepting: { $0.id != exactID }
+        )?.id, "fallback")
+    }
+
+    func testEpisodeLookupKeepsProviderAliasesAndCoordinateContradictions() {
+        var contradictory = episodeDownload(id: "contradictory", episode: 4)
+        contradictory.episodePlaybackContext = episodeContext(episode: 4, provider: 123, tmdbEpisode: 5)
+        var aliased = episodeDownload(id: "aliased", episode: 4)
+        aliased.episodePlaybackContext = episodeContext(episode: 4, provider: 456)
+        let snapshot = EpisodeDownloadLookupSnapshot(
+            items: [contradictory, aliased], providerAliasesByTMDBID: [1: [123: 456]], revision: 0
+        )
+        var checked: [String] = []
+        let result = snapshot.matchingEpisodeDownloadItem(
+            tmdbId: 1, seasonNumber: 1, episodeNumber: 4,
+            playbackContext: episodeContext(episode: 4, provider: 123)
+        ) { item in
+            checked.append(item.id)
+            return true
+        }
+        XCTAssertEqual(result?.id, "aliased")
+        XCTAssertEqual(checked, ["aliased"])
+    }
+
+    func testEpisodeLookupDoesNotReplaceFirstAcceptedDuplicateExactID() {
+        let exactID = DownloadManager.downloadID(tmdbId: 1, isMovie: false, seasonNumber: 1, episodeNumber: 4)
+        var missing = episodeDownload(id: exactID, episode: 4)
+        missing.localFileName = "missing.mkv"
+        var present = episodeDownload(id: exactID, episode: 4)
+        present.localFileName = "present.mkv"
+        let snapshot = EpisodeDownloadLookupSnapshot(items: [missing, present], providerAliasesByTMDBID: [:], revision: 0)
+        XCTAssertEqual(snapshot.matchingEpisodeDownloadItem(
+            tmdbId: 1, seasonNumber: 1, episodeNumber: 4, playbackContext: nil,
+            accepting: { $0.localFileName == "present.mkv" }
+        )?.localFileName, "present.mkv")
+    }
+
+    private func episodeContext(episode: Int, provider: Int? = nil, tmdbEpisode: Int? = nil) -> EpisodePlaybackContext {
+        EpisodePlaybackContext(localSeasonNumber: 1, localEpisodeNumber: episode, anilistMediaId: provider,
+                               tmdbSeasonNumber: 1, tmdbEpisodeNumber: tmdbEpisode ?? episode,
+                               tmdbEpisodeOffset: nil, animeAbsoluteEpisodeNumber: nil,
+                               animeSeasonEpisodeCount: nil, isSpecial: false, titleOnlySearch: false)
+    }
+
+    private func episodeDownload(id: String, episode: Int) -> DownloadItem {
+        DownloadItem(id: id, tmdbId: 1, isMovie: false, title: "Show", displayTitle: "Episode \(episode)",
+                     posterURL: nil, seasonNumber: 1, episodeNumber: episode, episodeName: nil,
+                     streamURL: "", headers: [:], subtitleURL: nil, serviceBaseURL: "",
+                     episodePlaybackContext: episodeContext(episode: episode), status: .completed,
+                     progress: 1, totalBytes: 100, downloadedBytes: 100, localFileName: "\(id).mkv",
+                     subtitleFileName: nil, error: nil, dateAdded: Date(), dateCompleted: Date(), isAnime: false)
+    }
+
     private let chunk = DirectDownloadResumePolicy.chunkBytes
 
     private func response(

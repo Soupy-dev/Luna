@@ -525,3 +525,352 @@ final class ServiceJavaScriptResultBoundaryTests: XCTestCase {
 }
 
 #endif
+
+#if os(iOS)
+private actor DelayedServiceRankingWorker: ServiceResultRankingComputing {
+    private struct Request {
+        let titles: [String]
+        let context: ServiceResultRankingContext
+        var continuation: CheckedContinuation<[ServiceResultRankingContext.RankedSearchResult], Error>?
+    }
+
+    private var requests: [Request] = []
+    private var submissionObservers: [(Int, @Sendable () -> Void)] = []
+    var requestCount: Int { requests.count }
+
+    func onSubmitted(_ count: Int, perform: @escaping @Sendable () -> Void) {
+        if requests.count >= count {
+            perform()
+        } else {
+            submissionObservers.append((count, perform))
+        }
+    }
+
+    func rank(titles: [String], context: ServiceResultRankingContext) async throws -> [ServiceResultRankingContext.RankedSearchResult] {
+        try await withCheckedThrowingContinuation { continuation in
+            requests.append(Request(titles: titles, context: context, continuation: continuation))
+            let ready = submissionObservers.filter { $0.0 <= requests.count }
+            submissionObservers.removeAll { $0.0 <= requests.count }
+            ready.forEach { $0.1() }
+        }
+    }
+
+    func complete(_ index: Int) throws {
+        guard requests.indices.contains(index), let continuation = requests[index].continuation else { return }
+        let scores = try requests[index].context.rankedServiceResults(requests[index].titles)
+        requests[index].continuation = nil
+        continuation.resume(returning: scores)
+    }
+}
+
+final class ServicesResolvedPlaybackHandoffTests: XCTestCase {
+    private let firstURL = URL(fileURLWithPath: "/first-stream")
+    private let secondURL = URL(fileURLWithPath: "/second-stream")
+
+    func testSourceFamilyHandoffsDeliverOnceAfterIntentionalDismissal() throws {
+        for source in [PlaybackSourceKind.service, .stremio, .skyStream, .nuvio] {
+            var state = ServicesResolvedPlaybackHandoffState()
+            let operation = try XCTUnwrap(state.begin(url: firstURL))
+            var events: [String] = []
+            XCTAssertTrue(state.claim(operation, isCurrent: true), source.rawValue)
+            events.append("committed")
+            events.append("dismissed")
+            state.cancelPending()
+            if state.complete(operation, isCurrent: true) == .deliver {
+                events.append("resolved")
+            }
+            XCTAssertEqual(state.complete(operation, isCurrent: true), .ignore, source.rawValue)
+            XCTAssertNil(state.begin(url: secondURL), source.rawValue)
+            XCTAssertEqual(events, ["committed", "dismissed", "resolved"], source.rawValue)
+        }
+    }
+
+    func testSupersededPreflightCannotClaimTheNewHandoff() throws {
+        var state = ServicesResolvedPlaybackHandoffState()
+        let old = try XCTUnwrap(state.begin(url: firstURL))
+        let current = try XCTUnwrap(state.begin(url: secondURL))
+        XCTAssertFalse(state.claim(old, isCurrent: true))
+        state.cancelPending(old)
+        XCTAssertTrue(state.claim(current, isCurrent: true))
+        XCTAssertEqual(state.complete(old, isCurrent: true), .ignore)
+        XCTAssertEqual(state.complete(current, isCurrent: true), .deliver)
+    }
+
+    func testDismissalBeforeClaimRejectsLateResultAndAllowsLaterPresentation() throws {
+        var state = ServicesResolvedPlaybackHandoffState()
+        let old = try XCTUnwrap(state.begin(url: firstURL))
+        state.cancelPending()
+        XCTAssertFalse(state.claim(old, isCurrent: true))
+        XCTAssertFalse(state.retainsResource(at: firstURL))
+        let current = try XCTUnwrap(state.begin(url: firstURL))
+        XCTAssertNotEqual(old, current)
+        XCTAssertTrue(state.claim(current, isCurrent: true))
+    }
+
+    func testOwnerChangeBeforeClaimDoesNotCommitPlayback() throws {
+        var state = ServicesResolvedPlaybackHandoffState()
+        let operation = try XCTUnwrap(state.begin(url: firstURL))
+        XCTAssertFalse(state.claim(operation, isCurrent: false))
+        state.cancelPending(operation)
+        XCTAssertEqual(state.complete(operation, isCurrent: true), .ignore)
+        XCTAssertFalse(state.retainsResource(at: firstURL))
+    }
+
+    func testOwnerOrWatchTogetherChangeDuringDismissalDiscardsOnce() throws {
+        var state = ServicesResolvedPlaybackHandoffState()
+        let operation = try XCTUnwrap(state.begin(url: firstURL))
+        XCTAssertTrue(state.claim(operation, isCurrent: true))
+        state.cancelPending()
+        XCTAssertEqual(state.complete(operation, isCurrent: false), .discard)
+        XCTAssertFalse(state.retainsResource(at: firstURL))
+        XCTAssertEqual(state.complete(operation, isCurrent: true), .ignore)
+        XCTAssertNil(state.begin(url: secondURL))
+    }
+
+    func testDuplicateRequestDoesNotReleasePendingOrDeliveredProxyResource() throws {
+        var state = ServicesResolvedPlaybackHandoffState()
+        let earlier = try XCTUnwrap(state.begin(url: firstURL))
+        let operation = try XCTUnwrap(state.begin(url: firstURL))
+        XCTAssertFalse(state.claim(earlier, isCurrent: true))
+        state.cancelPending(earlier)
+        XCTAssertTrue(state.retainsResource(at: firstURL))
+        XCTAssertTrue(state.claim(operation, isCurrent: true))
+        XCTAssertNil(state.begin(url: firstURL))
+        XCTAssertTrue(state.retainsResource(at: firstURL))
+        XCTAssertEqual(state.complete(operation, isCurrent: true), .deliver)
+        XCTAssertNil(state.begin(url: firstURL))
+        XCTAssertTrue(state.retainsResource(at: firstURL))
+        XCTAssertFalse(state.retainsResource(at: secondURL))
+    }
+
+    func testWatchTogetherIdentityRejectsReturnToSameMediaAtLaterRevisionOrSession() {
+        let sessionID = UUID()
+        let original = WatchTogetherPlaybackHandoffIdentity(sessionID: sessionID, sessionGeneration: 1, mediaRevision: 4, mediaIdentifier: "episode-a")
+        let changed = WatchTogetherPlaybackHandoffIdentity(sessionID: sessionID, sessionGeneration: 1, mediaRevision: 5, mediaIdentifier: "episode-b")
+        let returned = WatchTogetherPlaybackHandoffIdentity(sessionID: sessionID, sessionGeneration: 1, mediaRevision: 6, mediaIdentifier: "episode-a")
+        let replacement = WatchTogetherPlaybackHandoffIdentity(sessionID: UUID(), sessionGeneration: 2, mediaRevision: 4, mediaIdentifier: "episode-a")
+        let rejoined = WatchTogetherPlaybackHandoffIdentity(sessionID: sessionID, sessionGeneration: 2, mediaRevision: 4, mediaIdentifier: "episode-a")
+        XCTAssertNotEqual(original, changed)
+        XCTAssertNotEqual(original, returned)
+        XCTAssertNotEqual(original, replacement)
+        XCTAssertNotEqual(original, rejoined)
+    }
+
+    func testWatchTogetherNoSessionPreviewPreservesItsLifetimeGeneration() {
+        let preview = WatchTogetherPlaybackHandoffIdentity(sessionID: nil, sessionGeneration: 2, mediaRevision: nil, mediaIdentifier: nil)
+        let unchanged = WatchTogetherPlaybackHandoffIdentity(sessionID: nil, sessionGeneration: 2, mediaRevision: nil, mediaIdentifier: nil)
+        let afterSessionEnded = WatchTogetherPlaybackHandoffIdentity(sessionID: nil, sessionGeneration: 4, mediaRevision: nil, mediaIdentifier: nil)
+        XCTAssertEqual(preview, unchanged)
+        XCTAssertNotEqual(preview, afterSessionEnded)
+    }
+
+    func testSupersededPreflightAbandonmentPreservesCurrentSameURLProxy() throws {
+        var state = ServicesResolvedPlaybackHandoffState()
+        var invalidationCount = 0
+        let ownership = PlaybackProxySessionOwnership(proxyURLs: [firstURL]) { _ in
+            invalidationCount += 1
+        }
+        let old = try XCTUnwrap(state.begin(url: firstURL))
+        let current = try XCTUnwrap(state.begin(url: firstURL))
+        state.cancelPending(old)
+        if !state.retainsResource(at: firstURL) { ownership.invalidate() }
+        XCTAssertEqual(invalidationCount, 0)
+        XCTAssertFalse(ownership.isInvalidated)
+        XCTAssertTrue(state.claim(current, isCurrent: true))
+        XCTAssertEqual(state.complete(current, isCurrent: false), .discard)
+        if !state.retainsResource(at: firstURL) { ownership.invalidate() }
+        XCTAssertEqual(invalidationCount, 1)
+        XCTAssertTrue(ownership.isInvalidated)
+    }
+}
+
+final class ServiceResultRankingSnapshotTests: XCTestCase {
+    private enum RankingTestError: Error { case timedOut }
+
+    private func context(
+        algorithm: SimilarityAlgorithm = .hybrid,
+        title: String = "Example Adventure",
+        originalTitle: String? = "Example Adventure Original",
+        anime: Bool = false,
+        forced: Bool = false,
+        minimum: Double = 0.4,
+        quality: Double = 0.9,
+        drop: Bool = false
+    ) -> ServiceResultRankingContext {
+        ServiceResultRankingContext(
+            algorithm: algorithm, localeIdentifier: "en_US_POSIX",
+            effectiveTitle: title, mediaTitle: title, displayTitle: title,
+            originalTitle: originalTitle, seasonTitleOverride: nil,
+            animeSeasonTitle: anime ? title : nil,
+            normalizedAnimeSequelTitle: nil, strippedAnimeFallbackTitle: nil,
+            isAnimeContent: anime, isForcedWatchTogetherAnimePlayback: forced,
+            selectedEpisode: anime ? .init(seasonNumber: 2, episodeNumber: 1) : nil,
+            serviceResultMinimumSimilarity: minimum, highQualityThreshold: quality,
+            dropsMismatches: drop
+        )
+    }
+
+    private func waitForRequests(_ count: Int, worker: DelayedServiceRankingWorker) async throws {
+        let submitted = expectation(description: "Ranking worker received input \(count)")
+        await worker.onSubmitted(count) { submitted.fulfill() }
+        await fulfillment(of: [submitted], timeout: 5)
+        guard await worker.requestCount >= count else { throw RankingTestError.timedOut }
+    }
+
+    @MainActor
+    func testSnapshotPreservesStableTiesRetainedLimitAndPayloadIdentity() throws {
+        let context = context()
+        let results = (0..<340).map {
+            SearchItem(title: "Example Adventure", imageUrl: "image-\($0)", href: "href-\($0)")
+        }
+        let scores = try context.rankedServiceResults(results.map(\.title))
+        let snapshot = ServiceResultRankingSnapshot(results: results, scores: scores, context: context)
+        XCTAssertEqual(snapshot.results.count, 300)
+        XCTAssertEqual(snapshot.highQuality.count, 80)
+        XCTAssertTrue(snapshot.lowQuality.isEmpty)
+        XCTAssertEqual(snapshot.results.map(\.id), Array(results.prefix(300)).map(\.id))
+        XCTAssertEqual(snapshot.ranked.first?.result.imageUrl, "image-0")
+        XCTAssertEqual(snapshot.ranked.last?.result.href, "href-299")
+    }
+
+    @MainActor
+    func testSnapshotThresholdPartitionPreservesRankAndVisibleLimit() throws {
+        let context = context(minimum: 0.5, quality: 0.9, drop: true)
+        let results = (0..<25).map { SearchItem(title: "Example Adventure", imageUrl: "", href: "match-\($0)") }
+            + (0..<90).map { SearchItem(title: "zzzzzz \($0)", imageUrl: "", href: "other-\($0)") }
+        let snapshot = ServiceResultRankingSnapshot(
+            results: results, scores: try context.rankedServiceResults(results.map(\.title)), context: context
+        )
+        XCTAssertEqual(snapshot.highQuality.map(\.id), Array(results.prefix(25)).map(\.id))
+        XCTAssertTrue(snapshot.lowQuality.allSatisfy { result in
+            snapshot.ranked.first(where: { $0.result.id == result.id })?.score.initialSimilarity ?? 0 >= 0.5
+        })
+        XCTAssertLessThanOrEqual(snapshot.highQuality.count + snapshot.lowQuality.count, 80)
+    }
+
+    func testForcedAnimeDestinationExcludesAlternateSeasonWithoutChangingRawRanking() throws {
+        let context = context(title: "Example Season 2", originalTitle: "Example Season 1", anime: true, forced: true)
+        let scores = try context.rankedServiceResults(["Example Season 1", "Example Season 2 (English Dub)", "Example Season 3"])
+        let destination = scores.filter(\.matchesForcedDestination)
+        XCTAssertEqual(destination.map(\.index), [1])
+        XCTAssertEqual(destination.first?.animeSeasonPreference, 1)
+    }
+
+    func testExplicitAlgorithmScoringIsIndependentOfTheSharedSelectedAlgorithm() {
+        for algorithm in SimilarityAlgorithm.allCases {
+            let actual = AlgorithmManager.calculateSimilarity(original: "abc", result: "axc", algorithm: algorithm)
+            let expected: Double
+            switch algorithm {
+            case .hybrid: expected = HybridSimilarity.calculateSimilarity(original: "abc", result: "axc")
+            case .jaroWinkler: expected = JaroWinklerSimilarity.calculateSimilarity(original: "abc", result: "axc")
+            case .levenshtein: expected = LevenshteinDistance.calculateSimilarity(original: "abc", result: "axc")
+            }
+            XCTAssertEqual(actual, expected, accuracy: 0.000_000_1)
+        }
+    }
+
+    @MainActor
+    func testPendingRankingIsAwaitedBeforeAutomaticSelectionCanReadIt() async throws {
+        let worker = DelayedServiceRankingWorker()
+        let model = ModulesSearchResultsViewModel(rankingWorker: worker)
+        let serviceID = UUID()
+        let result = SearchItem(title: "Example Adventure", imageUrl: "image", href: "href")
+        model.updateRankingContext(context())
+        model.enqueueServiceResults([result], serviceID: serviceID, merging: false)
+        try await waitForRequests(1, worker: worker)
+        var completed = false
+        let selection = Task { @MainActor in
+            let snapshot = await model.awaitServiceRanking(serviceID)
+            completed = true
+            return snapshot
+        }
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertFalse(completed)
+        XCTAssertTrue(model.pendingServiceRankings.contains(serviceID))
+        try await worker.complete(0)
+        let snapshot = await selection.value
+        XCTAssertEqual(snapshot?.ranked.first?.result.id, result.id)
+        XCTAssertFalse(model.pendingServiceRankings.contains(serviceID))
+    }
+
+    @MainActor
+    func testNewContextCannotPublishOldAlgorithmOrThresholdScores() async throws {
+        let worker = DelayedServiceRankingWorker()
+        let model = ModulesSearchResultsViewModel(rankingWorker: worker)
+        let serviceID = UUID()
+        model.updateRankingContext(context(algorithm: .hybrid))
+        model.enqueueServiceResults([SearchItem(title: "Example", imageUrl: "", href: "one")], serviceID: serviceID, merging: false)
+        try await waitForRequests(1, worker: worker)
+        let replacement = context(algorithm: .levenshtein, minimum: 0.95, quality: 0.99, drop: true)
+        model.updateRankingContext(replacement)
+        try await worker.complete(0)
+        try await waitForRequests(2, worker: worker)
+        XCTAssertNil(model.currentServiceRankingSnapshot(for: serviceID))
+        try await worker.complete(1)
+        let snapshot = await model.awaitServiceRanking(serviceID)
+        XCTAssertEqual(snapshot?.context, replacement)
+        XCTAssertTrue(snapshot?.highQuality.isEmpty == true)
+        XCTAssertTrue(snapshot?.lowQuality.isEmpty == true)
+    }
+
+    @MainActor
+    func testMergedPublicationWaitsForPriorRetentionAndKeepsOriginalDuplicatePayload() async throws {
+        let worker = DelayedServiceRankingWorker()
+        let model = ModulesSearchResultsViewModel(rankingWorker: worker)
+        let serviceID = UUID()
+        let first = SearchItem(title: "Example Adventure", imageUrl: "original", href: "same")
+        let duplicate = SearchItem(title: "Different", imageUrl: "replacement", href: "same")
+        let second = SearchItem(title: "Example Adventure Season 2", imageUrl: "second", href: "second")
+        model.updateRankingContext(context())
+        model.enqueueServiceResults([first], serviceID: serviceID, merging: false)
+        try await waitForRequests(1, worker: worker)
+        model.enqueueServiceResults([duplicate, second], serviceID: serviceID, merging: true)
+        try await worker.complete(0)
+        try await waitForRequests(2, worker: worker)
+        try await worker.complete(1)
+        let snapshot = await model.awaitServiceRanking(serviceID)
+        XCTAssertEqual(snapshot?.results.map(\.id), [first.id, second.id])
+        XCTAssertEqual(snapshot?.results.first?.imageUrl, "original")
+        XCTAssertEqual(model.serviceRankingRevision, 1)
+    }
+
+    @MainActor
+    func testPauseMarksUnpublishedSearchForRestartAndRejectsLateCompletion() async throws {
+        let worker = DelayedServiceRankingWorker()
+        let model = ModulesSearchResultsViewModel(rankingWorker: worker)
+        let serviceID = UUID()
+        model.updateRankingContext(context())
+        model.enqueueServiceResults([SearchItem(title: "Example Adventure", imageUrl: "", href: "old")], serviceID: serviceID, merging: false)
+        try await waitForRequests(1, worker: worker)
+        model.isSearching = false
+        model.cancelServiceRankings()
+        XCTAssertTrue(model.isSearching)
+        try await worker.complete(0)
+        let stale = await model.awaitServiceRanking(serviceID)
+        XCTAssertNil(stale)
+        XCTAssertNil(model.moduleResults[serviceID])
+    }
+
+    @MainActor
+    func testAccountEpochRejectsPendingAndCompletedSnapshotsWithoutGlobalNotifications() async throws {
+        let worker = DelayedServiceRankingWorker()
+        let epoch = MediaStateCaptureMutationClock()
+        let model = ModulesSearchResultsViewModel(rankingWorker: worker, rankingAccountClock: epoch)
+        let serviceID = UUID()
+        model.updateRankingContext(context())
+        model.enqueueServiceResults([SearchItem(title: "Example Adventure", imageUrl: "", href: "first")], serviceID: serviceID, merging: false)
+        try await waitForRequests(1, worker: worker)
+        try await worker.complete(0)
+        let completed = await model.awaitServiceRanking(serviceID)
+        XCTAssertNotNil(completed)
+        epoch.advance()
+        XCTAssertNil(model.currentServiceRankingSnapshot(for: serviceID))
+        model.enqueueServiceResults([SearchItem(title: "Example Adventure", imageUrl: "", href: "second")], serviceID: serviceID, merging: false)
+        try await waitForRequests(2, worker: worker)
+        epoch.advance()
+        try await worker.complete(1)
+        let stale = await model.awaitServiceRanking(serviceID)
+        XCTAssertNil(stale)
+    }
+}
+#endif

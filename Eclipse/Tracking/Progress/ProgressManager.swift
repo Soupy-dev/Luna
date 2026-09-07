@@ -12,13 +12,13 @@ import Combine
 import UIKit
 #endif
 
-struct ShowMetadata: Codable {
+struct ShowMetadata: Codable, Sendable {
     let showId: Int
     var title: String
     var posterURL: String?
 }
 
-struct ProgressData: Codable {
+struct ProgressData: Codable, Sendable {
     var movieProgress: [MovieProgressEntry] = []
     var episodeProgress: [EpisodeProgressEntry] = []
     var showMetadata: [Int: ShowMetadata] = [:]
@@ -82,7 +82,7 @@ struct ProgressData: Codable {
     }
 }
 
-struct MovieProgressEntry: Codable, Identifiable {
+struct MovieProgressEntry: Codable, Sendable, Identifiable {
     let id: Int
     let title: String
     var posterURL: String? = nil
@@ -103,7 +103,7 @@ struct MovieProgressEntry: Codable, Identifiable {
     }
 }
 
-struct EpisodeProgressEntry: Codable, Identifiable {
+struct EpisodeProgressEntry: Codable, Sendable, Identifiable {
     let id: String
     let showId: Int
     let seasonNumber: Int
@@ -178,29 +178,65 @@ enum ProgressPersistencePolicy {
             && (2...(maximumBulkEpisodeMutationCount + 1)).contains(episodeNumber)
     }
 
+    struct SanitizedProgress: Sendable {
+        let value: ProgressData
+        let didChange: Bool
+        let validUntil: Date?
+    }
+
     static func sanitized(
         _ source: ProgressData,
         preservingDeviceLocalReferences: Bool
     ) -> ProgressData {
-        let now = Date()
+        sanitizedResult(
+            source,
+            preservingDeviceLocalReferences: preservingDeviceLocalReferences
+        ).value
+    }
+
+    static func sanitizedResult(
+        _ source: ProgressData,
+        preservingDeviceLocalReferences: Bool,
+        now: Date = Date()
+    ) -> SanitizedProgress {
+        var didChange = false
+        var validUntil: Date?
+        func recordFutureAdmission(_ date: Date) {
+            guard date.timeIntervalSince1970.isFinite else { return }
+            let admission = date.addingTimeInterval(-MediaStateEnvelopeValidator.maximumFutureClockSkew)
+            if admission > now {
+                validUntil = validUntil.map { min($0, admission) } ?? admission
+            }
+        }
         var movieByID: [Int: MovieProgressEntry] = [:]
+        var previousMovieID: Int?
         for rawEntry in source.movieProgress {
+            recordFutureAdmission(rawEntry.lastUpdated)
+            if let previousMovieID, rawEntry.id <= previousMovieID { didChange = true }
+            previousMovieID = rawEntry.id
             guard validPositiveIdentifier(rawEntry.id),
                   isPlausibleClock(rawEntry.lastUpdated, now: now),
                   let times = sanitizedTimes(
                     currentTime: rawEntry.currentTime,
                     totalDuration: rawEntry.totalDuration
                   ) else {
+                didChange = true
                 continue
             }
             var entry = rawEntry
+            if entry.currentTime.bitPattern != times.currentTime.bitPattern
+                || entry.totalDuration.bitPattern != times.totalDuration.bitPattern {
+                didChange = true
+            }
             entry.currentTime = times.currentTime
             entry.totalDuration = times.totalDuration
             if !preservingDeviceLocalReferences {
+                if entry.lastHref != nil || entry.lastContentReference != nil { didChange = true }
                 entry.lastHref = nil
                 entry.lastContentReference = nil
             }
             if let existing = movieByID[entry.id] {
+                didChange = true
                 if entryIsPreferred(entry, over: existing) {
                     movieByID[entry.id] = entry
                 }
@@ -210,7 +246,11 @@ enum ProgressPersistencePolicy {
         }
 
         var episodeByID: [String: EpisodeProgressEntry] = [:]
+        var previousEpisode: EpisodeProgressEntry?
         for rawEntry in source.episodeProgress {
+            recordFutureAdmission(rawEntry.lastUpdated)
+            if let previousEpisode, !episodePrecedes(previousEpisode, rawEntry) { didChange = true }
+            previousEpisode = rawEntry
             guard validPositiveIdentifier(rawEntry.showId),
                   validSeasonCoordinate(rawEntry.seasonNumber),
                   (1...maximumCoordinate).contains(rawEntry.episodeNumber),
@@ -219,12 +259,20 @@ enum ProgressPersistencePolicy {
                     currentTime: rawEntry.currentTime,
                     totalDuration: rawEntry.totalDuration
                   ) else {
+                didChange = true
                 continue
             }
             let canonicalID = "ep_\(rawEntry.showId)_s\(rawEntry.seasonNumber)_e\(rawEntry.episodeNumber)"
-            guard rawEntry.id == canonicalID else { continue }
+            guard rawEntry.id == canonicalID else {
+                didChange = true
+                continue
+            }
 
             var entry = rawEntry
+            if entry.currentTime.bitPattern != times.currentTime.bitPattern
+                || entry.totalDuration.bitPattern != times.totalDuration.bitPattern {
+                didChange = true
+            }
             entry.currentTime = times.currentTime
             entry.totalDuration = times.totalDuration
             if let context = entry.playbackContext,
@@ -232,13 +280,16 @@ enum ProgressPersistencePolicy {
                 context,
                 expectedLocalEpisodeNumber: entry.episodeNumber
                ) == nil {
+                didChange = true
                 entry.playbackContext = nil
             }
             if !preservingDeviceLocalReferences {
+                if entry.lastHref != nil || entry.lastContentReference != nil { didChange = true }
                 entry.lastHref = nil
                 entry.lastContentReference = nil
             }
             if let existing = episodeByID[entry.id] {
+                didChange = true
                 if entryIsPreferred(entry, over: existing) {
                     episodeByID[entry.id] = entry
                 }
@@ -249,22 +300,31 @@ enum ProgressPersistencePolicy {
 
         var result = ProgressData()
         result.movieProgress = movieByID.values.sorted { $0.id < $1.id }
-        result.episodeProgress = episodeByID.values.sorted { lhs, rhs in
-            if lhs.showId != rhs.showId { return lhs.showId < rhs.showId }
-            if lhs.seasonNumber != rhs.seasonNumber { return lhs.seasonNumber < rhs.seasonNumber }
-            return lhs.episodeNumber < rhs.episodeNumber
-        }
+        result.episodeProgress = episodeByID.values.sorted(by: episodePrecedes)
         result.showMetadata = Dictionary(
             source.showMetadata.compactMap { showID, metadata -> (Int, ShowMetadata)? in
-                guard validPositiveIdentifier(showID), metadata.showId == showID else { return nil }
+                guard validPositiveIdentifier(showID), metadata.showId == showID else {
+                    didChange = true
+                    return nil
+                }
                 return (showID, metadata)
             },
             uniquingKeysWith: { _, incoming in incoming }
         )
         result.hiddenUpNextShowIds = Set(
-            source.hiddenUpNextShowIds.filter(validPositiveIdentifier)
+            source.hiddenUpNextShowIds.filter {
+                let valid = validPositiveIdentifier($0)
+                if !valid { didChange = true }
+                return valid
+            }
         )
-        return result
+        return SanitizedProgress(value: result, didChange: didChange, validUntil: validUntil)
+    }
+
+    private static func episodePrecedes(_ lhs: EpisodeProgressEntry, _ rhs: EpisodeProgressEntry) -> Bool {
+        if lhs.showId != rhs.showId { return lhs.showId < rhs.showId }
+        if lhs.seasonNumber != rhs.seasonNumber { return lhs.seasonNumber < rhs.seasonNumber }
+        return lhs.episodeNumber < rhs.episodeNumber
     }
 
     static func sanitizedTimes(
@@ -320,9 +380,7 @@ enum ProgressPersistencePolicy {
     }
 
     static func progressDataIsSafe(_ source: ProgressData) -> Bool {
-        canonicalData(source) == canonicalData(
-            sanitized(source, preservingDeviceLocalReferences: true)
-        )
+        !sanitizedResult(source, preservingDeviceLocalReferences: true).didChange
     }
 
     private static func validSignedProviderIdentifier(_ value: Int?) -> Bool {
@@ -446,13 +504,95 @@ struct ContinueWatchingItem: Identifiable {
 final class ProgressManager: ObservableObject {
     static let shared = ProgressManager()
 
-    struct ProfileMutationAuthority: Equatable {
+    struct ProfileMutationAuthority: Equatable, Sendable {
         let profileID: UUID
         let storeGeneration: UInt64
     }
 
     private let fileManager = FileManager.default
-    private var progressData: ProgressData = ProgressData()
+    private var progressData: ProgressData = ProgressData() {
+        didSet {
+            contentRevision &+= 1
+            allProfilesRevision &+= 1
+            preparedStoreWrite = nil
+        }
+    }
+    private var contentRevision: UInt64 = 0
+    private var allProfilesRevision: UInt64 = 0
+    private var durableContentRevision: UInt64?
+    private var durableValidationDate: Date?
+    private var durableValidationExpiry: Date?
+    private var preparedStoreWrite: PreparedStoreWrite?
+    private var pendingStorePreparation: StorePreparation?
+    private var isPreparingStoreWrite = false
+    private let preparationQueue: DispatchQueue
+
+    private struct InactiveProgressStore {
+        let value: ProgressData
+        let isDurable: Bool
+        let validatedAt: Date
+    }
+
+    struct EpisodeLookupSnapshot: Sendable {
+        let entries: [EpisodeProgressEntry]
+        let profileID: UUID
+        let storeGeneration: UInt64
+        let contentRevision: UInt64
+    }
+
+    func captureEpisodeLookup(showID: Int) -> EpisodeLookupSnapshot {
+        accessQueue.sync {
+            EpisodeLookupSnapshot(
+                entries: self.progressData.episodeProgress.filter { $0.showId == showID },
+                profileID: self.activeProfileID,
+                storeGeneration: self.storeGeneration,
+                contentRevision: self.contentRevision
+            )
+        }
+    }
+
+    func episodeLookupIsCurrent(_ snapshot: EpisodeLookupSnapshot) -> Bool {
+        accessQueue.sync {
+            snapshot.profileID == self.activeProfileID
+                && snapshot.storeGeneration == self.storeGeneration
+                && snapshot.contentRevision == self.contentRevision
+        }
+    }
+
+    struct MediaStateSnapshot: Sendable {
+        let revision: UInt64
+        let profiles: [UUID: ProgressData]
+        let unreadableProfileIDs: Set<UUID>
+    }
+
+    func captureForMediaStateSync(profileIDs: [UUID]) -> MediaStateSnapshot {
+        accessQueue.sync(flags: .barrier) {
+            var profiles: [UUID: ProgressData] = [:]
+            var unreadableProfileIDs = Set<UUID>()
+            for profileID in profileIDs {
+                if profileID == self.activeProfileID {
+                    if self.activeStoreLoadFailed {
+                        unreadableProfileIDs.insert(profileID)
+                    } else {
+                        profiles[profileID] = self.progressData
+                    }
+                } else if let value = self.readProgressData(forProfile: profileID) {
+                    profiles[profileID] = value
+                } else {
+                    unreadableProfileIDs.insert(profileID)
+                }
+            }
+            return MediaStateSnapshot(
+                revision: self.allProfilesRevision,
+                profiles: profiles,
+                unreadableProfileIDs: unreadableProfileIDs
+            )
+        }
+    }
+
+    func mediaStateSnapshotIsCurrent(_ snapshot: MediaStateSnapshot) -> Bool {
+        accessQueue.sync { self.allProfilesRevision == snapshot.revision }
+    }
 
     private var progressFileURL: URL
     private var activeProfileID: UUID
@@ -482,8 +622,15 @@ final class ProgressManager: ObservableObject {
     @Published private(set) var movieProgressList: [MovieProgressEntry] = []
     @Published private(set) var episodeProgressList: [EpisodeProgressEntry] = []
 
-    private init() {
-        let profileID = ProfileManager.shared.activeProfileID
+    private convenience init() {
+        self.init(profileID: ProfileManager.shared.activeProfileID)
+    }
+
+    init(
+        profileID: UUID,
+        preparationQueue: DispatchQueue = DispatchQueue(label: "app.eclipse.soupy.progress-preparation", qos: .utility)
+    ) {
+        self.preparationQueue = preparationQueue
         self.activeProfileID = profileID
         self.progressFileURL = Self.progressFileURL(for: profileID)
         accessQueue.setSpecific(key: accessQueueKey, value: 1)
@@ -552,31 +699,59 @@ final class ProgressManager: ObservableObject {
     func switchProfile(to profileID: UUID) {
         guard profileID != activeProfileID else { return }
         flushPendingSave()
-
-        accessQueue.sync(flags: .barrier) {
-
+        let cached = accessQueue.sync(flags: .barrier) { () -> InactiveProgressStore? in
             if self.activeStoreLoadFailed {
-
                 self.inactiveProfileCache.removeValue(forKey: self.activeProfileID)
             } else {
-                self.inactiveProfileCache[self.activeProfileID] = self.progressData
+                let prepared = self.currentPreparedStoreWrite()
+                let isDurable = self.currentStoreIsDurable()
+                let cachedValue: ProgressData
+                if let prepared {
+                    cachedValue = prepared.snapshot
+                } else if isDurable, self.preparedStoreWrite == nil {
+                    cachedValue = self.progressData
+                } else {
+                    cachedValue = ProgressPersistencePolicy.sanitized(
+                        self.progressData,
+                        preservingDeviceLocalReferences: true
+                    )
+                }
+                self.inactiveProfileCache[self.activeProfileID] = InactiveProgressStore(
+                    value: cachedValue,
+                    isDurable: isDurable,
+                    validatedAt: Date()
+                )
             }
-            self.inactiveProfileCache.removeValue(forKey: profileID)
+            let cached = self.inactiveProfileCache.removeValue(forKey: profileID)
             self.storeGeneration &+= 1
             self.storeWriteSequence &+= 1
             self.activeProfileID = profileID
             self.progressFileURL = Self.progressFileURL(for: profileID)
             self.progressData = ProgressData()
-
+            self.durableContentRevision = nil
+            self.durableValidationDate = nil
+            self.durableValidationExpiry = nil
             self.activeStoreLoadFailed = false
             self.durationShrinkWarningKeys = []
+            guard let cached,
+                  Date() >= cached.validatedAt,
+                  !self.fileManager.fileExists(atPath: Self.unreadableMarkerURL(for: profileID).path) else {
+                return nil
+            }
+            self.progressData = cached.value
+            if cached.isDurable {
+                self.durableContentRevision = self.contentRevision
+                self.durableValidationDate = cached.validatedAt
+            }
+            return cached
         }
-        loadProgressData()
-
+        if cached == nil {
+            loadProgressData()
+        }
         publishProgressData(accessQueue.sync { self.progressData })
     }
 
-    private var inactiveProfileCache: [UUID: ProgressData] = [:]
+    private var inactiveProfileCache: [UUID: InactiveProgressStore] = [:]
 
     private var activeStoreLoadFailed = false
 
@@ -687,30 +862,40 @@ final class ProgressManager: ObservableObject {
     }
 
     func progressData(forProfile profileID: UUID) -> ProgressData? {
+        if DispatchQueue.getSpecific(key: accessQueueKey) != nil {
+            return readProgressData(forProfile: profileID)
+        }
+        return accessQueue.sync(flags: .barrier) {
+            self.readProgressData(forProfile: profileID)
+        }
+    }
+
+    private func readProgressData(forProfile profileID: UUID) -> ProgressData? {
         if profileID == activeProfileID {
 
-            return accessQueue.sync {
-                self.activeStoreLoadFailed
-                    ? nil
-                    : ProgressPersistencePolicy.sanitized(
+            return self.activeStoreLoadFailed
+                ? nil
+                : (self.currentPreparedStoreWrite()?.snapshot
+                    ?? ProgressPersistencePolicy.sanitized(
                         self.progressData,
                         preservingDeviceLocalReferences: true
-                    )
-            }
+                    ))
         }
         guard !fileManager.fileExists(atPath: Self.unreadableMarkerURL(for: profileID).path) else {
             return nil
         }
-        if let cached = accessQueue.sync(execute: { inactiveProfileCache[profileID] }) {
-            return cached
+        if let cached = inactiveProfileCache[profileID], Date() >= cached.validatedAt {
+            return cached.value
         }
         let url = Self.progressFileURL(for: profileID)
         guard fileManager.fileExists(atPath: url.path) else {
 
             let empty = ProgressData()
-            accessQueue.sync(flags: .barrier) {
-                self.inactiveProfileCache[profileID] = empty
-            }
+            self.inactiveProfileCache[profileID] = InactiveProgressStore(
+                value: empty,
+                isDurable: false,
+                validatedAt: Date()
+            )
             return empty
         }
         let decoded: ProgressData
@@ -728,19 +913,21 @@ final class ProgressManager: ObservableObject {
             )
             return nil
         }
-        let sanitized = ProgressPersistencePolicy.sanitized(
+        let normalized = ProgressPersistencePolicy.sanitizedResult(
             decoded,
             preservingDeviceLocalReferences: true
         )
+        let sanitized = normalized.value
         guard repairDecodedStoreIfNeeded(
-            decoded: decoded,
-            sanitized: sanitized,
+            normalized: normalized,
             destination: url,
             profileID: profileID
         ) else { return nil }
-        accessQueue.sync(flags: .barrier) {
-            self.inactiveProfileCache[profileID] = sanitized
-        }
+        self.inactiveProfileCache[profileID] = InactiveProgressStore(
+            value: sanitized,
+            isDurable: true,
+            validatedAt: Date()
+        )
         return sanitized
     }
 
@@ -784,9 +971,17 @@ final class ProgressManager: ObservableObject {
                     )
                     self.progressData = sanitizedData
                     self.activeStoreLoadFailed = false
+                    self.durableContentRevision = self.contentRevision
+                    self.durableValidationDate = Date()
+                    self.durableValidationExpiry = nil
                     shouldPublish = true
                 } else {
-                    self.inactiveProfileCache[profileID] = sanitizedData
+                    self.allProfilesRevision &+= 1
+                    self.inactiveProfileCache[profileID] = InactiveProgressStore(
+                        value: sanitizedData,
+                        isDurable: true,
+                        validatedAt: Date()
+                    )
                 }
             } catch {
                 restoreError = error
@@ -806,11 +1001,12 @@ final class ProgressManager: ObservableObject {
     }
 
     func discardStore(forProfile profileID: UUID) {
-        guard profileID != activeProfileID else { return }
-        try? fileManager.removeItem(at: Self.progressFileURL(for: profileID))
-        try? fileManager.removeItem(at: Self.unreadableMarkerURL(for: profileID))
         accessQueue.sync(flags: .barrier) {
-            _ = self.inactiveProfileCache.removeValue(forKey: profileID)
+            guard profileID != self.activeProfileID else { return }
+            self.allProfilesRevision &+= 1
+            self.inactiveProfileCache.removeValue(forKey: profileID)
+            try? self.fileManager.removeItem(at: Self.progressFileURL(for: profileID))
+            try? self.fileManager.removeItem(at: Self.unreadableMarkerURL(for: profileID))
         }
     }
 
@@ -844,6 +1040,7 @@ final class ProgressManager: ObservableObject {
             destination: captured.destination,
             generation: captured.generation,
             sequence: captured.sequence,
+            contentRevision: captured.contentRevision,
             snapshot: sanitizedData,
 
             storeLoadFailed: false
@@ -877,6 +1074,9 @@ final class ProgressManager: ObservableObject {
                 self.progressData = sanitizedData
 
                 self.activeStoreLoadFailed = false
+                self.durableContentRevision = self.contentRevision
+                self.durableValidationDate = Date()
+                self.durableValidationExpiry = nil
                 didRestore = true
             } catch {
                 restoreError = error
@@ -1136,12 +1336,25 @@ final class ProgressManager: ObservableObject {
     }
 
     private func publishProgressData(_ snapshot: ProgressData) {
-        let movies = snapshot.movieProgress
-        let episodes = snapshot.episodeProgress
+        let capture = { () -> ProgressPublication in
+            self.periodicPublicationLock.lock()
+            let invalidationGeneration = self.periodicPublicationInvalidationGeneration
+            self.periodicPublicationLock.unlock()
+            return ProgressPublication(
+                movieProgress: self.progressData.movieProgress,
+                episodeProgress: self.progressData.episodeProgress,
+                authority: ProfileMutationAuthority(
+                    profileID: self.activeProfileID,
+                    storeGeneration: self.storeGeneration
+                ),
+                invalidationGeneration: invalidationGeneration
+            )
+        }
+        let publication = DispatchQueue.getSpecific(key: accessQueueKey) != nil
+            ? capture()
+            : accessQueue.sync(execute: capture)
         DispatchQueue.main.async {
-            self.movieProgressList = movies
-            self.episodeProgressList = episodes
-            NotificationCenter.default.post(name: .progressDataDidChange, object: self)
+            self.publishPeriodicProgressData(publication)
         }
     }
 
@@ -1193,13 +1406,13 @@ final class ProgressManager: ObservableObject {
 
         do {
             let decoded = try JSONDecoder().decode(ProgressData.self, from: data)
-            let sanitized = ProgressPersistencePolicy.sanitized(
+            let normalized = ProgressPersistencePolicy.sanitizedResult(
                 decoded,
                 preservingDeviceLocalReferences: true
             )
+            let sanitized = normalized.value
             let repairSucceeded = repairDecodedStoreIfNeeded(
-                decoded: decoded,
-                sanitized: sanitized,
+                normalized: normalized,
                 destination: progressFileURL,
                 profileID: activeProfileID
             )
@@ -1210,6 +1423,11 @@ final class ProgressManager: ObservableObject {
             accessQueue.sync(flags: .barrier) {
                 self.progressData = sanitized
                 self.activeStoreLoadFailed = !repairSucceeded
+                if repairSucceeded {
+                    self.durableContentRevision = self.contentRevision
+                    self.durableValidationDate = Date()
+                    self.durableValidationExpiry = nil
+                }
             }
             publishProgressData(sanitized)
             if repairSucceeded {
@@ -1272,18 +1490,17 @@ final class ProgressManager: ObservableObject {
     }
 
     private func repairDecodedStoreIfNeeded(
-        decoded: ProgressData,
-        sanitized: ProgressData,
+        normalized: ProgressPersistencePolicy.SanitizedProgress,
         destination: URL,
         profileID: UUID
     ) -> Bool {
-        guard !ProgressPersistencePolicy.progressDataIsSafe(decoded) else { return true }
+        guard normalized.didChange else { return true }
         let rescueURL = Self.documentsDirectory.appendingPathComponent(
             "\(Self.sidecarPrefix(for: profileID))repaired-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.lowercased()).json"
         )
         do {
             try fileManager.copyItem(at: destination, to: rescueURL)
-            let safeData = try JSONEncoder().encode(sanitized)
+            let safeData = try JSONEncoder().encode(normalized.value)
             guard safeData.count <= ProgressPersistencePolicy.maximumPersistedStoreBytes else {
                 throw CocoaError(.fileWriteOutOfSpace)
             }
@@ -1331,11 +1548,12 @@ final class ProgressManager: ObservableObject {
         )
     }
 
-    private struct StoreWriteRequest {
+    private struct StoreWriteRequest: Sendable {
         let profileID: UUID
         let destination: URL
         let generation: UInt64
         let sequence: UInt64
+        let contentRevision: UInt64
         let snapshot: ProgressData
         let storeLoadFailed: Bool
     }
@@ -1365,10 +1583,8 @@ final class ProgressManager: ObservableObject {
                 destination: self.progressFileURL,
                 generation: self.storeGeneration,
                 sequence: self.storeWriteSequence,
-                snapshot: ProgressPersistencePolicy.sanitized(
-                    self.progressData,
-                    preservingDeviceLocalReferences: true
-                ),
+                contentRevision: self.contentRevision,
+                snapshot: self.progressData,
                 storeLoadFailed: self.activeStoreLoadFailed
             )
         }
@@ -1429,10 +1645,8 @@ final class ProgressManager: ObservableObject {
                 destination: reservation.destination,
                 generation: reservation.generation,
                 sequence: reservation.sequence,
-                snapshot: ProgressPersistencePolicy.sanitized(
-                    self.progressData,
-                    preservingDeviceLocalReferences: true
-                ),
+                contentRevision: self.contentRevision,
+                snapshot: self.progressData,
                 storeLoadFailed: reservation.storeLoadFailed
             )
         }
@@ -1517,6 +1731,7 @@ final class ProgressManager: ObservableObject {
 
     private func storeWriteRequestIsCurrent(_ request: StoreWriteRequest) -> Bool {
         storeWriteRequestTargetsCurrentStore(request)
+            && request.contentRevision == contentRevision
             && !request.storeLoadFailed
             && !activeStoreLoadFailed
     }
@@ -1526,15 +1741,127 @@ final class ProgressManager: ObservableObject {
         enqueueStoreWrite(request)
     }
 
+    private struct PreparedStoreWrite: Sendable {
+        let profileID: UUID
+        let generation: UInt64
+        let contentRevision: UInt64
+        let snapshot: ProgressData
+        let data: Data
+        let validatedAt: Date
+        let validUntil: Date?
+    }
+
+    private struct StorePreparation: Sendable {
+        let request: StoreWriteRequest
+        let persistsWhenReady: Bool
+    }
+
+    static func preparationClockIsCurrent(now: Date, validatedAt: Date, validUntil: Date?) -> Bool {
+        now >= validatedAt && (validUntil.map { now < $0 } ?? true)
+    }
+
+    private func currentPreparedStoreWrite() -> PreparedStoreWrite? {
+        guard let prepared = preparedStoreWrite,
+              prepared.profileID == activeProfileID,
+              prepared.generation == storeGeneration,
+              prepared.contentRevision == contentRevision,
+              Self.preparationClockIsCurrent(
+                now: Date(),
+                validatedAt: prepared.validatedAt,
+                validUntil: prepared.validUntil
+              ) else { return nil }
+        return prepared
+    }
+
+    private static func prepareStoreWrite(_ request: StoreWriteRequest) throws -> PreparedStoreWrite {
+        let now = Date()
+        let normalized = ProgressPersistencePolicy.sanitizedResult(
+            request.snapshot,
+            preservingDeviceLocalReferences: true,
+            now: now
+        )
+        let data = try JSONEncoder().encode(normalized.value)
+        guard data.count <= ProgressPersistencePolicy.maximumPersistedStoreBytes else {
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+        return PreparedStoreWrite(
+            profileID: request.profileID,
+            generation: request.generation,
+            contentRevision: request.contentRevision,
+            snapshot: normalized.value,
+            data: data,
+            validatedAt: now,
+            validUntil: normalized.validUntil
+        )
+    }
+
     private func enqueueStoreWrite(_ request: StoreWriteRequest) {
+        enqueueStorePreparation(request, persistsWhenReady: true)
+    }
+
+    private func enqueueStorePreparation(_ request: StoreWriteRequest, persistsWhenReady: Bool) {
         accessQueue.async(flags: .barrier) { [weak self] in
             guard let self, self.storeWriteRequestIsCurrent(request) else { return }
-            self.writeProgressData(request)
+            if self.currentStoreIsDurable() { return }
+            if let prepared = self.currentPreparedStoreWrite() {
+                if persistsWhenReady { self.writeProgressData(request, prepared: prepared) }
+                return
+            }
+            self.pendingStorePreparation = StorePreparation(
+                request: request,
+                persistsWhenReady: persistsWhenReady
+            )
+            self.beginPendingStorePreparation()
         }
     }
 
-    private func writeProgressData(_ request: StoreWriteRequest) {
+    private func beginPendingStorePreparation() {
+        guard !isPreparingStoreWrite, let preparation = pendingStorePreparation else { return }
+        pendingStorePreparation = nil
+        guard storeWriteRequestIsCurrent(preparation.request) else { return }
+        isPreparingStoreWrite = true
+        preparationQueue.async { [weak self] in
+            let result = Result { try Self.prepareStoreWrite(preparation.request) }
+            self?.accessQueue.async(flags: .barrier) { [weak self] in
+                guard let self else { return }
+                self.isPreparingStoreWrite = false
+                if self.storeWriteRequestIsCurrent(preparation.request) {
+                    switch result {
+                    case .success(let prepared):
+                        self.preparedStoreWrite = prepared
+                        if preparation.persistsWhenReady {
+                            self.writeProgressData(preparation.request, prepared: prepared)
+                        }
+                    case .failure(let error):
+                        Logger.shared.log("Failed to prepare progress data: \(error.localizedDescription)", type: "Error")
+                    }
+                }
+                self.beginPendingStorePreparation()
+            }
+        }
+    }
 
+    private func preparedStoreWriteCandidate(_ prepared: PreparedStoreWrite?) -> PreparedStoreWrite? {
+        guard let prepared,
+              Self.preparationClockIsCurrent(
+                now: Date(),
+                validatedAt: prepared.validatedAt,
+                validUntil: prepared.validUntil
+              ) else { return nil }
+        return prepared
+    }
+
+    private func currentStoreIsDurable() -> Bool {
+        guard durableContentRevision == contentRevision,
+              let validatedAt = durableValidationDate else { return false }
+        return Self.preparationClockIsCurrent(
+            now: Date(),
+            validatedAt: validatedAt,
+            validUntil: durableValidationExpiry
+        )
+    }
+
+    private func writeProgressData(_ request: StoreWriteRequest, prepared suppliedPreparation: PreparedStoreWrite? = nil) {
         guard !request.storeLoadFailed else {
             Logger.shared.log(
                 "ProgressManager: refused to save over a store that failed to load",
@@ -1543,16 +1870,22 @@ final class ProgressManager: ObservableObject {
             return
         }
         do {
-            let data = try JSONEncoder().encode(request.snapshot)
-            guard data.count <= ProgressPersistencePolicy.maximumPersistedStoreBytes else {
-                throw CocoaError(.fileWriteOutOfSpace)
+            let prepared: PreparedStoreWrite
+            if let candidate = preparedStoreWriteCandidate(suppliedPreparation) {
+                prepared = candidate
+            } else {
+                prepared = try Self.prepareStoreWrite(request)
             }
             preservePreviousStoreIfCatastrophicShrink(
-                newByteCount: data.count,
+                newByteCount: prepared.data.count,
                 destination: request.destination,
                 profileID: request.profileID
             )
-            try data.write(to: request.destination, options: .atomic)
+            try prepared.data.write(to: request.destination, options: .atomic)
+            preparedStoreWrite = prepared
+            durableContentRevision = request.contentRevision
+            durableValidationDate = prepared.validatedAt
+            durableValidationExpiry = prepared.validUntil
             Logger.shared.log("Progress data saved successfully", type: "Progress")
         } catch {
             Logger.shared.log("Failed to save progress data: \(error.localizedDescription)", type: "Error")
@@ -1615,6 +1948,9 @@ final class ProgressManager: ObservableObject {
 
     private func debouncedSave(authorizing authority: ProfileMutationAuthority) {
         guard let reservation = reserveStoreWrite(authorizing: authority) else { return }
+        if let request = materializeStoreWriteRequest(reservation) {
+            enqueueStorePreparation(request, persistsWhenReady: false)
+        }
         let now = Date()
         debounceLock.lock()
         debounceGeneration = Self.nextDebounceGeneration(after: debounceGeneration)
@@ -1660,10 +1996,11 @@ final class ProgressManager: ObservableObject {
         debounceLock.unlock()
         pendingTask?.cancel()
 
-        guard let request = captureStoreWriteRequest(authorizing: nil) else { return }
         let writeIfCurrent = {
-            guard self.storeWriteRequestIsCurrent(request) else { return }
-            self.writeProgressData(request)
+            if self.currentStoreIsDurable() { return }
+            guard let request = self.captureStoreWriteRequest(authorizing: nil),
+                  self.storeWriteRequestIsCurrent(request) else { return }
+            self.writeProgressData(request, prepared: self.currentPreparedStoreWrite())
         }
         if DispatchQueue.getSpecific(key: accessQueueKey) != nil {
             writeIfCurrent()

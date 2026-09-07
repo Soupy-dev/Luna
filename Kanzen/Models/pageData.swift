@@ -139,6 +139,107 @@ struct Chapter: Identifiable {
     let chapterData: [ChapterData]?
 }
 
+struct LegacyReaderChapterSnapshot {
+    struct OrderingInput: Sendable {
+        let number: String
+        let index: Int
+    }
+
+    struct Ordering: Sendable {
+        let offsets: [Int]
+        let keys: [String]
+    }
+
+    struct Group {
+        let original: Chapters
+        let reversed: [Chapter]
+        let chronological: [Chapter]
+        let readerChapters: [Chapter]
+        let keysByID: [UUID: String]
+
+        func readingTarget(lastRead: String?, readKeys: Set<String>) -> Chapter? {
+            if let lastRead {
+                let key = ChapterIdentityNormalizer.key(for: lastRead)
+                if !readKeys.contains(key),
+                   let chapter = original.chapters.first(where: {
+                       $0.chapterNumber == lastRead || keysByID[$0.id] == key
+                   }) {
+                    return chapter
+                }
+            }
+            return chronological.first {
+                !readKeys.contains(keysByID[$0.id] ?? $0.chapterNumber)
+            } ?? chronological.first
+        }
+    }
+
+    let groups: [Group]
+    let latestChapterNumbers: [String]?
+
+    func group(at index: Int) -> Group? {
+        guard !groups.isEmpty else { return nil }
+        return groups[groups.indices.contains(index) ? index : 0]
+    }
+
+    static func selectedIndex(languages: [String], preserving language: String?) -> Int {
+        language.flatMap { languages.firstIndex(of: $0) } ?? 0
+    }
+
+    static func ordering(_ input: [OrderingInput]) -> Ordering {
+        let regex = try? NSRegularExpression(pattern: #"(\d+(?:\.\d+)?)"#)
+        let numeric = input.map { entry -> Double? in
+            let range = NSRange(entry.number.startIndex..., in: entry.number)
+            guard let match = regex?.matches(in: entry.number, range: range).last,
+                  let numberRange = Range(match.range(at: 1), in: entry.number) else { return nil }
+            return Double(entry.number[numberRange])
+        }
+        let offsets = input.indices.sorted { lhs, rhs in
+            switch (numeric[lhs], numeric[rhs]) {
+            case let (left?, right?):
+                if left != right { return left < right }
+                return input[lhs].index < input[rhs].index
+            case (.some, .none): return true
+            case (.none, .some): return false
+            case (.none, .none): return input[lhs].index > input[rhs].index
+            }
+        }
+        return Ordering(offsets: offsets, keys: input.map { ChapterIdentityNormalizer.key(for: $0.number) })
+    }
+
+    @MainActor
+    static func prepare(_ chapters: [Chapters]) async -> LegacyReaderChapterSnapshot {
+        let inputs = chapters.map { group in
+            group.chapters.map { OrderingInput(number: $0.chapterNumber, index: $0.idx) }
+        }
+        let orderings = await Task.detached(priority: .userInitiated) {
+            inputs.map(Self.ordering)
+        }.value
+        let groups = zip(chapters, orderings).map { original, ordering in
+            let chronological = ordering.offsets.map { original.chapters[$0] }
+            var seen = Set<String>()
+            let readerChapters = ordering.offsets.filter { seen.insert(ordering.keys[$0]).inserted }
+                .enumerated().map { index, offset in
+                    let chapter = original.chapters[offset]
+                    return Chapter(chapterNumber: chapter.chapterNumber, idx: index, chapterData: chapter.chapterData)
+                }
+            let keys = Dictionary(zip(original.chapters, ordering.keys).map { ($0.0.id, $0.1) }, uniquingKeysWith: { first, _ in first })
+            return Group(
+                original: original,
+                reversed: Array(original.chapters.reversed()),
+                chronological: chronological,
+                readerChapters: readerChapters,
+                keysByID: keys
+            )
+        }
+        let latest = groups.max { $0.original.chapters.count < $1.original.chapters.count }.map { group in
+            var seen = Set<String>()
+            return group.original.chapters.filter { seen.insert(group.keysByID[$0.id] ?? $0.chapterNumber).inserted }
+                .map(\.chapterNumber)
+        }
+        return LegacyReaderChapterSnapshot(groups: groups, latestChapterNumbers: latest)
+    }
+}
+
 enum ChapterIdentityNormalizer {
     private static let numberPattern = #"(\d+(?:\.\d+)?)"#
     private static let volumeChapterRegex = try? NSRegularExpression(

@@ -704,12 +704,12 @@ private final class NovelReaderWindowMetricsProbeView: UIView {
     }
 }
 
-private struct NovelScrollRequest: Equatable {
+struct NovelScrollRequest: Equatable {
     let id = UUID()
     let percentage: CGFloat
 }
 
-private struct NovelHTMLView: UIViewRepresentable {
+struct NovelHTMLView: UIViewRepresentable {
     let htmlContent: String
     let fontSize: CGFloat
     let fontFamily: String
@@ -730,7 +730,7 @@ private struct NovelHTMLView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
-        coordinator.stopProgressTracking()
+        coordinator.tearDown()
     }
 
     class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
@@ -739,6 +739,13 @@ private struct NovelHTMLView: UIViewRepresentable {
         var scrollTimer: Timer?
         var progressTimer: Timer?
         weak var webView: WKWebView?
+        private(set) var isDismantled = false
+        var documentGeneration = UUID()
+        var expectedNavigation: WKNavigation?
+        var navigationGeneration: UUID?
+        private(set) var isDocumentReady = false
+        private var progressUsesIsolatedWorld: Bool?
+        var scriptEvaluator: ((String, WKWebView, ((Any?, Error?) -> Void)?) -> Void)?
 
         var lastHTML: String = ""
         var lastFontSize: CGFloat = 0
@@ -748,10 +755,64 @@ private struct NovelHTMLView: UIViewRepresentable {
         var lastLineSpacing: CGFloat = 0
         var lastMargin: CGFloat = 0
         var lastPreset: String = ""
+        var lastChapterKey: String = ""
+        var lastSettingsStore: UserDefaults?
+        var lastIsolatesReaderExtensionHTML = false
         var lastScrollRequestID: UUID?
 
         init(_ parent: NovelHTMLView) {
             self.parent = parent
+        }
+
+        func documentHasChanged(_ view: NovelHTMLView) -> Bool {
+            lastHTML != view.htmlContent || lastFontSize != view.fontSize
+                || lastFontFamily != view.fontFamily || lastFontWeight != view.fontWeight
+                || lastAlignment != view.textAlignment || lastLineSpacing != view.lineSpacing
+                || lastMargin != view.margin || lastPreset != view.colorPreset.name
+                || lastChapterKey != view.chapterKey || lastSettingsStore !== view.settingsStore
+                || lastIsolatesReaderExtensionHTML != view.isolatesReaderExtensionHTML
+        }
+
+        func recordDocument(_ view: NovelHTMLView) {
+            lastHTML = view.htmlContent
+            lastFontSize = view.fontSize
+            lastFontFamily = view.fontFamily
+            lastFontWeight = view.fontWeight
+            lastAlignment = view.textAlignment
+            lastLineSpacing = view.lineSpacing
+            lastMargin = view.margin
+            lastPreset = view.colorPreset.name
+            lastChapterKey = view.chapterKey
+            lastSettingsStore = view.settingsStore
+            lastIsolatesReaderExtensionHTML = view.isolatesReaderExtensionHTML
+        }
+
+        func applyScrollRequest(_ webView: WKWebView) {
+            guard let request = parent.scrollRequest, request.id != lastScrollRequestID else { return }
+            lastScrollRequestID = request.id
+            let percentage = min(max(request.percentage, 0), 1)
+            let script = """
+            (function() {
+                var h = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+                window.scrollTo({ top: h * \(percentage), behavior: 'auto' });
+            })();
+            """
+            evaluateReaderScript(script, in: webView)
+        }
+
+        func beginDocumentReplacement() {
+            documentGeneration = UUID()
+            expectedNavigation = nil
+            navigationGeneration = nil
+            isDocumentReady = false
+            stopAutoScroll()
+            stopProgressTracking()
+            webView?.stopLoading()
+        }
+
+        func registerNavigation(_ navigation: WKNavigation?) {
+            expectedNavigation = navigation
+            navigationGeneration = documentGeneration
         }
 
         func evaluateReaderScript(
@@ -759,6 +820,11 @@ private struct NovelHTMLView: UIViewRepresentable {
             in webView: WKWebView,
             completion: ((Any?, Error?) -> Void)? = nil
         ) {
+            guard !isDismantled, self.webView === webView else { return }
+            if let scriptEvaluator {
+                scriptEvaluator(script, webView, completion)
+                return
+            }
             if parent.isolatesReaderExtensionHTML {
                 webView.evaluateJavaScript(
                     script,
@@ -776,13 +842,18 @@ private struct NovelHTMLView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-
+            guard !isDismantled, self.webView === webView,
+                  let navigation, navigation === expectedNavigation,
+                  navigationGeneration == documentGeneration else { return }
+            isDocumentReady = true
             let saved = parent.settingsStore.double(forKey: "novelScrollPos_\(parent.chapterKey)")
             if saved > 0.01 {
                 let script = "window.scrollTo(0, document.documentElement.scrollHeight * \(saved));"
                 evaluateReaderScript(script, in: webView)
             }
+            applyScrollRequest(webView)
             startProgressTracking(webView: webView)
+            if parent.isAutoScrolling { startAutoScroll(webView) }
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -792,13 +863,23 @@ private struct NovelHTMLView: UIViewRepresentable {
         }
 
         func startAutoScroll(_ webView: WKWebView) {
-            stopAutoScroll()
-            scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
+            guard !isDismantled, self.webView === webView, scrollTimer == nil else { return }
+            scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { [weak self, weak webView] timer in
+                guard let self, let webView, !self.isDismantled, self.webView === webView else {
+                    timer.invalidate()
+                    return
+                }
+                let generation = self.documentGeneration
                 let amount = self.parent.autoScrollSpeed * 0.5
                 self.evaluateReaderScript("window.scrollBy(0, \(amount));", in: webView)
-                self.evaluateReaderScript("(window.pageYOffset + window.innerHeight) >= document.body.scrollHeight", in: webView) { result, _ in
+                self.evaluateReaderScript("(window.pageYOffset + window.innerHeight) >= document.body.scrollHeight", in: webView) { [weak self] result, _ in
                     if let atBottom = result as? Bool, atBottom {
-                        DispatchQueue.main.async { self.parent.isAutoScrolling = false }
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self, !self.isDismantled,
+                                  self.documentGeneration == generation else { return }
+                            self.stopAutoScroll()
+                            self.parent.isAutoScrolling = false
+                        }
                     }
                 }
             }
@@ -809,7 +890,18 @@ private struct NovelHTMLView: UIViewRepresentable {
             scrollTimer = nil
         }
 
+        func tearDown() {
+            guard !isDismantled else { return }
+            isDismantled = true
+            beginDocumentReplacement()
+            webView?.navigationDelegate = nil
+            webView?.stopLoading()
+            webView = nil
+            scriptEvaluator = nil
+        }
+
         func startProgressTracking(webView: WKWebView) {
+            guard !isDismantled, self.webView === webView, progressTimer == nil else { return }
             stopProgressTracking()
             self.webView = webView
             updateProgress(webView)
@@ -845,6 +937,7 @@ private struct NovelHTMLView: UIViewRepresentable {
                 )
                 : WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
             webView.configuration.userContentController.addUserScript(script)
+            progressUsesIsolatedWorld = parent.isolatesReaderExtensionHTML
             if parent.isolatesReaderExtensionHTML {
                 webView.configuration.userContentController.add(
                     self,
@@ -861,19 +954,21 @@ private struct NovelHTMLView: UIViewRepresentable {
             progressTimer = nil
             if let wv = webView {
                 wv.configuration.userContentController.removeAllUserScripts()
-                if parent.isolatesReaderExtensionHTML {
+                if progressUsesIsolatedWorld == true {
                     wv.configuration.userContentController.removeScriptMessageHandler(
                         forName: "novelScrollHandler",
                         contentWorld: Self.readerBridgeWorld
                     )
-                } else {
+                } else if progressUsesIsolatedWorld == false {
                     wv.configuration.userContentController.removeScriptMessageHandler(forName: "novelScrollHandler")
                 }
             }
+            progressUsesIsolatedWorld = nil
         }
 
         func updateProgress(_ webView: WKWebView) {
-            guard webView.window != nil else { stopProgressTracking(); return }
+            guard !isDismantled, self.webView === webView, webView.window != nil else { stopProgressTracking(); return }
+            let generation = documentGeneration
             let js = """
             (function() {
                 var sh = document.documentElement.scrollHeight;
@@ -885,7 +980,8 @@ private struct NovelHTMLView: UIViewRepresentable {
             })();
             """
             evaluateReaderScript(js, in: webView) { [weak self] result, _ in
-                guard let self, let dict = result as? [String: Any],
+                guard let self, !self.isDismantled, self.documentGeneration == generation,
+                      let dict = result as? [String: Any],
                       let progress = dict["progress"] as? Double else { return }
                 if let scrollPos = dict["scrollPos"] as? Double {
                     self.parent.settingsStore.set(scrollPos, forKey: "novelScrollPos_\(self.parent.chapterKey)")
@@ -934,39 +1030,21 @@ private struct NovelHTMLView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         let c = context.coordinator
+        guard !c.isDismantled else { return }
+        c.parent = self
 
-        if let scrollRequest, scrollRequest.id != c.lastScrollRequestID {
-            c.lastScrollRequestID = scrollRequest.id
-            let percentage = min(max(scrollRequest.percentage, 0), 1)
-            let script = """
-            (function() {
-                var h = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-                window.scrollTo({ top: h * \(percentage), behavior: 'auto' });
-            })();
-            """
-            c.evaluateReaderScript(script, in: webView)
+        let changed = c.documentHasChanged(self)
+        if changed {
+            c.beginDocumentReplacement()
+        } else if c.isDocumentReady {
+            c.applyScrollRequest(webView)
+            if isAutoScrolling { c.startAutoScroll(webView) }
+            else { c.stopAutoScroll() }
+            if webView.window != nil { c.startProgressTracking(webView: webView) }
+            else { c.stopProgressTracking() }
         }
 
-        if isAutoScrolling {
-            c.startAutoScroll(webView)
-        } else {
-            c.stopAutoScroll()
-        }
-
-        if webView.window != nil {
-            c.startProgressTracking(webView: webView)
-        } else {
-            c.stopProgressTracking()
-        }
-
-        guard !htmlContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-
-        let changed = c.lastHTML != htmlContent || c.lastFontSize != fontSize ||
-                      c.lastFontFamily != fontFamily || c.lastFontWeight != fontWeight ||
-                      c.lastAlignment != textAlignment || c.lastLineSpacing != lineSpacing ||
-                      c.lastMargin != margin || c.lastPreset != colorPreset.name
-
-        guard changed else { return }
+        guard changed, !htmlContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         let contentSecurityPolicy = isolatesReaderExtensionHTML
             ? "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src 'none'; style-src 'unsafe-inline'; font-src 'none'; media-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; connect-src 'none'\">"
@@ -1010,24 +1088,20 @@ private struct NovelHTMLView: UIViewRepresentable {
         <body>\(htmlContent)</body>
         </html>
         """
-        webView.loadHTMLString(html, baseURL: nil)
+        c.registerNavigation(webView.loadHTMLString(html, baseURL: nil))
 
         let savedPos = settingsStore.double(forKey: "novelScrollPos_\(chapterKey)")
         if savedPos > 0.01 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let generation = c.documentGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak c, weak webView] in
+                guard let c, let webView, !c.isDismantled,
+                      c.documentGeneration == generation, c.isDocumentReady else { return }
                 let js = "window.scrollTo(0, document.documentElement.scrollHeight * \(savedPos));"
                 c.evaluateReaderScript(js, in: webView)
             }
         }
 
-        c.lastHTML = htmlContent
-        c.lastFontSize = fontSize
-        c.lastFontFamily = fontFamily
-        c.lastFontWeight = fontWeight
-        c.lastAlignment = textAlignment
-        c.lastLineSpacing = lineSpacing
-        c.lastMargin = margin
-        c.lastPreset = colorPreset.name
+        c.recordDocument(self)
     }
 }
 

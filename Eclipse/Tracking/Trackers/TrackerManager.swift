@@ -12005,6 +12005,7 @@ final class TrackerManager: NSObject, ObservableObject {
     }
 
     private func performSyncTool(_ plan: TrackerSyncToolPlan) async throws -> TrackerSyncPreview {
+        let operationGeneration = trackerOperationGenerationSnapshot()
         try await validateSyncToolPlan(plan)
         let action = plan.action
         switch action {
@@ -12014,7 +12015,7 @@ final class TrackerManager: NSObject, ObservableObject {
             let animeResult = try await fillEclipseFromRemoteAnime(plan.animeEntries, sourceName: "AniList", action: action, owner: plan.owner)
             try await advanceSyncToolProgress(by: plan.animeEntries.count, detail: "Finished AniList anime fill")
             await updateSyncToolProgress(detail: "Filling Eclipse manga from AniList...")
-            let mangaResult = try await fillEclipseFromRemoteManga(plan.mangaEntries, sourceName: "AniList", action: action, owner: plan.owner)
+            let mangaResult = try await fillEclipseFromRemoteManga(plan.mangaEntries, sourceName: "AniList", action: action, owner: plan.owner, requiredOperationGeneration: operationGeneration)
             try await advanceSyncToolProgress(by: plan.mangaEntries.count, detail: "Finished AniList manga fill")
             return try await finalizedSyncToolResult(
                 combineSyncPreviews(action: action, animeResult, mangaResult, note: "AniList fill completed without deleting or downgrading local progress."),
@@ -12027,7 +12028,7 @@ final class TrackerManager: NSObject, ObservableObject {
             let animeResult = try await fillEclipseFromRemoteAnime(plan.animeEntries, sourceName: "MAL", action: action, owner: plan.owner)
             try await advanceSyncToolProgress(by: plan.animeEntries.count, detail: "Finished MAL anime fill")
             await updateSyncToolProgress(detail: "Filling Eclipse manga from MAL...")
-            let mangaResult = try await fillEclipseFromRemoteManga(plan.mangaEntries, sourceName: "MAL", action: action, owner: plan.owner)
+            let mangaResult = try await fillEclipseFromRemoteManga(plan.mangaEntries, sourceName: "MAL", action: action, owner: plan.owner, requiredOperationGeneration: operationGeneration)
             try await advanceSyncToolProgress(by: plan.mangaEntries.count, detail: "Finished MAL manga fill")
             return try await finalizedSyncToolResult(
                 combineSyncPreviews(action: action, animeResult, mangaResult, note: "MAL fill completed without deleting or downgrading local progress."),
@@ -13643,39 +13644,26 @@ final class TrackerManager: NSObject, ObservableObject {
         sourceName: String,
         action: TrackerSyncToolAction,
         owner: UUID,
-        requiredOperationGeneration: UInt64? = nil
+        requiredOperationGeneration: UInt64
     ) async throws -> TrackerSyncPreview {
-        let counts = try await MainActor.run { () throws -> (advanced: Int, unmapped: Int, rejected: Int) in
-            try self.requireOwner(owner, operationGeneration: requiredOperationGeneration)
-            var advanced = 0
-            var unmapped = 0
-            var rejected = 0
-
-            for entry in entries {
-                try Task.checkCancellation()
-                guard let anilistId = entry.anilistId else {
-                    unmapped += 1
-                    continue
-                }
-
-                let read = remoteReadChapters(entry)
-                if read > 0 {
-                    let imported = MangaReadingProgressManager.shared.bulkMarkChaptersReadForImport(
-                        mangaId: anilistId,
-                        throughChapter: read,
-                        mangaTitle: entry.title,
-                        totalChapters: entry.totalChapters
-                    )
-                    if imported {
-                        advanced += 1
-                    } else {
-                        rejected += 1
-                    }
-                }
+        let generation = requiredOperationGeneration
+        var unmapped = 0
+        var records: [MangaReadingProgressManager.ImportRecord] = []
+        for entry in entries {
+            try Task.checkCancellation()
+            guard let anilistID = entry.anilistId else {
+                unmapped += 1
+                continue
             }
-
-            return (advanced: advanced, unmapped: unmapped, rejected: rejected)
+            let read = remoteReadChapters(entry)
+            guard read > 0 else { continue }
+            records.append(.init(mangaID: anilistID, throughChapter: read,
+                                 title: entry.title, coverURL: nil, totalChapters: entry.totalChapters))
         }
+        let imported = try await MangaReadingProgressManager.shared.importChapters(records, owner: owner) {
+            try self.requireOwner(owner, operationGeneration: generation)
+        }
+        let counts = (advanced: imported.imported, unmapped: unmapped, rejected: imported.rejected)
 
         return TrackerSyncPreview(
             action: action,
@@ -14451,7 +14439,7 @@ final class TrackerManager: NSObject, ObservableObject {
                     throw CancellationError()
                 }
                 try await MainActor.run {
-                    try self.requireOwner(owner)
+                    try self.requireOwner(owner, operationGeneration: requestAuthority.operationGeneration)
                     LibraryManager.shared.applyTraktWatchlistPull(resolvedResults)
                 }
                 Logger.shared.log("Trakt watchlist pull: \(resolvedResults.count) items merged into \(Self.traktWatchlistCollectionName)", type: "Tracker")

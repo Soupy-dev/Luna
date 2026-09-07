@@ -501,6 +501,23 @@ final class WatchTogetherCoordinator {
         return request
     }
 
+    var playbackHandoffIdentity: WatchTogetherPlaybackHandoffIdentity {
+        guard let session, session.state == .joined, let currentSharedState else {
+            return WatchTogetherPlaybackHandoffIdentity(
+                sessionID: nil,
+                sessionGeneration: outboundSendGeneration,
+                mediaRevision: nil,
+                mediaIdentifier: nil
+            )
+        }
+        return WatchTogetherPlaybackHandoffIdentity(
+            sessionID: session.id,
+            sessionGeneration: outboundSendGeneration,
+            mediaRevision: currentSharedState.mediaRevision,
+            mediaIdentifier: currentSharedState.mediaIdentifier
+        )
+    }
+
     func isCurrentSharedMedia(_ media: WatchTogetherMediaDescriptor) -> Bool {
         guard didReceiveAuthoritativeStateMessage,
               let session,

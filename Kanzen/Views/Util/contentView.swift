@@ -32,6 +32,8 @@ struct contentView: View {
 
     @State private var detailsFailedAt: Date?
     @State private var contentChapters: [Chapters]?
+    @State private var chapterSnapshot: LegacyReaderChapterSnapshot?
+    @State private var chapterLoadGeneration = UUID()
     @EnvironmentObject var kanzen: KanzenEngine
     @EnvironmentObject var settings: Settings
     @EnvironmentObject var favouriteManager : FavouriteManager
@@ -130,8 +132,12 @@ struct contentView: View {
         )
     }
 
+    private var selectedChapterSnapshot: LegacyReaderChapterSnapshot.Group? {
+        chapterSnapshot?.group(at: langaugeIdx)
+    }
+
     private var currentChapterNumbers: [String]? {
-        chapterNumbers(from: contentChapters)
+        chapterSnapshot?.latestChapterNumbers
     }
 
     private func chapterNumbers(from groups: [Chapters]?) -> [String]? {
@@ -180,6 +186,13 @@ struct contentView: View {
             }
         }
 
+        .onReceive(NotificationCenter.default.publisher(for: .activeProfileDidChange)) { _ in
+            selectedChapterData = nil
+            chapterLoadGeneration = UUID()
+            if loadingState || detailsResolution == .pending {
+                getContentData()
+            }
+        }
         .onAppear {
 
             toggleFavourite = checkIfFavorited()
@@ -284,13 +297,9 @@ struct contentView: View {
         .coordinateSpace(name: "moduleContentScroll")
         .onPreferenceChange(ScrollOffsetPreferenceKey.self) { scrollOffset = $0 }
 
-        .onReceive(NotificationCenter.default.publisher(for: .activeProfileDidChange)) { _ in
-            selectedChapterData = nil
-        }
         .fullScreenCover(item: $selectedChapterData) { chapter in
-            if let contentChapters = self.contentChapters{
-                let chapterList = contentChapters[langaugeIdx].chapters
-                let readerChapterList = readerChapters(from: chapterList)
+            if let group = selectedChapterSnapshot {
+                let readerChapterList = group.readerChapters
                 let selectedReaderChapter = readerChapterList.first {
                     $0.chapterNumber == chapter.chapterNumber
                 } ?? readerChapterList.first ?? chapter
@@ -331,10 +340,12 @@ struct contentView: View {
     }
 
     func getContentData() {
-
+        let generation = UUID()
+        chapterLoadGeneration = generation
         let owner = ProfileManager.shared.activeProfileID
         kanzen.extractDetails(params: self.params) { result in
             DispatchQueue.main.async {
+                guard self.chapterLoadGeneration == generation else { return }
                 self.contentData = result
 
                 self.detailsResolution = result == nil ? .failed : .resolved
@@ -342,7 +353,8 @@ struct contentView: View {
             }
         }
         kanzen.extractChapters(params: self.params) { result in
-            DispatchQueue.main.async {
+            Task { @MainActor in
+                guard self.chapterLoadGeneration == generation else { return }
                 if let result = result {
                     var temp: [Chapters] = []
 
@@ -386,6 +398,13 @@ struct contentView: View {
                         )
                     }
 
+                    let snapshot = await LegacyReaderChapterSnapshot.prepare(temp)
+                    guard self.chapterLoadGeneration == generation else { return }
+                    let selectedLanguage = self.selectedChapterSnapshot?.original.language
+                    self.langaugeIdx = LegacyReaderChapterSnapshot.selectedIndex(
+                        languages: temp.map(\.language), preserving: selectedLanguage
+                    )
+                    self.chapterSnapshot = snapshot
                     self.contentChapters = temp
                     if !temp.isEmpty, ProfileManager.shared.isStillActive(owner) {
                         let latestNumbers = chapterNumbers(from: temp) ?? []
@@ -691,9 +710,9 @@ struct contentView: View {
 
     @ViewBuilder
     func chaptersView() -> some View {
-        if let chaptersData = self.contentChapters, !chaptersData.isEmpty {
-            let selected = chaptersData[langaugeIdx]
-            let displayed: [Chapter] = reverseChapterlist ? Array(selected.chapters.reversed()) : selected.chapters
+        if let chaptersData = self.contentChapters, let group = selectedChapterSnapshot {
+            let selected = group.original
+            let displayed = reverseChapterlist ? group.reversed : selected.chapters
 
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
@@ -985,28 +1004,11 @@ struct contentView: View {
     private func readButton(chapters: [Chapter]) -> some View {
         let lastRead = progressManager.lastReadChapter(for: stableId)
         let readChapters = progressManager.readChapters(for: stableId)
-        let readKeys = Set(readChapters.map { ChapterIdentityNormalizer.key(for: $0) })
+        let readKeys = progressManager.normalizedReadChapterKeys(for: stableId)
         let hasProgress = lastRead != nil || !readChapters.isEmpty
         let experimental = ExperimentalFeatureState.isEnabledAtLaunch
 
-        let targetChapter: Chapter? = {
-            if let lastRead = lastRead {
-                let lastReadKey = ChapterIdentityNormalizer.key(for: lastRead)
-                if !readKeys.contains(lastReadKey),
-                   let ch = chapters.first(where: {
-                    $0.chapterNumber == lastRead ||
-                    ChapterIdentityNormalizer.key(for: $0.chapterNumber) == lastReadKey
-                }) {
-                    return ch
-                }
-            }
-            if let unread = chronologicalChapters(chapters).first(where: {
-                !readKeys.contains(ChapterIdentityNormalizer.key(for: $0.chapterNumber))
-            }) {
-                return unread
-            }
-            return chronologicalChapters(chapters).first
-        }()
+        let targetChapter = selectedChapterSnapshot?.readingTarget(lastRead: lastRead, readKeys: readKeys)
 
         if let target = targetChapter {
             Button {
@@ -1036,43 +1038,7 @@ struct contentView: View {
         }
     }
 
-    private func chronologicalChapters(_ chapters: [Chapter]) -> [Chapter] {
-        chapters.sorted { lhs, rhs in
-            let lhsNumber = numericChapterValue(lhs.chapterNumber)
-            let rhsNumber = numericChapterValue(rhs.chapterNumber)
-            switch (lhsNumber, rhsNumber) {
-            case let (lhsValue?, rhsValue?):
-                if lhsValue != rhsValue { return lhsValue < rhsValue }
-                return lhs.idx < rhs.idx
-            case (.some, .none):
-                return true
-            case (.none, .some):
-                return false
-            case (.none, .none):
-                return lhs.idx > rhs.idx
-            }
-        }
-    }
 
-    private func numericChapterValue(_ text: String) -> Double? {
-        let pattern = #"(\d+(?:\.\d+)?)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let range = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: range)
-        guard let match = matches.last,
-              let valueRange = Range(match.range(at: 1), in: text) else { return nil }
-        return Double(text[valueRange])
-    }
-
-    private func readerChapters(from chapters: [Chapter]) -> [Chapter] {
-        ChapterIdentityNormalizer.deduplicatedChapters(chronologicalChapters(chapters), reindex: false).enumerated().map { index, chapter in
-            Chapter(
-                chapterNumber: chapter.chapterNumber,
-                idx: index,
-                chapterData: chapter.chapterData
-            )
-        }
-    }
 }
 
 struct MangaModuleContentLoaderView: View {

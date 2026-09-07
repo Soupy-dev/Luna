@@ -1405,6 +1405,165 @@ enum DownloadMetadataPersistencePolicy {
     }
 }
 
+#if os(iOS)
+struct EpisodeDownloadLookupSnapshot {
+    private struct Coordinate: Hashable {
+        let show: Int
+        let season: Int
+        let episode: Int
+    }
+
+    private struct ProviderEpisode: Hashable {
+        enum Kind: Hashable {
+            case raw
+            case canonical
+            case mal
+            case kitsu
+            case legacy
+        }
+        let show: Int
+        let kind: Kind
+        let provider: Int
+        let episode: Int
+    }
+
+    let revision: UInt64
+    private let items: [DownloadItem]
+    private let providerAliasesByTMDBID: [Int: [Int: Int]]
+    private var itemsByID: [String: [Int]] = [:]
+    private var coordinateOffsets: [Coordinate: [Int]] = [:]
+    private var providerEpisodeOffsets: [ProviderEpisode: [Int]] = [:]
+
+    init(items: [DownloadItem], providerAliasesByTMDBID: [Int: [Int: Int]], revision: UInt64) {
+        self.items = items
+        self.providerAliasesByTMDBID = providerAliasesByTMDBID
+        self.revision = revision
+        for (offset, item) in items.enumerated() {
+            itemsByID[item.id, default: []].append(offset)
+            guard !item.isMovie else { continue }
+            if let context = item.episodePlaybackContext {
+                for key in Self.providerKeys(context: context, show: item.tmdbId, aliases: providerAliasesByTMDBID[item.tmdbId] ?? [:]) {
+                    providerEpisodeOffsets[key, default: []].append(offset)
+                }
+                if let season = context.resolvedTMDBSeasonNumber, let episode = context.resolvedTMDBEpisodeNumber {
+                    coordinateOffsets[Coordinate(show: item.tmdbId, season: season, episode: episode), default: []].append(offset)
+                }
+            } else if let episode = item.episodeNumber, let season = item.seasonNumber,
+                      let provider = AnimeSyntheticSeasonKey.providerID(from: season) {
+                let canonical = providerAliasesByTMDBID[item.tmdbId]?[provider] ?? provider
+                let key = ProviderEpisode(show: item.tmdbId, kind: .legacy, provider: canonical, episode: episode)
+                providerEpisodeOffsets[key, default: []].append(offset)
+            }
+        }
+    }
+
+    private static func providerKeys(context: EpisodePlaybackContext, show: Int, aliases: [Int: Int]) -> [ProviderEpisode] {
+        var keys: [ProviderEpisode] = []
+        func append(_ kind: ProviderEpisode.Kind, _ provider: Int?) {
+            if let provider {
+                keys.append(ProviderEpisode(show: show, kind: kind, provider: provider, episode: context.localEpisodeNumber))
+            }
+        }
+        append(.raw, context.anilistMediaId)
+        append(.canonical, context.canonicalAniListMediaId ?? context.anilistMediaId.map { aliases[$0] ?? $0 })
+        append(.mal, context.exactMALMediaId)
+        append(.kitsu, context.kitsuMediaId)
+        append(.legacy, context.anilistMediaId.map { aliases[$0] ?? $0 })
+        return keys
+    }
+
+    func matchingEpisodeDownloadItem(
+        tmdbId: Int,
+        seasonNumber: Int,
+        episodeNumber: Int,
+        playbackContext: EpisodePlaybackContext?,
+        accepting: (DownloadItem) -> Bool
+    ) -> DownloadItem? {
+        func canonicalProviderID(_ rawID: Int) -> Int {
+            providerAliasesByTMDBID[tmdbId]?[rawID] ?? rawID
+        }
+        let requestedHasProviderIdentity = playbackContext?.anilistMediaId != nil
+            || playbackContext?.kitsuMediaId != nil
+        let exactID = DownloadManager.downloadID(
+            tmdbId: tmdbId,
+            isMovie: false,
+            seasonNumber: seasonNumber,
+            episodeNumber: episodeNumber
+        )
+        let exactCoordinateItem = (itemsByID[exactID] ?? []).lazy.map { items[$0] }.first(where: accepting)
+
+        func matchesExactTMDBIdentity(_ candidate: DownloadItem) -> Bool? {
+            guard let candidateContext = candidate.episodePlaybackContext,
+                  let candidateSeason = candidateContext.resolvedTMDBSeasonNumber,
+                  let candidateEpisode = candidateContext.resolvedTMDBEpisodeNumber else {
+                return nil
+            }
+            let requestedSeason = playbackContext?.resolvedTMDBSeasonNumber ?? seasonNumber
+            let requestedEpisode = playbackContext?.resolvedTMDBEpisodeNumber ?? episodeNumber
+            return candidateSeason == requestedSeason && candidateEpisode == requestedEpisode
+        }
+
+        func matchesProviderIdentity(_ candidate: DownloadItem) -> Bool {
+            guard let playbackContext else { return false }
+
+            if let candidateContext = candidate.episodePlaybackContext {
+                return AnimeEpisodeIdentityPolicy.isSameEpisode(
+                    playbackContext,
+                    candidateContext,
+                    providerAliases: providerAliasesByTMDBID[tmdbId] ?? [:]
+                )
+            }
+
+            if let requestedAniListID = playbackContext.anilistMediaId,
+               let candidateSeason = candidate.seasonNumber,
+               let candidateProviderID = AnimeSyntheticSeasonKey.providerID(from: candidateSeason),
+               canonicalProviderID(candidateProviderID) == canonicalProviderID(requestedAniListID) {
+                return candidate.episodeNumber == playbackContext.localEpisodeNumber
+            }
+            return false
+        }
+
+        if let exactCoordinateItem {
+            if requestedHasProviderIdentity {
+                if matchesProviderIdentity(exactCoordinateItem) {
+                    return exactCoordinateItem
+                }
+
+                if exactCoordinateItem.episodePlaybackContext == nil {
+                    return exactCoordinateItem
+                }
+            } else if matchesExactTMDBIdentity(exactCoordinateItem) != false {
+
+                return exactCoordinateItem
+            }
+        }
+
+        let requestedTMDBSeason = playbackContext?.resolvedTMDBSeasonNumber ?? seasonNumber
+        let requestedTMDBEpisode = playbackContext?.resolvedTMDBEpisodeNumber ?? episodeNumber
+
+        let coordinate = Coordinate(show: tmdbId, season: requestedTMDBSeason, episode: requestedTMDBEpisode)
+        var offsets = coordinateOffsets[coordinate] ?? []
+        if requestedHasProviderIdentity, let playbackContext {
+            for key in Self.providerKeys(context: playbackContext, show: tmdbId, aliases: providerAliasesByTMDBID[tmdbId] ?? [:]) {
+                offsets.append(contentsOf: providerEpisodeOffsets[key] ?? [])
+            }
+            offsets = Array(Set(offsets)).sorted()
+        }
+        return offsets.lazy.map { items[$0] }.first { candidate in
+            guard !candidate.isMovie, candidate.tmdbId == tmdbId else { return false }
+            let matches: Bool
+            if requestedHasProviderIdentity {
+                matches = matchesProviderIdentity(candidate)
+            } else {
+                matches = candidate.episodePlaybackContext?.resolvedTMDBSeasonNumber == requestedTMDBSeason
+                    && candidate.episodePlaybackContext?.resolvedTMDBEpisodeNumber == requestedTMDBEpisode
+            }
+            return matches && accepting(candidate)
+        }
+    }
+}
+#endif
+
 final class DownloadManager: NSObject, ObservableObject {
     static let shared = DownloadManager()
     private static let animeProviderAliasesKey = "downloadAnimeProviderAliasesV1"
@@ -1452,7 +1611,20 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
-    @Published private(set) var downloads: [DownloadItem] = []
+    @Published private(set) var downloads: [DownloadItem] = [] {
+        didSet { invalidateEpisodeLookup() }
+    }
+#if os(iOS)
+    private var episodeLookupRevision: UInt64 = 0
+    private var episodeLookupCache: EpisodeDownloadLookupSnapshot?
+#endif
+
+    private func invalidateEpisodeLookup() {
+#if os(iOS)
+        episodeLookupRevision &+= 1
+        episodeLookupCache = nil
+#endif
+    }
 
     private var backgroundSession: URLSession!
     private var activeTasks: [String: URLSessionDownloadTask] = [:]
@@ -1506,7 +1678,9 @@ final class DownloadManager: NSObject, ObservableObject {
     private var cloudflareRecoveringDownloadIDs = Set<String>()
     private var mediaSourceRecoveryAttempts: [String: (count: Int, lastAttempt: Date)] = [:]
 
-    private var animeProviderAliasesByTMDBID: [Int: [Int: Int]] = [:]
+    private var animeProviderAliasesByTMDBID: [Int: [Int: Int]] = [:] {
+        didSet { invalidateEpisodeLookup() }
+    }
     private var scheduledQueueWakeWorkItem: DispatchWorkItem?
     #if canImport(UIKit)
     private var lifecycleObservers: [NSObjectProtocol] = []
@@ -2293,7 +2467,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 #endif
 
-    private static func downloadID(
+    static func downloadID(
         tmdbId: Int,
         isMovie: Bool,
         seasonNumber: Int?,
@@ -2990,6 +3164,21 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
+    func episodeLookupSnapshot() -> EpisodeDownloadLookupSnapshot {
+        if let episodeLookupCache { return episodeLookupCache }
+        let snapshot = EpisodeDownloadLookupSnapshot(
+            items: downloads,
+            providerAliasesByTMDBID: animeProviderAliasesByTMDBID,
+            revision: episodeLookupRevision
+        )
+        episodeLookupCache = snapshot
+        return snapshot
+    }
+
+    func episodeLookupIsCurrent(_ snapshot: EpisodeDownloadLookupSnapshot) -> Bool {
+        snapshot.revision == episodeLookupRevision
+    }
+
     private func matchingEpisodeDownloadItem(
         tmdbId: Int,
         seasonNumber: Int,
@@ -2997,88 +3186,13 @@ final class DownloadManager: NSObject, ObservableObject {
         playbackContext: EpisodePlaybackContext?,
         accepting: (DownloadItem) -> Bool
     ) -> DownloadItem? {
-        func canonicalProviderID(_ rawID: Int) -> Int {
-            animeProviderAliasesByTMDBID[tmdbId]?[rawID] ?? rawID
-        }
-        let requestedHasProviderIdentity = playbackContext?.anilistMediaId != nil
-            || playbackContext?.kitsuMediaId != nil
-        let exactID = Self.downloadID(
+        episodeLookupSnapshot().matchingEpisodeDownloadItem(
             tmdbId: tmdbId,
-            isMovie: false,
             seasonNumber: seasonNumber,
-            episodeNumber: episodeNumber
+            episodeNumber: episodeNumber,
+            playbackContext: playbackContext,
+            accepting: accepting
         )
-        let exactCoordinateItem = downloads.first {
-            $0.id == exactID && accepting($0)
-        }
-
-        func matchesExactTMDBIdentity(_ candidate: DownloadItem) -> Bool? {
-            guard let candidateContext = candidate.episodePlaybackContext,
-                  let candidateSeason = candidateContext.resolvedTMDBSeasonNumber,
-                  let candidateEpisode = candidateContext.resolvedTMDBEpisodeNumber else {
-                return nil
-            }
-            let requestedSeason = playbackContext?.resolvedTMDBSeasonNumber ?? seasonNumber
-            let requestedEpisode = playbackContext?.resolvedTMDBEpisodeNumber ?? episodeNumber
-            return candidateSeason == requestedSeason && candidateEpisode == requestedEpisode
-        }
-
-        func matchesProviderIdentity(_ candidate: DownloadItem) -> Bool {
-            guard let playbackContext else { return false }
-
-            if let candidateContext = candidate.episodePlaybackContext {
-                return AnimeEpisodeIdentityPolicy.isSameEpisode(
-                    playbackContext,
-                    candidateContext,
-                    providerAliases: animeProviderAliasesByTMDBID[tmdbId] ?? [:]
-                )
-            }
-
-            if let requestedAniListID = playbackContext.anilistMediaId,
-               let candidateSeason = candidate.seasonNumber,
-               let candidateProviderID = AnimeSyntheticSeasonKey.providerID(from: candidateSeason),
-               canonicalProviderID(candidateProviderID) == canonicalProviderID(requestedAniListID) {
-                return candidate.episodeNumber == playbackContext.localEpisodeNumber
-            }
-            return false
-        }
-
-        if let exactCoordinateItem {
-            if requestedHasProviderIdentity {
-                if matchesProviderIdentity(exactCoordinateItem) {
-                    return exactCoordinateItem
-                }
-
-                if exactCoordinateItem.episodePlaybackContext == nil {
-                    return exactCoordinateItem
-                }
-            } else if matchesExactTMDBIdentity(exactCoordinateItem) != false {
-
-                return exactCoordinateItem
-            }
-        }
-
-        let requestedTMDBSeason = playbackContext?.resolvedTMDBSeasonNumber ?? seasonNumber
-        let requestedTMDBEpisode = playbackContext?.resolvedTMDBEpisodeNumber ?? episodeNumber
-
-        return downloads.first { candidate in
-            guard !candidate.isMovie,
-                  candidate.tmdbId == tmdbId,
-                  accepting(candidate) else {
-                return false
-            }
-
-            if requestedHasProviderIdentity {
-                return matchesProviderIdentity(candidate)
-            }
-
-            if let candidateContext = candidate.episodePlaybackContext,
-               candidateContext.resolvedTMDBSeasonNumber == requestedTMDBSeason,
-               candidateContext.resolvedTMDBEpisodeNumber == requestedTMDBEpisode {
-                return true
-            }
-            return false
-        }
     }
 #endif
 

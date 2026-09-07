@@ -5281,6 +5281,8 @@ final class MPVSampleBufferPiPBridge: PlayerRenderer {
     private var lastLoggedSampleBufferState = ""
     private var lastLoggedDiagnosticsFrameCount = 0
     private var lastLoggedDiagnosticsFailures = 0
+    private var lastSubtitleTrackSignature = ""
+    private var lastNotifiedSubtitleTrackID: Int?
 
     var isPausedState: Bool { isPaused }
     var currentTime: Double { sampleRenderer.currentTime }
@@ -5366,6 +5368,7 @@ final class MPVSampleBufferPiPBridge: PlayerRenderer {
                 guard self.callbackGeneration == callbackGeneration,
                       self.sampleBufferLoadGeneration == generation else { return }
                 self.logDiagnosticsIfNeeded(diagnostics)
+                self.notifySubtitleTrackChangesIfNeeded()
                 let liveDiagnostics = self.sampleRenderer.diagnosticsSnapshot()
                 self.completeFreshIPadStartupFenceIfNeeded(
                     reason: "first-frame",
@@ -5390,6 +5393,8 @@ final class MPVSampleBufferPiPBridge: PlayerRenderer {
         isLoading = false
         isAwaitingReadyForCurrentLoad = true
         sampleBufferLoadGeneration += 1
+        lastSubtitleTrackSignature = ""
+        lastNotifiedSubtitleTrackID = nil
         didLogFreshIPadStartupFence = false
         hasDeferredFreshIPadPlaybackState = false
         lastPositionUpdateAt = 0
@@ -5407,6 +5412,8 @@ final class MPVSampleBufferPiPBridge: PlayerRenderer {
         currentPreset = preset
         currentHeaders = headers
         sampleBufferLoadGeneration += 1
+        lastSubtitleTrackSignature = ""
+        lastNotifiedSubtitleTrackID = nil
         applyPreset(preset)
         isReadyToSeek = false
         isLoading = true
@@ -5547,6 +5554,24 @@ final class MPVSampleBufferPiPBridge: PlayerRenderer {
 
     func refreshSubtitleOverlay() {
         applySubtitleStyle(lastAppliedSubtitleStyle)
+    }
+
+    private func notifySubtitleTrackChangesIfNeeded() {
+        let tracks = sampleRenderer.subtitleTracks()
+        let selected = sampleRenderer.currentSubtitleTrackID()
+        let signature = "\(selected)|" + tracks.map {
+            "\($0.id):\($0.title):\($0.language):\($0.codec):\($0.selected)"
+        }.joined(separator: "|")
+        guard signature != lastSubtitleTrackSignature else { return }
+        lastSubtitleTrackSignature = signature
+        if selected != lastNotifiedSubtitleTrackID {
+            let previous = lastNotifiedSubtitleTrackID
+            lastNotifiedSubtitleTrackID = selected
+            if selected >= 0 || previous != nil {
+                delegate?.renderer(self, subtitleTrackDidChange: selected)
+            }
+        }
+        delegate?.rendererDidChangeTracks(self)
     }
 
     func loadExternalSubtitles(urls: [String], names: [String]?, enforce: Bool) {

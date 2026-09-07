@@ -13,6 +13,8 @@ class ModuleManager: ObservableObject {
     private let maximumModuleMetadataBytes = 1_000_000
     private let maximumModuleScriptBytes = 10_000_000
     private var metadataLoadFailed = false
+    private var replacementGeneration: UInt64 = 0
+    private var updateTask: Task<Void, Never>?
 
     var metadataStoreFailedToLoad: Bool { metadataLoadFailed }
 
@@ -92,7 +94,7 @@ class ModuleManager: ObservableObject {
         do {
             let data = try JSONEncoder().encode([ModuleDataContainer]())
             try data.write(to: url, options: [.atomic, .completeFileProtection])
-            modules = []
+            replaceModulesForRestore([])
             metadataLoadFailed = false
             return true
         } catch {
@@ -101,6 +103,32 @@ class ModuleManager: ObservableObject {
                 type: "Error"
             )
             return false
+        }
+    }
+
+    private func invalidatePendingUpdates() {
+        replacementGeneration &+= 1
+        updateTask?.cancel()
+        updateTask = nil
+    }
+
+    func replaceModulesForRestore(_ replacement: [ModuleDataContainer]) {
+        invalidatePendingUpdates()
+        modules = replacement
+    }
+
+    static func currentUpdateIndex(
+        for original: ModuleDataContainer,
+        in modules: [ModuleDataContainer],
+        expectedGeneration: UInt64,
+        currentGeneration: UInt64
+    ) -> Int? {
+        guard expectedGeneration == currentGeneration else { return nil }
+        return modules.firstIndex {
+            $0.id == original.id
+                && $0.localPath == original.localPath
+                && $0.moduleurl == original.moduleurl
+                && $0.moduleData.version == original.moduleData.version
         }
     }
     func addModules(_ moduleUrL:String, metaData: ModuleData) async throws -> Void
@@ -157,6 +185,7 @@ class ModuleManager: ObservableObject {
             )
             return
         }
+        invalidatePendingUpdates()
         modules = remainingModules
 
         if let fileUrl = validatedModuleScriptURL(for: module.localPath) {
@@ -339,10 +368,30 @@ class ModuleManager: ObservableObject {
         return ModuleManager.shared.modules.first { $0.id == moduleId }
     }
 
+    @MainActor
     func updateModules() async {
+        if let updateTask {
+            await updateTask.value
+            return
+        }
+        let generation = replacementGeneration
+        let originals = modules
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performModuleUpdates(originals, generation: generation)
+        }
+        updateTask = task
+        await task.value
+        if replacementGeneration == generation { updateTask = nil }
+    }
+
+    @MainActor
+    private func performModuleUpdates(_ originals: [ModuleDataContainer], generation: UInt64) async {
         ReaderLogger.shared.log("ModuleManager: Starting module auto-update for \(modules.count) modules", type: "Info")
-        for module in modules {
+        for module in originals {
             do {
+                try Task.checkCancellation()
+                guard generation == replacementGeneration else { return }
                 let metaData = try await validateModuleUrl(module.moduleurl)
 
                 if metaData.version == module.moduleData.version {
@@ -354,30 +403,46 @@ class ModuleManager: ObservableObject {
                 guard let localUrl = validatedModuleScriptURL(for: module.localPath) else {
                     throw ModuleLoadingError.missingScriptPath("Unsafe module script path")
                 }
-                try jsContent.write(to: localUrl, atomically: true, encoding: .utf8)
-
-                if let index = modules.firstIndex(where: { $0.id == module.id }) {
+                let stagedURL = localUrl.deletingLastPathComponent()
+                    .appendingPathComponent(".module-update-\(UUID().uuidString).tmp")
+                defer { try? fileManager.removeItem(at: stagedURL) }
+                try await Task.detached(priority: .utility) {
+                    try jsContent.write(to: stagedURL, atomically: true, encoding: .utf8)
+                }.value
+                try Task.checkCancellation()
+                if let index = Self.currentUpdateIndex(
+                    for: module,
+                    in: modules,
+                    expectedGeneration: generation,
+                    currentGeneration: replacementGeneration
+                ) {
+                    if fileManager.fileExists(atPath: localUrl.path) {
+                        _ = try fileManager.replaceItemAt(localUrl, withItemAt: stagedURL)
+                    } else {
+                        try fileManager.moveItem(at: stagedURL, to: localUrl)
+                    }
                     let updated = ModuleDataContainer(
                         id: module.id,
                         moduleData: metaData,
                         localPath: module.localPath,
                         moduleurl: module.moduleurl,
-                        isActive: module.isActive
+                        isActive: modules[index].isActive
                     )
-                    await MainActor.run {
-                        self.modules[index] = updated
-                    }
+                    modules[index] = updated
+                    ReaderLogger.shared.log("ModuleManager: Updated \(module.moduleData.sourceName) to v\(metaData.version)", type: "Info")
                 }
-                ReaderLogger.shared.log("ModuleManager: Updated \(module.moduleData.sourceName) to v\(metaData.version)", type: "Info")
             } catch {
+                guard !Task.isCancelled, generation == replacementGeneration else { return }
                 ReaderLogger.shared.log("ModuleManager: Failed to update \(module.moduleData.sourceName): \(error.localizedDescription)", type: "Error")
             }
         }
+        guard generation == replacementGeneration, !Task.isCancelled else { return }
         saveModules()
         lastAutoUpdateDate = Date()
         ReaderLogger.shared.log("ModuleManager: Auto-update complete", type: "Info")
     }
 
+    @MainActor
     func autoUpdateModulesIfNeeded() async {
         guard ModuleManager.isAutoUpdateEnabled, !modules.isEmpty else { return }
 

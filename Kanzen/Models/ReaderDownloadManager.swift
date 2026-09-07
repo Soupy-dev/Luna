@@ -160,6 +160,49 @@ private enum ReaderDownloadPersistenceError: LocalizedError {
     }
 }
 
+final class ReaderDownloadMutationQueue: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [(@MainActor () async -> Void)?] = []
+    private var nextIndex = 0
+    private var isDraining = false
+
+    func enqueue(_ operation: @escaping @MainActor () async -> Void) {
+        lock.lock()
+        pending.append(operation)
+        let needsDrain = !isDraining
+        isDraining = true
+        lock.unlock()
+        guard needsDrain else { return }
+        Task { @MainActor in
+            while let operation = takeNext() { await operation() }
+        }
+    }
+
+    private func takeNext() -> (@MainActor () async -> Void)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard nextIndex < pending.count else {
+            pending.removeAll(keepingCapacity: true)
+            nextIndex = 0
+            isDraining = false
+            return nil
+        }
+        let operation = pending[nextIndex]
+        pending[nextIndex] = nil
+        nextIndex += 1
+        return operation
+    }
+
+    @MainActor
+    func perform<Value>(_ operation: @escaping @MainActor () async -> Value) async -> Value {
+        await withCheckedContinuation { continuation in
+            enqueue {
+                continuation.resume(returning: await operation())
+            }
+        }
+    }
+}
+
 final class ReaderDownloadManager: ObservableObject {
     static let shared = ReaderDownloadManager()
 
@@ -175,11 +218,23 @@ final class ReaderDownloadManager: ObservableObject {
     private static let maximumReconnectDetailFetches = 64
     private static let maximumConcurrentReconnectDetailFetches = 4
 
-    @Published private(set) var downloads: [ReaderDownloadItem] = []
+    @Published private(set) var downloads: [ReaderDownloadItem] = [] {
+        didSet { markStorageSnapshotDirty() }
+    }
+    @Published private(set) var totalDownloadedBytes: Int64 = 0
+    private var storageSnapshotObservers = Set<UUID>()
+    private let storageSnapshotClock = MediaStateCaptureMutationClock()
+    private var storageSnapshotTask: Task<Void, Never>?
+    private var lastStorageSnapshotUptime: TimeInterval?
     @Published private(set) var enqueueErrorMessage: String?
 
     private let fileManager = FileManager.default
     private var storesAreSafe: Bool
+    private var storageRootOverride: URL?
+    private var writeOverride: (([ReaderDownloadItem], Data?) -> IndexWriteOutcome)?
+    private var automaticallyStartsDownloads = true
+    private var transferStartOverride: ((ReaderDownloadItem) -> Void)?
+    private var storageScanOverride: (@Sendable (URL) -> Int64)?
     private var persistedIndexAuthorityData: Data?
     private let indexPersistenceQueue = DispatchQueue(label: "app.eclipse.soupy.reader-download-index", qos: .utility)
     private let coalescedWriteLock = NSLock()
@@ -191,6 +246,42 @@ final class ReaderDownloadManager: ObservableObject {
     private var pausedIds = Set<String>()
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private let progressPublishInterval: TimeInterval = 0.5
+    private let mutationQueue = ReaderDownloadMutationQueue()
+    private let profileAuthorityLock = NSLock()
+    private var profileGeneration: UInt64 = 0
+
+    private struct ProfileRequestAuthority {
+        let owner: UUID
+        let generation: UInt64
+    }
+
+    private func profileRequestAuthority() -> ProfileRequestAuthority {
+        profileAuthorityLock.lock()
+        defer { profileAuthorityLock.unlock() }
+        return ProfileRequestAuthority(owner: ProfileManager.shared.activeProfileID, generation: profileGeneration)
+    }
+
+    private func profileRequestIsCurrent(_ authority: ProfileRequestAuthority) -> Bool {
+        profileAuthorityLock.lock()
+        defer { profileAuthorityLock.unlock() }
+        return authority.generation == profileGeneration && authority.owner == ProfileManager.shared.activeProfileID
+    }
+
+    func profileDidChange(to profileID: UUID) {
+        profileAuthorityLock.lock()
+        profileGeneration &+= 1
+        profileAuthorityLock.unlock()
+        pauseReaderExtensionDownloadsForProfileChange(activeProfileID: profileID)
+    }
+
+    private func scheduleMutation(_ operation: @escaping @MainActor () async -> Void) {
+        mutationQueue.enqueue(operation)
+    }
+
+    @MainActor
+    private func performMutation<Value>(_ operation: @escaping @MainActor () async -> Value) async -> Value {
+        await mutationQueue.perform(operation)
+    }
 
     private var maxConcurrentDownloads: Int {
         let raw = ProfileSettingsStore.active.integer(forKey: "readerDownloadsParallelLimit")
@@ -213,6 +304,7 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     var downloadsDirectory: URL {
+        if let storageRootOverride { return storageRootOverride }
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = appSupport.appendingPathComponent("KanzenDownloads", isDirectory: true)
         guard storesAreSafe else { return dir }
@@ -242,14 +334,63 @@ final class ReaderDownloadManager: ObservableObject {
         groupedTitles(from: downloads)
     }
 
-    var totalDownloadedBytes: Int64 {
+    @MainActor
+    func beginStorageSnapshotObservation(_ id: UUID) {
+        storageSnapshotObservers.insert(id)
+        markStorageSnapshotDirty()
+    }
+
+    @MainActor
+    func endStorageSnapshotObservation(_ id: UUID) {
+        storageSnapshotObservers.remove(id)
+    }
+
+    private func markStorageSnapshotDirty() {
+        storageSnapshotClock.advance()
         guard storesAreSafe else {
-            return downloads.reduce(into: Int64(0)) { total, item in
-                let (next, overflow) = total.addingReportingOverflow(max(0, item.downloadedBytes))
-                total = overflow ? Int64.max : next
+            totalDownloadedBytes = Self.recordedDownloadBytes(downloads)
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.scheduleStorageSnapshot()
+        }
+    }
+
+    static func recordedDownloadBytes(_ items: [ReaderDownloadItem]) -> Int64 {
+        items.reduce(into: Int64(0)) { total, item in
+            let (next, overflow) = total.addingReportingOverflow(max(0, item.downloadedBytes))
+            total = overflow ? Int64.max : next
+        }
+    }
+
+    @MainActor
+    private func scheduleStorageSnapshot() {
+        guard !storageSnapshotObservers.isEmpty, storageSnapshotTask == nil else { return }
+        storageSnapshotTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let elapsed = self.lastStorageSnapshotUptime.map { ProcessInfo.processInfo.systemUptime - $0 } ?? 0.5
+            let delay = min(0.5, max(0, 0.5 - elapsed))
+            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            guard !self.storageSnapshotObservers.isEmpty else {
+                self.storageSnapshotTask = nil
+                return
+            }
+            let generation = self.storageSnapshotClock.revision
+            let directory = self.downloadsDirectory
+            let scanner = self.storageScanOverride
+            let bytes = await Task.detached(priority: .utility) {
+                scanner?(directory) ?? Self.directorySize(directory)
+            }.value
+            self.storageSnapshotTask = nil
+            self.lastStorageSnapshotUptime = ProcessInfo.processInfo.systemUptime
+            guard !self.storageSnapshotObservers.isEmpty else { return }
+            if generation == self.storageSnapshotClock.revision, self.storesAreSafe {
+                self.totalDownloadedBytes = bytes
+            } else if self.storesAreSafe {
+                self.scheduleStorageSnapshot()
             }
         }
-        return directorySize(downloadsDirectory)
     }
 
     private init() {
@@ -295,7 +436,28 @@ final class ReaderDownloadManager: ObservableObject {
         }
     }
 
-    @discardableResult
+    init(
+        downloadsRoot: URL,
+        initialDownloads: [ReaderDownloadItem] = [],
+        automaticallyStartsDownloads: Bool = false,
+        write: (([ReaderDownloadItem], Data?) -> IndexWriteOutcome)? = nil,
+        transferStarted: ((ReaderDownloadItem) -> Void)? = nil,
+        storageScan: (@Sendable (URL) -> Int64)? = nil
+    ) {
+        storesAreSafe = true
+        storageRootOverride = downloadsRoot
+        writeOverride = write
+        self.automaticallyStartsDownloads = automaticallyStartsDownloads
+        transferStartOverride = transferStarted
+        storageScanOverride = storageScan
+        downloads = initialDownloads
+    }
+
+    @MainActor
+    func waitForPendingMutations() async {
+        await mutationQueue.perform {}
+    }
+
     func enqueueChapter(
         route: MangaContentRoute,
         mangaId: Int,
@@ -306,77 +468,10 @@ final class ReaderDownloadManager: ObservableObject {
         chapter: Chapter,
         contentRating: Int? = nil,
         kanzen: KanzenEngine? = nil
-    ) -> Bool {
-        guard storesAreSafe else { return false }
-        guard let provider = provider(for: route, chapter: chapter) else {
-            upsertFailedPlaceholder(
-                route: route,
-                mangaId: mangaId,
-                title: title,
-                coverURL: coverURL,
-                sourceName: sourceName,
-                format: format,
-                chapter: chapter,
-                contentRating: contentRating,
-                message: "This chapter cannot be downloaded because the source did not provide persistable chapter data."
-            )
-            return false
-        }
-
-        let id = Self.downloadId(route: route, chapterNumber: chapter.chapterNumber)
-        if let existing = downloads.first(where: { $0.id == id }),
-           existing.status == .completed || existing.status == .queued || existing.status == .downloading {
-            ReaderLogger.shared.log("Reader download already tracked id=\(id) status=\(existing.status.rawValue)", type: "ReaderDownload")
-            return true
-        }
-
-        let item = ReaderDownloadItem(
-            id: id,
-            route: route,
-            routeKey: route.stableKey,
-            mangaId: mangaId,
-            mangaTitle: title,
-            coverURL: coverURL,
-            sourceName: sourceName,
-            format: format,
-            chapterNumber: chapter.chapterNumber,
-            chapterTitle: chapter.chapterData?.first?.title,
-            chapterKey: ChapterIdentityNormalizer.key(for: chapter.chapterNumber),
-            contentRating: contentRating,
-            provider: provider,
-            status: .queued,
-            progress: 0,
-            completedPages: 0,
-            totalPages: 0,
-            downloadedBytes: 0,
-            error: nil,
-            dateAdded: Date(),
-            dateCompleted: nil
-        )
-
-        var candidate = downloads
-        if let index = candidate.firstIndex(where: { $0.id == id }) {
-            candidate[index] = item
-        } else {
-            guard Self.downloadIndexCanAcceptNewItem(currentItemCount: candidate.count) else {
-                publishEnqueueError(
-                    "Reader Downloads can store up to \(Self.maximumReadOnlyItems.formatted()) chapters. Remove an existing download before adding another."
-                )
-                return false
-            }
-            candidate.append(item)
-        }
-        guard Self.persistedItemsAreWithinLimits(candidate) else {
-            publishEnqueueError(
-                "This chapter could not be queued because the Reader download index reached its safe storage limit. Remove an existing download and try again."
-            )
-            return false
-        }
-        guard commitDownloads(candidate) else { return false }
-        queuedContexts[id] = ReaderDownloadContext(chapter: chapter, kanzen: kanzen)
-        ReaderLogger.shared.log("Queued reader download id=\(id)", type: "ReaderDownload")
-        processQueue()
-        return true
+    ) {
+        enqueueChapters(route: route, mangaId: mangaId, title: title, coverURL: coverURL,
+                        sourceName: sourceName, format: format, chapters: [chapter],
+                        contentRating: contentRating, kanzen: kanzen)
     }
 
     func enqueueChapters(
@@ -390,24 +485,128 @@ final class ReaderDownloadManager: ObservableObject {
         contentRating: Int? = nil,
         kanzen: KanzenEngine? = nil
     ) {
-        guard storesAreSafe else { return }
-        let unique = ChapterIdentityNormalizer.deduplicatedChapters(chapters, reindex: false)
-        for chapter in unique {
-            guard enqueueChapter(
-                route: route,
-                mangaId: mangaId,
-                title: title,
-                coverURL: coverURL,
-                sourceName: sourceName,
-                format: format,
-                chapter: chapter,
-                contentRating: contentRating,
-                kanzen: kanzen
-            ) else {
-                if enqueueErrorMessage != nil { break }
-                continue
+        let owner = ProfileManager.shared.activeProfileID
+        scheduleMutation { [self] in
+            guard storesAreSafe else { return }
+            var proposals: [ReaderDownloadItem] = []
+            var contexts: [String: ReaderDownloadContext] = [:]
+            var seen = Set<String>()
+            for (offset, chapter) in chapters.enumerated() {
+                if offset.isMultiple(of: 64) { await Task.yield() }
+                guard seen.insert(ChapterIdentityNormalizer.key(for: chapter.chapterNumber)).inserted else { continue }
+                var item: ReaderDownloadItem
+                if var provider = provider(for: route, chapter: chapter) {
+                    if provider.kind == .readerExtension { provider.authenticationProfileID = owner }
+                    item = ReaderDownloadItem(
+                        id: Self.downloadId(route: route, chapterNumber: chapter.chapterNumber),
+                        route: route, routeKey: route.stableKey, mangaId: mangaId, mangaTitle: title,
+                        coverURL: coverURL, sourceName: sourceName, format: format,
+                        chapterNumber: chapter.chapterNumber, chapterTitle: chapter.chapterData?.first?.title,
+                        chapterKey: ChapterIdentityNormalizer.key(for: chapter.chapterNumber),
+                        contentRating: contentRating, provider: provider, status: .queued,
+                        progress: 0, completedPages: 0, totalPages: 0, downloadedBytes: 0,
+                        error: nil, dateAdded: Date(), dateCompleted: nil
+                    )
+                    contexts[item.id] = ReaderDownloadContext(chapter: chapter, kanzen: kanzen)
+                } else {
+                    item = failedPlaceholder(route: route, mangaId: mangaId, title: title,
+                                             coverURL: coverURL, sourceName: sourceName, format: format,
+                                             chapter: chapter, contentRating: contentRating,
+                                             message: "This chapter cannot be downloaded because the source did not provide persistable chapter data.")
+                    if item.provider.kind == .readerExtension { item.provider.authenticationProfileID = owner }
+                }
+                proposals.append(item)
+            }
+            let current = downloads
+            let capturedProposals = proposals
+            do {
+                let plan = try await Task.detached(priority: .utility) {
+                    try Self.prepareEnqueue(current: current, proposals: capturedProposals)
+                }.value
+                if let data = plan.data {
+                    guard await commitDownloads(plan.items, preparedData: data) else { return }
+                    for id in plan.queuedIDs { queuedContexts[id] = contexts[id] }
+                }
+                if let error = plan.errorMessage { publishEnqueueError(error) }
+                processQueue()
+            } catch {
+                publishEnqueueError("Reader Downloads could not save this change. Try again after freeing device storage.")
             }
         }
+    }
+
+    struct EnqueuePlan {
+        let items: [ReaderDownloadItem]
+        let queuedIDs: Set<String>
+        let data: Data?
+        let errorMessage: String?
+    }
+
+    static func prepareEnqueue(current: [ReaderDownloadItem], proposals: [ReaderDownloadItem]) throws -> EnqueuePlan {
+        var items = current
+        var indices = Dictionary(items.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
+        var sizes: [String: (bytes: Int, tokens: Int)] = [:]
+        var bytes = 2 + max(0, items.count - 1)
+        var tokens = 1
+        for item in items {
+            let data = try JSONEncoder.readerDownloadEncoder.encode(item)
+            let count = try encodedIndexTokenCount(data)
+            sizes[item.id] = (data.count, count)
+            bytes += data.count
+            tokens += count
+        }
+        var queuedIDs = Set<String>()
+        var changed = false
+        var errorMessage: String?
+        for item in proposals {
+            if item.status == .queued, let index = indices[item.id],
+               [.completed, .queued, .downloading].contains(items[index].status) { continue }
+            let existing = indices[item.id]
+            if existing == nil, !downloadIndexCanAcceptNewItem(currentItemCount: items.count) {
+                errorMessage = "Reader Downloads can store up to \(maximumReadOnlyItems.formatted()) chapters. Remove an existing download before adding another."
+                break
+            }
+            let limitMessage = item.status == .failed
+                ? "This failed download could not be recorded because the Reader download index reached its safe storage limit."
+                : "This chapter could not be queued because the Reader download index reached its safe storage limit. Remove an existing download and try again."
+            guard let data = try? JSONEncoder.readerDownloadEncoder.encode(item),
+                  let tokenCount = try? encodedIndexTokenCount(data) else {
+                errorMessage = limitMessage
+                break
+            }
+            var single = Data([0x5b])
+            single.append(data)
+            single.append(0x5d)
+            let previous = sizes[item.id] ?? (0, 0)
+            let nextBytes = bytes - previous.0 + data.count + (existing == nil && !items.isEmpty ? 1 : 0)
+            let nextTokens = tokens - previous.1 + tokenCount
+            guard nextBytes <= maximumReadOnlyIndexBytes, nextTokens <= 1_000_000,
+                  persistedIndexSchemaIsValid(single) else {
+                errorMessage = limitMessage
+                break
+            }
+            if let existing { items[existing] = item }
+            else { indices[item.id] = items.count; items.append(item) }
+            sizes[item.id] = (data.count, tokenCount)
+            bytes = nextBytes
+            tokens = nextTokens
+            changed = true
+            if item.status == .queued { queuedIDs.insert(item.id) }
+        }
+        let data = changed ? try JSONEncoder.readerDownloadEncoder.encode(items) : nil
+        if let data, !persistedIndexSchemaIsValid(data) { throw ReaderDownloadPersistenceError.invalidIndex }
+        return EnqueuePlan(items: items, queuedIDs: queuedIDs, data: data, errorMessage: errorMessage)
+    }
+
+    private static func encodedIndexTokenCount(_ data: Data) throws -> Int {
+        func count(_ value: Any) -> Int {
+            if let object = value as? [String: Any] {
+                return 1 + object.count + object.values.reduce(0) { $0 + count($1) }
+            }
+            if let array = value as? [Any] { return 1 + array.reduce(0) { $0 + count($1) } }
+            return 1
+        }
+        return count(try JSONSerialization.jsonObject(with: data))
     }
 
     func clearEnqueueError() {
@@ -415,21 +614,39 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     func pauseDownload(id: String) {
+        scheduleMutation { [self] in
+            await pauseDownloadNow(id: id)
+        }
+    }
+
+    @MainActor
+    private func pauseDownloadNow(id: String) async {
         guard storesAreSafe else { return }
         pausedIds.insert(id)
         activeTasks[id]?.cancel()
-        updateItem(id) {
+        await updateItem(id) {
             $0.status = .paused
             $0.error = "Paused"
         }
     }
 
     func resumeDownload(id: String) {
-        guard storesAreSafe else { return }
+        scheduleResumeDownload(id: id, authority: profileRequestAuthority())
+    }
+
+    private func scheduleResumeDownload(id: String, authority: ProfileRequestAuthority) {
+        scheduleMutation { [self] in
+            await resumeDownloadNow(id: id, authority: authority)
+        }
+    }
+
+    @MainActor
+    private func resumeDownloadNow(id: String, authority: ProfileRequestAuthority) async {
+        guard storesAreSafe, profileRequestIsCurrent(authority) else { return }
         pausedIds.remove(id)
-        guard updateItem(id, mutate: {
+        guard await updateItem(id, mutate: {
             if $0.provider.kind == .readerExtension {
-                $0.provider.authenticationProfileID = ProfileManager.shared.activeProfileID
+                $0.provider.authenticationProfileID = authority.owner
             }
             if Self.needsReconnectHydration($0) {
                 $0.status = .failed
@@ -445,23 +662,38 @@ final class ReaderDownloadManager: ObservableObject {
                 await self.hydrateReconnectedDownloads(onlyIDs: [id])
                 guard self.downloads.first(where: { $0.id == id })?
                     .provider.chapterParams != nil else { return }
-                self.resumeDownload(id: id)
+                self.scheduleResumeDownload(id: id, authority: authority)
             }
+            return
+        }
+        guard profileRequestIsCurrent(authority) else {
+            await pauseAfterStaleProfileRequest(id: id)
             return
         }
         processQueue()
     }
 
     func retryDownload(id: String) {
-        guard storesAreSafe else { return }
-        guard updateItem(id, mutate: {
+        scheduleRetryDownload(id: id, authority: profileRequestAuthority())
+    }
+
+    private func scheduleRetryDownload(id: String, authority: ProfileRequestAuthority) {
+        scheduleMutation { [self] in
+            await retryDownloadNow(id: id, authority: authority)
+        }
+    }
+
+    @MainActor
+    private func retryDownloadNow(id: String, authority: ProfileRequestAuthority) async {
+        guard storesAreSafe, profileRequestIsCurrent(authority) else { return }
+        guard await updateItem(id, mutate: {
             if $0.provider.kind == .readerExtension {
-                $0.provider.authenticationProfileID = ProfileManager.shared.activeProfileID
+                $0.provider.authenticationProfileID = authority.owner
             }
         }) else { return }
         if let item = downloads.first(where: { $0.id == id }),
            Self.needsReconnectHydration(item) {
-            guard updateItem(id, mutate: {
+            guard await updateItem(id, mutate: {
                 $0.status = .failed
                 $0.error = "Verifying the replacement chapter before retrying…"
             }) else { return }
@@ -470,19 +702,34 @@ final class ReaderDownloadManager: ObservableObject {
                 await self.hydrateReconnectedDownloads(onlyIDs: [id])
                 guard self.downloads.first(where: { $0.id == id })?
                     .provider.chapterParams != nil else { return }
-                self.retryDownload(id: id)
+                self.scheduleRetryDownload(id: id, authority: authority)
             }
             return
         }
         pausedIds.remove(id)
-        guard updateItem(id, mutate: {
+        guard await updateItem(id, mutate: {
             $0.status = .queued
             $0.progress = 0
             $0.completedPages = 0
             $0.totalPages = 0
             $0.error = nil
         }) else { return }
+        guard profileRequestIsCurrent(authority) else {
+            await pauseAfterStaleProfileRequest(id: id)
+            return
+        }
         processQueue()
+    }
+
+    @MainActor
+    private func pauseAfterStaleProfileRequest(id: String) async {
+        guard downloads.first(where: { $0.id == id })?.provider.kind == .readerExtension else { return }
+        pausedIds.insert(id)
+        activeTasks[id]?.cancel()
+        await updateItem(id) {
+            $0.status = .paused
+            $0.error = "Paused after a profile change. Resume to use the active profile's authentication."
+        }
     }
 
     func applyQueueSettingsChanged() {
@@ -491,10 +738,17 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     func cancelDownload(id: String) {
+        scheduleMutation { [self] in
+            await cancelDownloadNow(id: id)
+        }
+    }
+
+    @MainActor
+    private func cancelDownloadNow(id: String) async {
         guard storesAreSafe else { return }
         let removedItem = downloads.first(where: { $0.id == id })
         let candidate = downloads.filter { $0.id != id }
-        guard commitDownloads(candidate) else { return }
+        guard await commitDownloads(candidate) else { return }
         pausedIds.remove(id)
         activeTasks[id]?.cancel()
         queuedContexts.removeValue(forKey: id)
@@ -505,10 +759,17 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     func removeDownload(id: String, deleteFiles: Bool = true) {
+        scheduleMutation { [self] in
+            await removeDownloadNow(id: id, deleteFiles: deleteFiles)
+        }
+    }
+
+    @MainActor
+    private func removeDownloadNow(id: String, deleteFiles: Bool = true) async {
         guard storesAreSafe else { return }
         let removedItem = downloads.first(where: { $0.id == id })
         let candidate = downloads.filter { $0.id != id }
-        guard commitDownloads(candidate) else { return }
+        guard await commitDownloads(candidate) else { return }
         activeTasks[id]?.cancel()
         queuedContexts.removeValue(forKey: id)
         if deleteFiles, let item = removedItem {
@@ -517,11 +778,18 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     func deleteTitle(route: MangaContentRoute) {
+        scheduleMutation { [self] in
+            await deleteTitleNow(route: route)
+        }
+    }
+
+    @MainActor
+    private func deleteTitleNow(route: MangaContentRoute) async {
         guard storesAreSafe else { return }
         let routeKey = route.stableKey
         let removedItems = downloads.filter { $0.routeKey == routeKey }
         let candidate = downloads.filter { $0.routeKey != routeKey }
-        guard commitDownloads(candidate) else { return }
+        guard await commitDownloads(candidate) else { return }
         for item in removedItems {
             activeTasks[item.id]?.cancel()
         }
@@ -532,8 +800,15 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     func deleteAll() {
+        scheduleMutation { [self] in
+            await deleteAllNow()
+        }
+    }
+
+    @MainActor
+    private func deleteAllNow() async {
         guard storesAreSafe else { return }
-        guard commitDownloads([]) else { return }
+        guard await commitDownloads([]) else { return }
         for task in activeTasks.values { task.cancel() }
         queuedContexts.removeAll()
         pausedIds.removeAll()
@@ -543,10 +818,17 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     func deleteFailed() {
+        scheduleMutation { [self] in
+            await deleteFailedNow()
+        }
+    }
+
+    @MainActor
+    private func deleteFailedNow() async {
         guard storesAreSafe else { return }
         let removedItems = failedDownloads
         let candidate = downloads.filter { $0.status != .failed }
-        guard commitDownloads(candidate) else { return }
+        guard await commitDownloads(candidate) else { return }
         for item in removedItems {
             try? fileManager.removeItem(at: chapterDirectory(for: item))
         }
@@ -647,7 +929,14 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     private func processQueue() {
-        guard storesAreSafe else { return }
+        scheduleMutation { [self] in
+            await processQueueNow()
+        }
+    }
+
+    @MainActor
+    private func processQueueNow() async {
+        guard storesAreSafe, automaticallyStartsDownloads else { return }
         let activeCount = downloads.filter { $0.status == .downloading }.count
         guard activeCount < maxConcurrentDownloads else { return }
 
@@ -664,26 +953,36 @@ final class ReaderDownloadManager: ObservableObject {
             .prefix(slots)
 
         for item in nextItems {
-            start(item)
+            await start(item)
         }
     }
 
-    private func start(_ item: ReaderDownloadItem) {
+    @MainActor
+    private func start(_ item: ReaderDownloadItem) async {
+        let authority = profileRequestAuthority()
         guard Self.authenticationScopeAllowsExecution(
             item.provider,
             activeProfileID: ProfileManager.shared.activeProfileID
         ) else {
-            updateItem(item.id) {
+            await updateItem(item.id) {
                 $0.status = .paused
                 $0.error = "Paused after a profile change. Resume to use the active profile's authentication."
             }
             return
         }
-        guard updateItem(item.id, mutate: {
+        guard await updateItem(item.id, mutate: {
             $0.status = .downloading
             $0.error = nil
         }) else { return }
 
+        if item.provider.kind == .readerExtension, !profileRequestIsCurrent(authority) {
+            await pauseAfterStaleProfileRequest(id: item.id)
+            return
+        }
+        if let transferStartOverride {
+            transferStartOverride(item)
+            return
+        }
         if backgroundDownloadsEnabled {
             beginBackgroundTaskIfNeeded()
         }
@@ -692,11 +991,11 @@ final class ReaderDownloadManager: ObservableObject {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.performDownload(itemId: item.id, context: context)
+                try await self.performDownload(item: item, context: context)
             } catch is CancellationError {
-                await MainActor.run {
+                await self.performMutation {
                     if self.pausedIds.contains(item.id) {
-                        self.updateItem(item.id) {
+                        await self.updateItem(item.id) {
                             $0.status = .paused
                             $0.error = "Paused"
                         }
@@ -710,8 +1009,12 @@ final class ReaderDownloadManager: ObservableObject {
                     self.endBackgroundTaskIfIdle()
                 }
             } catch {
-                await MainActor.run {
-                    self.failItem(item.id, message: error.localizedDescription)
+                let cancelled = Task.isCancelled
+                await self.performMutation {
+                    if !cancelled, !self.pausedIds.contains(item.id),
+                       self.downloads.first(where: { $0.id == item.id })?.status == .downloading {
+                        await self.failItem(item.id, message: error.localizedDescription)
+                    }
                     self.activeTasks.removeValue(forKey: item.id)
                     self.processQueue()
                     self.endBackgroundTaskIfIdle()
@@ -722,8 +1025,9 @@ final class ReaderDownloadManager: ObservableObject {
         activeTasks[item.id] = task
     }
 
-    private func performDownload(itemId: String, context: ReaderDownloadContext?) async throws {
-        guard var item = downloads.first(where: { $0.id == itemId }) else { return }
+    private func performDownload(item original: ReaderDownloadItem, context: ReaderDownloadContext?) async throws {
+        var item = original
+        let itemId = item.id
         try requireCurrentAuthenticationScope(item.provider)
         ReaderLogger.shared.log("Starting reader download id=\(itemId)", type: "ReaderDownload")
 
@@ -738,14 +1042,17 @@ final class ReaderDownloadManager: ObservableObject {
             )
         }
 
-        let didPersistPreparation = await MainActor.run {
-            self.updateItem(itemId) {
+        let preparation = await performMutation { () async -> Bool? in
+            guard self.downloads.contains(where: { $0.id == itemId && $0.status == .downloading }),
+                  !self.pausedIds.contains(itemId) else { return nil }
+            return await self.updateItem(itemId) {
                 $0.totalPages = pages.count
                 $0.completedPages = 0
                 $0.progress = 0
                 $0.downloadedBytes = 0
             }
         }
+        guard let didPersistPreparation = preparation else { throw CancellationError() }
         guard didPersistPreparation else {
             throw ReaderDownloadPersistenceError.verificationFailed
         }
@@ -788,7 +1095,9 @@ final class ReaderDownloadManager: ObservableObject {
             if isFirstPage || isLastPage || now.timeIntervalSince(lastProgressPublish) >= progressPublishInterval {
                 lastProgressPublish = now
                 let publishedDownloadedBytes = downloadedBytes
-                await MainActor.run {
+                await performMutation {
+                    guard self.downloads.contains(where: { $0.id == itemId && $0.status == .downloading }),
+                          !self.pausedIds.contains(itemId) else { return }
                     self.publishItemProgress(itemId) {
                         $0.completedPages = index + 1
                         $0.totalPages = pages.count
@@ -834,8 +1143,10 @@ final class ReaderDownloadManager: ObservableObject {
         )
         try Task.checkCancellation()
 
-        let didPersistCompletion = await MainActor.run {
-            self.updateItem(itemId) {
+        let completion = await performMutation { () async -> Bool? in
+            guard self.downloads.contains(where: { $0.id == itemId && $0.status == .downloading }),
+                  !self.pausedIds.contains(itemId) else { return nil }
+            return await self.updateItem(itemId) {
                 $0.status = .completed
                 $0.progress = 1
                 $0.completedPages = pages.count
@@ -845,6 +1156,7 @@ final class ReaderDownloadManager: ObservableObject {
                 $0.error = nil
             }
         }
+        guard let didPersistCompletion = completion else { throw CancellationError() }
         guard didPersistCompletion else {
             let shouldRetainCompletedFiles = await MainActor.run {
                 !self.storesAreSafe || self.downloads.contains(where: { $0.id == itemId })
@@ -852,12 +1164,13 @@ final class ReaderDownloadManager: ObservableObject {
             guard shouldRetainCompletedFiles else {
                 throw CancellationError()
             }
-            await MainActor.run {
-                self.enterReadOnlyRecovery(retaining: [item])
+            let completedItem = item
+            await performMutation {
+                self.enterReadOnlyRecovery(retaining: [completedItem])
             }
             return
         }
-        await MainActor.run {
+        await performMutation {
             self.queuedContexts.removeValue(forKey: itemId)
             self.activeTasks.removeValue(forKey: itemId)
             ReaderLogger.shared.log("Completed reader download id=\(itemId) pages=\(pages.count)", type: "ReaderDownload")
@@ -980,8 +1293,8 @@ final class ReaderDownloadManager: ObservableObject {
 
     private func applyDerivedRating(itemId: String, item: ReaderExtensionItem) async {
         let derived = ReaderContentFilter.shared.derivedReaderExtensionRating(for: item)
-        await MainActor.run {
-            self.updateItem(itemId) { item in
+        _ = await performMutation {
+            await self.updateItem(itemId) { item in
                 guard let existing = item.contentRating else {
                     item.contentRating = derived
                     return
@@ -1810,7 +2123,7 @@ final class ReaderDownloadManager: ObservableObject {
             recovered.append(completed)
         }
         guard !recovered.isEmpty else { return true }
-        if commitDownloads(
+        if commitInitialDownloads(
             candidate,
             failureMessage: "A completed Reader chapter was recovered, but its index could not be made writable. It remains available read-only."
         ) {
@@ -1854,9 +2167,9 @@ final class ReaderDownloadManager: ObservableObject {
         )
     }
 
-    private func persistCandidate(_ candidate: [ReaderDownloadItem]) throws -> Data {
+    private func persistCandidate(_ candidate: [ReaderDownloadItem], preparedData: Data? = nil) throws -> Data {
         guard storesAreSafe else { throw ReaderDownloadPersistenceError.unsafeState }
-        let data = try JSONEncoder.readerDownloadEncoder.encode(candidate)
+        let data = try preparedData ?? JSONEncoder.readerDownloadEncoder.encode(candidate)
         guard data.count <= Self.maximumReadOnlyIndexBytes,
               Self.persistedIndexSchemaIsValid(data) else {
             throw ReaderDownloadPersistenceError.invalidIndex
@@ -1948,14 +2261,14 @@ final class ReaderDownloadManager: ObservableObject {
         }
     }
 
-    private enum IndexWriteOutcome {
+    enum IndexWriteOutcome {
         case success
         case staleAuthority
         case writeFailed(storedStateChanged: Bool)
     }
 
     @discardableResult
-    private func commitDownloads(
+    private func commitInitialDownloads(
         _ candidate: [ReaderDownloadItem],
         failureMessage: String = "Reader Downloads could not save this change. Try again after freeing device storage."
     ) -> Bool {
@@ -1986,7 +2299,48 @@ final class ReaderDownloadManager: ObservableObject {
         }
     }
 
-    private func performIndexWrite(_ candidate: [ReaderDownloadItem]) -> IndexWriteOutcome {
+    @MainActor
+    @discardableResult
+    private func commitDownloads(
+        _ candidate: [ReaderDownloadItem],
+        preparedData: Data? = nil,
+        failureMessage: String = "Reader Downloads could not save this change. Try again after freeing device storage."
+    ) async -> Bool {
+        discardCoalescedIndexWrite()
+        let outcome = await withCheckedContinuation { continuation in
+            let write = DispatchWorkItem { [self] in
+                continuation.resume(returning: performIndexWrite(candidate, preparedData: preparedData))
+            }
+            indexPersistenceQueue.async(execute: write)
+        }
+        guard storesAreSafe else { return false }
+        switch outcome {
+        case .success:
+            downloads = candidate
+            return true
+        case .staleAuthority:
+            enterReadOnlyRecovery(retaining: [])
+            publishEnqueueError(failureMessage)
+            ReaderLogger.shared.log(
+                "Refused to overwrite a Reader download index that changed or became unreadable",
+                type: "ReaderDownloadStorage"
+            )
+            return false
+        case .writeFailed(let storedStateChanged):
+            if storedStateChanged {
+                enterReadOnlyRecovery(retaining: [])
+            }
+            publishEnqueueError(failureMessage)
+            ReaderLogger.shared.log(
+                "Failed to persist reader download index; mutation was not published",
+                type: "ReaderDownloadStorage"
+            )
+            return false
+        }
+    }
+
+    private func performIndexWrite(_ candidate: [ReaderDownloadItem], preparedData: Data? = nil) -> IndexWriteOutcome {
+        if let writeOverride { return writeOverride(candidate, preparedData) }
         let priorStoredState = Self.persistedIndexReadState(at: persistenceURL)
         guard Self.persistedIndexAuthorityIsCurrent(
             expected: persistedIndexAuthorityData,
@@ -1995,7 +2349,7 @@ final class ReaderDownloadManager: ObservableObject {
             return .staleAuthority
         }
         do {
-            let persisted = try persistCandidate(candidate)
+            let persisted = try persistCandidate(candidate, preparedData: preparedData)
             persistedIndexAuthorityData = persisted
             return .success
         } catch {
@@ -2092,7 +2446,7 @@ final class ReaderDownloadManager: ObservableObject {
             candidate[index].error = "Paused after app restart"
             changed = true
         }
-        if changed { _ = commitDownloads(candidate) }
+        if changed { _ = commitInitialDownloads(candidate) }
     }
 
     private func normalizeReaderExtensionAuthenticationScopes() {
@@ -2115,7 +2469,7 @@ final class ReaderDownloadManager: ObservableObject {
                 break
             }
         }
-        if changed { _ = commitDownloads(candidate) }
+        if changed { _ = commitInitialDownloads(candidate) }
     }
 
     static func authenticationScopeAllowsExecution(
@@ -2160,7 +2514,7 @@ final class ReaderDownloadManager: ObservableObject {
             candidate[index].error = "Previous Reader source unavailable. Reconnect the title to resume."
             changed = true
         }
-        if changed { _ = commitDownloads(candidate) }
+        if changed { _ = commitInitialDownloads(candidate) }
     }
 
     private var hasDownloadsNeedingReconnectHydration: Bool {
@@ -2366,32 +2720,35 @@ final class ReaderDownloadManager: ObservableObject {
             results.append(contentsOf: batchResults)
         }
 
-        var candidateDownloads = downloads
-        var changed = false
-        for result in results {
-            guard let itemIDs = itemIDsByKey[result.key] else { continue }
-            for id in itemIDs {
-                guard let index = candidateDownloads.firstIndex(where: { $0.id == id }),
-                      Self.needsReconnectHydration(candidateDownloads[index]) else { continue }
-                guard let chapters = result.chapters,
-                      let replacementKey = Self.verifiedReplacementChapterKey(
-                        for: candidateDownloads[index],
-                        candidates: chapters
-                      ) else {
-                    candidateDownloads[index].status = .failed
-                    candidateDownloads[index].error = "Source unavailable: the replacement chapter could not be verified."
-                    changed = true
-                    continue
-                }
+        let resolvedResults = results
+        await performMutation { [self] in
+            var candidateDownloads = downloads
+            var changed = false
+            for result in resolvedResults {
+                guard let itemIDs = itemIDsByKey[result.key] else { continue }
+                for id in itemIDs {
+                    guard let index = candidateDownloads.firstIndex(where: { $0.id == id }),
+                          Self.needsReconnectHydration(candidateDownloads[index]) else { continue }
+                    guard let chapters = result.chapters,
+                          let replacementKey = Self.verifiedReplacementChapterKey(
+                            for: candidateDownloads[index],
+                            candidates: chapters
+                          ) else {
+                        candidateDownloads[index].status = .failed
+                        candidateDownloads[index].error = "Source unavailable: the replacement chapter could not be verified."
+                        changed = true
+                        continue
+                    }
 
-                changed = Self.applyVerifiedReplacementChapterKey(
-                    replacementKey,
-                    to: &candidateDownloads[index]
-                ) || changed
+                    changed = Self.applyVerifiedReplacementChapterKey(
+                        replacementKey,
+                        to: &candidateDownloads[index]
+                    ) || changed
+                }
             }
-        }
-        if changed {
-            _ = commitDownloads(candidateDownloads)
+            if changed {
+                _ = await commitDownloads(candidateDownloads)
+            }
         }
     }
 
@@ -2412,18 +2769,20 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     @discardableResult
+    @MainActor
     private func updateItem(
         _ id: String,
         mutate: (inout ReaderDownloadItem) -> Void
-    ) -> Bool {
+    ) async -> Bool {
         var candidate = downloads
         guard let index = candidate.firstIndex(where: { $0.id == id }) else { return false }
         mutate(&candidate[index])
-        return commitDownloads(candidate)
+        return await commitDownloads(candidate)
     }
 
-    private func failItem(_ id: String, message: String) {
-        guard updateItem(id, mutate: {
+    @MainActor
+    private func failItem(_ id: String, message: String) async {
+        guard await updateItem(id, mutate: {
             $0.status = .failed
             $0.error = message
         }) else { return }
@@ -2434,14 +2793,21 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     private func markStale(_ item: ReaderDownloadItem, reason: String) {
-        updateItem(item.id) {
+        scheduleMutation { [self] in
+            await markStaleNow(item, reason: reason)
+        }
+    }
+
+    @MainActor
+    private func markStaleNow(_ item: ReaderDownloadItem, reason: String) async {
+        await updateItem(item.id) {
             $0.status = .failed
             $0.error = reason
         }
         ReaderLogger.shared.log("Reader download stale id=\(item.id) reason=\(reason)", type: "ReaderDownloadStorage")
     }
 
-    private func upsertFailedPlaceholder(
+    private func failedPlaceholder(
         route: MangaContentRoute,
         mangaId: Int,
         title: String,
@@ -2451,7 +2817,7 @@ final class ReaderDownloadManager: ObservableObject {
         chapter: Chapter,
         contentRating: Int? = nil,
         message: String
-    ) {
+    ) -> ReaderDownloadItem {
         let id = Self.downloadId(route: route, chapterNumber: chapter.chapterNumber)
         let provider: ReaderDownloadProvider
         switch route {
@@ -2510,26 +2876,7 @@ final class ReaderDownloadManager: ObservableObject {
             dateAdded: Date(),
             dateCompleted: nil
         )
-        var candidate = downloads
-        if let index = candidate.firstIndex(where: { $0.id == id }) {
-            candidate[index] = item
-        } else {
-            guard Self.downloadIndexCanAcceptNewItem(currentItemCount: candidate.count) else {
-                publishEnqueueError(
-                    "Reader Downloads can store up to \(Self.maximumReadOnlyItems.formatted()) chapters. Remove an existing download before adding another."
-                )
-                return
-            }
-            candidate.append(item)
-        }
-        guard Self.persistedItemsAreWithinLimits(candidate) else {
-            publishEnqueueError(
-                "This failed download could not be recorded because the Reader download index reached its safe storage limit."
-            )
-            return
-        }
-        guard commitDownloads(candidate) else { return }
-        ReaderLogger.shared.log("Reader download unsupported id=\(id) reason=\(message)", type: "ReaderDownload")
+        return item
     }
 
     private func provider(for route: MangaContentRoute, chapter: Chapter) -> ReaderDownloadProvider? {
@@ -2624,7 +2971,8 @@ final class ReaderDownloadManager: ObservableObject {
         }
     }
 
-    private func directorySize(_ url: URL) -> Int64 {
+    static func directorySize(_ url: URL) -> Int64 {
+        let fileManager = FileManager.default
         guard let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey]) else {
             return 0
         }
@@ -2680,16 +3028,18 @@ final class ReaderDownloadManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.pauseReaderExtensionDownloadsForProfileChange()
-            }
+            let profileID = ProfileManager.shared.activeProfileID
+            self?.profileDidChange(to: profileID)
         }
         NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.processQueue() }
+            Task { @MainActor in
+                self?.markStorageSnapshotDirty()
+                self?.processQueue()
+            }
         }
         NotificationCenter.default.addObserver(
             forName: .readerExtensionLegacyRoutesDidReconnect,
@@ -2698,30 +3048,34 @@ final class ReaderDownloadManager: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                let legacyIDs = Set(
-                    self.downloads
-                        .filter { $0.provider.kind == .aidoku }
-                        .map(\.id)
-                )
-                for id in legacyIDs {
-                    self.activeTasks[id]?.cancel()
-                    self.queuedContexts[id] = nil
-                    self.pausedIds.remove(id)
-                }
-                guard self.loadDownloads() else {
-                    self.storesAreSafe = false
-                    self.downloads = Self.verifiedCompletedDownloadsForReadOnlyFallback(
-                        indexURL: self.persistenceURL,
-                        downloadsRoot: self.downloadsDirectory,
-                        fileManager: self.fileManager
+                let reloaded = await self.performMutation {
+                    let legacyIDs = Set(
+                        self.downloads
+                            .filter { $0.provider.kind == .aidoku }
+                            .map(\.id)
                     )
-                    self.objectWillChange.send()
-                    return
+                    for id in legacyIDs {
+                        self.activeTasks[id]?.cancel()
+                        self.queuedContexts[id] = nil
+                        self.pausedIds.remove(id)
+                    }
+                    guard self.loadDownloads() else {
+                        self.storesAreSafe = false
+                        self.downloads = Self.verifiedCompletedDownloadsForReadOnlyFallback(
+                            indexURL: self.persistenceURL,
+                            downloadsRoot: self.downloadsDirectory,
+                            fileManager: self.fileManager
+                        )
+                        self.objectWillChange.send()
+                        return false
+                    }
+                    guard self.recoverCompletedManifestsIfNeeded() else { return false }
+                    self.normalizeInterruptedDownloads()
+                    self.normalizeReaderExtensionAuthenticationScopes()
+                    self.normalizeRemovedAidokuDownloads()
+                    return true
                 }
-                guard self.recoverCompletedManifestsIfNeeded() else { return }
-                self.normalizeInterruptedDownloads()
-                self.normalizeReaderExtensionAuthenticationScopes()
-                self.normalizeRemovedAidokuDownloads()
+                guard reloaded else { return }
                 await self.hydrateReconnectedDownloads()
                 self.objectWillChange.send()
                 self.processQueue()
@@ -2729,9 +3083,15 @@ final class ReaderDownloadManager: ObservableObject {
         }
     }
 
-    private func pauseReaderExtensionDownloadsForProfileChange() {
+    private func pauseReaderExtensionDownloadsForProfileChange(activeProfileID: UUID) {
+        scheduleMutation { [self] in
+            await pauseReaderExtensionDownloadsForProfileChangeNow(activeProfileID: activeProfileID)
+        }
+    }
+
+    @MainActor
+    private func pauseReaderExtensionDownloadsForProfileChangeNow(activeProfileID: UUID) async {
         guard storesAreSafe else { return }
-        let activeProfileID = ProfileManager.shared.activeProfileID
         let affectedIDs = downloads.compactMap { item -> String? in
             guard item.provider.kind == .readerExtension,
                   item.status == .queued || item.status == .downloading,
@@ -2756,7 +3116,7 @@ final class ReaderDownloadManager: ObservableObject {
             candidate[index].status = .paused
             candidate[index].error = "Paused after a profile change. Resume to use the active profile's authentication."
         }
-        _ = commitDownloads(candidate)
+        _ = await commitDownloads(candidate)
         endBackgroundTaskIfIdle()
     }
 
@@ -2764,8 +3124,11 @@ final class ReaderDownloadManager: ObservableObject {
         guard backgroundTask == .invalid else { return }
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ReaderDownloads") { [weak self] in
             Task { @MainActor in
-                self?.pauseAllActiveForBackgroundExpiration()
-                self?.endBackgroundTask()
+                guard let self else { return }
+                await self.performMutation {
+                    await self.pauseAllActiveForBackgroundExpirationNow()
+                    self.endBackgroundTask()
+                }
             }
         }
     }
@@ -2782,10 +3145,17 @@ final class ReaderDownloadManager: ObservableObject {
     }
 
     private func pauseAllActiveForBackgroundExpiration() {
+        scheduleMutation { [self] in
+            await pauseAllActiveForBackgroundExpirationNow()
+        }
+    }
+
+    @MainActor
+    private func pauseAllActiveForBackgroundExpirationNow() async {
         for item in downloads where item.status == .downloading {
             pausedIds.insert(item.id)
             activeTasks[item.id]?.cancel()
-            updateItem(item.id) {
+            await updateItem(item.id) {
                 $0.status = .paused
                 $0.error = "Paused when iOS ended background time"
             }

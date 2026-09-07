@@ -620,23 +620,7 @@ final class KanzenAidokuMigrationTests: XCTestCase {
         let owner = ProfileManager.shared.activeProfileID
         let libraryKey = MangaLibraryManager.storageKey(for: owner)
         let progressKey = MangaReadingProgressManager.storageKey(for: owner)
-        let originalLibrary = UserDefaults.standard.data(forKey: libraryKey)
-        let originalProgress = UserDefaults.standard.data(forKey: progressKey)
-        captureStandardValue(forKey: libraryKey)
-        captureStandardValue(forKey: progressKey)
-        defer {
-            MangaLibraryManager.shared.applyRestoredCollections(
-                MangaLibraryManager.persistedCollections(from: originalLibrary).collections,
-                forProfile: owner
-            )
-            let restoredProgress = originalProgress.flatMap {
-                try? JSONDecoder().decode([Int: MangaProgress].self, from: $0)
-            } ?? [:]
-            MangaReadingProgressManager.shared.applyRestoredProgress(
-                restoredProgress,
-                forProfile: owner
-            )
-        }
+        prepareStandardStoresForReconnect(owner: owner)
 
         let legacySourceID = "en.eclipsemigrationfixture"
         let legacyItemKey = "/series/01J0Q1RSTVWXYZ0123456789AB"
@@ -657,7 +641,7 @@ final class KanzenAidokuMigrationTests: XCTestCase {
             forKey: progressKey
         )
 
-        let servicesStore = makeStore(named: "services")
+        let servicesStore = try makeStore(named: "services")
         let legacySource = try makeLegacySource(
             id: legacySourceID,
             name: "Eclipse Migration Fixture"
@@ -671,10 +655,11 @@ final class KanzenAidokuMigrationTests: XCTestCase {
             upstreamID: "31337",
             baseURL: "https://eclipsemigrationfixture.test"
         )
+        try persistInstalledSources([installed], in: servicesStore)
 
         var environment = KanzenAidokuMigrationEnvironment.live
         environment.servicesStore = { servicesStore }
-        let markStore = makeStore(named: "marks")
+        let markStore = try makeStore(named: "marks")
         environment.markStore = { markStore }
         environment.installedSources = { [installed] }
         environment.verifyItemKey = { legacyItem, _ in .resolved(legacyItem.legacyItemKey) }
@@ -759,13 +744,14 @@ final class KanzenAidokuMigrationTests: XCTestCase {
     ) {
         let owner = ProfileManager.shared.activeProfileID
         let libraryKey = MangaLibraryManager.storageKey(for: owner)
+        prepareStandardStoresForReconnect(owner: owner)
         let legacySourceID = "en.eclipsemigrationfixture"
         let items = itemKeys.map {
             aidokuItem(sourceID: legacySourceID, key: $0, title: "Fixture \($0)")
         }
         UserDefaults.standard.set(try encodedLibrary(items), forKey: libraryKey)
 
-        let servicesStore = makeStore(named: "services-\(label)")
+        let servicesStore = try makeStore(named: "services-\(label)")
         servicesStore.set(
             try JSONEncoder().encode([
                 try makeLegacySource(id: legacySourceID, name: "Eclipse Migration Fixture")
@@ -777,8 +763,9 @@ final class KanzenAidokuMigrationTests: XCTestCase {
             upstreamID: "31337",
             baseURL: "https://eclipsemigrationfixture.test"
         )
+        try persistInstalledSources([installed], in: servicesStore)
 
-        let markStore = makeStore(named: "marks-\(label)")
+        let markStore = try makeStore(named: "marks-\(label)")
         var environment = KanzenAidokuMigrationEnvironment.live
         environment.servicesStore = { servicesStore }
         environment.markStore = { markStore }
@@ -794,9 +781,15 @@ final class KanzenAidokuMigrationTests: XCTestCase {
         let ledgerKey = ReaderExtensionReconnectLedgerStore.storageKey(for: owner)
         let originalLibrary = UserDefaults.standard.data(forKey: libraryKey)
         let originalProgress = UserDefaults.standard.data(forKey: progressKey)
-        captureStandardValue(forKey: libraryKey)
-        captureStandardValue(forKey: progressKey)
+        let profileIDs = Set(ProfileManager.shared.profiles.map(\.id))
+            .union([owner, ProfileManager.defaultProfileID])
+        for profileID in profileIDs {
+            captureStandardValue(forKey: MangaLibraryManager.storageKey(for: profileID))
+            captureStandardValue(forKey: MangaReadingProgressManager.storageKey(for: profileID))
+        }
         captureStandardValue(forKey: ledgerKey)
+        captureStandardValue(forKey: ReaderExtensionLegacyReconnectManager.quarantineKey)
+        UserDefaults.standard.removeObject(forKey: progressKey)
         UserDefaults.standard.removeObject(forKey: ledgerKey)
         addTeardownBlock { @MainActor in
             MangaLibraryManager.shared.applyRestoredCollections(
@@ -814,13 +807,99 @@ final class KanzenAidokuMigrationTests: XCTestCase {
     }
 
     @MainActor
+    func testResumableFixtureCapturesOriginalStoresBeforeReplacingLibrary() throws {
+        try XCTSkipUnless(ProfileManager.shared.rosterStoreIsReadable)
+        try XCTSkipIf(ProfileManager.shared.isKidsModeActive)
+
+        let owner = ProfileManager.shared.activeProfileID
+        let keys = [
+            MangaLibraryManager.storageKey(for: owner),
+            MangaReadingProgressManager.storageKey(for: owner),
+            ReaderExtensionReconnectLedgerStore.storageKey(for: owner),
+            ReaderExtensionLegacyReconnectManager.quarantineKey
+        ]
+        var originalValues: [String: Any] = [:]
+        for key in keys {
+            originalValues[key] = UserDefaults.standard.object(forKey: key)
+        }
+
+        let fixture = try makeResumableFixture(itemKeys: ["/series/capture"], label: "capture")
+
+        XCTAssertTrue(Set(keys).isSubset(of: capturedStandardKeys))
+        XCTAssertTrue(
+            NSDictionary(dictionary: restoredStandardValues.filter { keys.contains($0.key) })
+                .isEqual(to: originalValues),
+            "cleanup must retain the incoming stores, not the library written by the fixture"
+        )
+        XCTAssertEqual(
+            removedStandardKeys.intersection(keys),
+            Set(keys).subtracting(originalValues.keys)
+        )
+        let written = try XCTUnwrap(UserDefaults.standard.data(forKey: fixture.libraryKey))
+        XCTAssertEqual(
+            MangaLibraryManager.persistedCollections(from: written).collections.flatMap(\.items).map(\.id),
+            fixture.items.map(\.id)
+        )
+        XCTAssertNil(UserDefaults.standard.object(forKey: keys[1]))
+        XCTAssertNil(UserDefaults.standard.object(forKey: keys[2]))
+        XCTAssertEqual(
+            try ReaderExtensionPersistence.loadInstalledSources(from: fixture.servicesStore).map(\.id),
+            [fixture.installed.id]
+        )
+    }
+
+    @MainActor
+    func testReconnectRejectsAnAdvertisedSourceMissingFromItsPersistedInventory() async throws {
+        try XCTSkipUnless(ProfileManager.shared.rosterStoreIsReadable)
+        try XCTSkipIf(ProfileManager.shared.isKidsModeActive)
+
+        let fixture = try makeResumableFixture(itemKeys: ["/series/removed"], label: "removed")
+        let other = makeInstalledSource(name: "Another Fixture", upstreamID: "31338")
+        try persistInstalledSources([other], in: fixture.servicesStore)
+        let progressKey = MangaReadingProgressManager.storageKey(for: fixture.owner)
+        let item = try XCTUnwrap(fixture.items.first)
+        var progress = MangaProgress()
+        progress.route = item.route
+        progress.readChapterNumbers = ["1", "2"]
+        UserDefaults.standard.set(try JSONEncoder().encode([item.id: progress]), forKey: progressKey)
+        let libraryBefore = UserDefaults.standard.data(forKey: fixture.libraryKey)
+        let progressBefore = UserDefaults.standard.data(forKey: progressKey)
+        let metadataBefore = fixture.servicesStore.data(
+            forKey: BackupReaderExtensionState.legacyAidokuSourcesStorageKey
+        )
+        var environment = fixture.environment
+        let log = VerifierLog()
+        environment.verifyItemKey = { legacyItem, _ in log.answer(for: legacyItem.legacyItemKey) }
+
+        let coordinator = KanzenAidokuMigrationCoordinator(environment: environment)
+        _ = await coordinator.detect()
+        XCTAssertEqual(
+            coordinator.plan.sources.first?.match.confidentCandidate?.installedSource.id,
+            fixture.installed.id
+        )
+        let outcome = await coordinator.apply(choices: [:])
+
+        XCTAssertEqual(log.asked, ["/series/removed"])
+        XCTAssertEqual(
+            outcome.failures.map(\.message),
+            [ReaderExtensionLegacyReconnectError.installedSourceNotFound.localizedDescription]
+        )
+        XCTAssertTrue(outcome.reconnectedSourceIDs.isEmpty)
+        XCTAssertEqual(UserDefaults.standard.data(forKey: fixture.libraryKey), libraryBefore)
+        XCTAssertEqual(UserDefaults.standard.data(forKey: progressKey), progressBefore)
+        XCTAssertEqual(
+            fixture.servicesStore.data(forKey: BackupReaderExtensionState.legacyAidokuSourcesStorageKey),
+            metadataBefore
+        )
+    }
+
+    @MainActor
     func testASourceThatStopsAnsweringKeepsEveryTitleItAlreadyMatched() async throws {
         try XCTSkipUnless(ProfileManager.shared.rosterStoreIsReadable)
         try XCTSkipIf(ProfileManager.shared.isKidsModeActive)
 
         let keys = ["/series/aaa", "/series/bbb", "/series/ccc"]
         let fixture = try makeResumableFixture(itemKeys: keys, label: "interrupted")
-        prepareStandardStoresForReconnect(owner: fixture.owner)
 
         let log = VerifierLog()
         log.answers["/series/bbb"] = .interrupted
@@ -893,7 +972,6 @@ final class KanzenAidokuMigrationTests: XCTestCase {
 
         let keys = ["/series/aaa", "/series/bbb"]
         let fixture = try makeResumableFixture(itemKeys: keys, label: "absent")
-        prepareStandardStoresForReconnect(owner: fixture.owner)
 
         let log = VerifierLog()
         log.answers["/series/bbb"] = .absent
@@ -943,7 +1021,6 @@ final class KanzenAidokuMigrationTests: XCTestCase {
 
         let keys = ["/series/aaa", "/series/bbb"]
         let fixture = try makeResumableFixture(itemKeys: keys, label: "all-absent")
-        prepareStandardStoresForReconnect(owner: fixture.owner)
 
         var environment = fixture.environment
         environment.verifyItemKey = { _, _ in .absent }
@@ -979,7 +1056,6 @@ final class KanzenAidokuMigrationTests: XCTestCase {
 
         let keys = ["/series/aaa", "/series/bbb"]
         let fixture = try makeResumableFixture(itemKeys: keys, label: "repeat")
-        prepareStandardStoresForReconnect(owner: fixture.owner)
 
         let log = VerifierLog()
         log.answers["/series/bbb"] = .absent
@@ -1019,7 +1095,6 @@ final class KanzenAidokuMigrationTests: XCTestCase {
             itemKeys: ["/series/aaa", "/series/bbb"],
             label: "badge"
         )
-        prepareStandardStoresForReconnect(owner: fixture.owner)
 
         let log = VerifierLog()
         log.answers["/series/bbb"] = .absent
@@ -1217,12 +1292,12 @@ final class KanzenAidokuMigrationTests: XCTestCase {
         readProgress.readChapterNumbers = ["1", "2"]
         let progressData = try JSONEncoder().encode([read.id: readProgress])
 
-        let servicesStore = makeStore(named: "services")
+        let servicesStore = try makeStore(named: "services")
         servicesStore.set(
             try JSONEncoder().encode([legacy]),
             forKey: BackupReaderExtensionState.legacyAidokuSourcesStorageKey
         )
-        let markStore = makeStore(named: "marks")
+        let markStore = try makeStore(named: "marks")
         let box = InstalledSourcesBox()
         let owner = ownerProfileID
 
@@ -1250,14 +1325,21 @@ final class KanzenAidokuMigrationTests: XCTestCase {
         )
     }
 
-    private func makeStore(named label: String) -> UserDefaults {
+    private func makeStore(named label: String) throws -> UserDefaults {
         let name = "KanzenAidokuMigrationTests.\(label).\(UUID().uuidString)"
         suiteNames.append(name)
-        guard let store = UserDefaults(suiteName: name) else {
-            XCTFail("could not create an isolated defaults suite")
-            return .standard
-        }
-        return store
+        return try XCTUnwrap(UserDefaults(suiteName: name), "could not create an isolated defaults suite")
+    }
+
+    private func persistInstalledSources(
+        _ sources: [ReaderExtensionInstalledSource],
+        in store: UserDefaults
+    ) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        let data = try encoder.encode(sources)
+        try ReaderExtensionPersistence.validateInstalledSourceStoreJSON(data)
+        store.set(data, forKey: ReaderExtensionPersistence.installedSourcesKey)
     }
 
     private func captureStandardValue(forKey key: String) {

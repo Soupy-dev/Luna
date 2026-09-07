@@ -14722,10 +14722,10 @@ struct PlayerEpisodeBrowserItem: Identifiable {
     let playbackContext: EpisodePlaybackContext?
     let originalTMDBSeasonNumber: Int?
     let originalTMDBEpisodeNumber: Int?
-    let progress: Double
-    let isDownloaded: Bool
+    var progress: Double
+    var isDownloaded: Bool
     #if !os(tvOS)
-    let downloadItem: DownloadItem?
+    var downloadItem: DownloadItem?
     #endif
     let isCurrent: Bool
     var mediaYear: Int? = nil
@@ -14793,6 +14793,72 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
     private var didLoad = false
     private var resolvedMediaYear: Int?
     private var canonicalCurrentPlaybackContext: EpisodePlaybackContext?
+    private struct EpisodeCoordinate: Hashable {
+        let season: Int
+        let episode: Int
+    }
+    private var progressLookup: ProgressManager.EpisodeLookupSnapshot?
+    private var progressByCoordinate: [EpisodeCoordinate: Double] = [:]
+#if os(iOS)
+    private var downloadLookup: EpisodeDownloadLookupSnapshot?
+    private var fileAvailability: [String: Bool] = [:]
+#endif
+
+    private func refreshEpisodeLookups() {
+        if progressLookup.map({ ProgressManager.shared.episodeLookupIsCurrent($0) }) != true {
+            let snapshot = ProgressManager.shared.captureEpisodeLookup(showID: seed.showId)
+            progressLookup = snapshot
+            var values: [EpisodeCoordinate: Double] = [:]
+            for entry in snapshot.entries {
+                let coordinate = EpisodeCoordinate(season: entry.seasonNumber, episode: entry.episodeNumber)
+                if values[coordinate] == nil {
+                    values[coordinate] = entry.progress
+                }
+            }
+            progressByCoordinate = values
+        }
+#if os(iOS)
+        if downloadLookup.map({ DownloadManager.shared.episodeLookupIsCurrent($0) }) != true {
+            downloadLookup = DownloadManager.shared.episodeLookupSnapshot()
+            fileAvailability.removeAll(keepingCapacity: true)
+        }
+#endif
+    }
+
+#if os(iOS)
+    private func completedDownload(for episode: TMDBEpisode, context: EpisodePlaybackContext?) -> DownloadItem? {
+        downloadLookup?.matchingEpisodeDownloadItem(
+            tmdbId: seed.showId,
+            seasonNumber: episode.seasonNumber,
+            episodeNumber: episode.episodeNumber,
+            playbackContext: context
+        ) { candidate in
+            guard candidate.status == .completed, let name = candidate.localFileName else { return false }
+            if let available = fileAvailability[name] { return available }
+            let available = DownloadManager.shared.localFileURL(for: candidate) != nil
+            fileAvailability[name] = available
+            return available
+        }
+    }
+#endif
+
+    private func refreshedEpisodeState(_ item: PlayerEpisodeBrowserItem) -> PlayerEpisodeBrowserItem {
+        refreshEpisodeLookups()
+        var result = item
+        result.progress = progressByCoordinate[EpisodeCoordinate(season: item.episode.seasonNumber, episode: item.episode.episodeNumber)] ?? 0
+#if os(iOS)
+        result.downloadItem = completedDownload(for: item.episode, context: item.playbackContext)
+        result.isDownloaded = result.downloadItem != nil
+#endif
+        return result
+    }
+
+    private func validateLoadAuthority(_ authority: ProgressManager.ProfileMutationAuthority) throws {
+        try Task.checkCancellation()
+        guard ProgressManager.shared.profileMutationAuthorityIsCurrent(authority) else {
+            throw CancellationError()
+        }
+    }
 
     init(seed: PlayerEpisodeBrowserSeed) {
         self.seed = seed
@@ -14913,9 +14979,26 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
 
     private func load() async {
         didLoad = true
+        guard let authority = ProgressManager.shared.profileMutationAuthority() else { return }
+        progressLookup = nil
+#if os(iOS)
+        downloadLookup = nil
+        fileAvailability.removeAll(keepingCapacity: true)
+#endif
+        defer {
+            progressLookup = nil
+            progressByCoordinate.removeAll(keepingCapacity: true)
+#if os(iOS)
+            downloadLookup = nil
+            fileAvailability.removeAll(keepingCapacity: true)
+#endif
+        }
         let cacheKey = Self.cacheKey(for: seed)
         if let cached = Self.cachedLoad(for: cacheKey) {
-            seasons = cached.seasons
+            seasons = cached.seasons.map { season in
+                PlayerEpisodeBrowserSeason(id: season.id, title: season.title, subtitle: season.subtitle,
+                                           posterURL: season.posterURL, episodes: season.episodes.map(refreshedEpisodeState))
+            }
             currentItemID = cached.currentItemID
             canonicalCurrentPlaybackContext = cached.seasons
                 .flatMap(\.episodes)
@@ -14936,6 +15019,7 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
         do {
             let tmdbService = TMDBService.shared
             let tvShow = try await tmdbService.getTVShowWithSeasons(id: seed.showId)
+            try validateLoadAuthority(authority)
             let showTitle = tvShow.name.isEmpty ? seed.showTitle : tvShow.name
             let showPosterURL = seed.showPosterURL ?? tvShow.fullPosterURL
             let resolvedImdbId = seed.imdbId ?? tvShow.externalIds?.imdbId
@@ -14959,6 +15043,7 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
                         value < 0 ? RemoteMediaNumericBoundary.positiveMagnitude(value) : nil
                     }
                 )
+                try validateLoadAuthority(authority)
                 if let animeData {
                     let mappings = animeData.seasons.map {
                         (
@@ -14995,6 +15080,7 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
                 Logger.shared.log("EpisodeBrowser: skipped AniList traversal because detail traversal performance mode is enabled", type: "AniList")
             }
 
+            try validateLoadAuthority(authority)
             var loaded: [PlayerEpisodeBrowserSeason] = []
             let animeAbsoluteEpisodeOffsets = animeData.map {
                 absoluteEpisodeOffsetsBySeason(for: $0.seasons)
@@ -15028,18 +15114,21 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
                 seasons = loaded
 
             } else if !seed.isAnime || animeData == nil,
-                      let currentTMDBSeason = tvShow.seasons.first(where: { $0.seasonNumber == seed.currentSeasonNumber }),
-                      let detail = try? await tmdbService.getSeasonDetails(tvShowId: seed.showId, seasonNumber: currentTMDBSeason.seasonNumber) {
-                loaded.append(buildTMDBSeason(
-                    summary: currentTMDBSeason,
-                    detail: detail,
-                    showTitle: showTitle,
-                    showPosterURL: showPosterURL,
-                    imdbId: resolvedImdbId,
-                    isSpecial: currentTMDBSeason.seasonNumber == 0,
-                    originalAudioLanguage: tvShow.originalLanguage
-                ))
-                seasons = loaded
+                      let currentTMDBSeason = tvShow.seasons.first(where: { $0.seasonNumber == seed.currentSeasonNumber }) {
+                let detail = try? await tmdbService.getSeasonDetails(tvShowId: seed.showId, seasonNumber: currentTMDBSeason.seasonNumber)
+                try validateLoadAuthority(authority)
+                if let detail {
+                    loaded.append(buildTMDBSeason(
+                        summary: currentTMDBSeason,
+                        detail: detail,
+                        showTitle: showTitle,
+                        showPosterURL: showPosterURL,
+                        imdbId: resolvedImdbId,
+                        isSpecial: currentTMDBSeason.seasonNumber == 0,
+                        originalAudioLanguage: tvShow.originalLanguage
+                    ))
+                    seasons = loaded
+                }
             }
 
             if seed.isAnime, let animeData {
@@ -15068,9 +15157,9 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
                         return lhs.seasonNumber < rhs.seasonNumber
                     }
                 for season in orderedSeasons where season.seasonNumber != seed.currentSeasonNumber {
-                    guard let detail = try? await tmdbService.getSeasonDetails(tvShowId: seed.showId, seasonNumber: season.seasonNumber) else {
-                        continue
-                    }
+                    let detail = try? await tmdbService.getSeasonDetails(tvShowId: seed.showId, seasonNumber: season.seasonNumber)
+                    try validateLoadAuthority(authority)
+                    guard let detail else { continue }
                     loaded.append(buildTMDBSeason(
                         summary: season,
                         detail: detail,
@@ -15084,6 +15173,7 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
                 }
             }
 
+            try validateLoadAuthority(authority)
             for context in specialContexts where !loaded.contains(where: { $0.id == "special-\(context.id)" }) {
                 loaded.append(buildSpecialSeason(
                     context: context,
@@ -15101,6 +15191,11 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
             seasons = loaded
             Self.storeLoad(seasons: loaded, currentItemID: currentItemID, for: cacheKey)
             isLoading = false
+        } catch is CancellationError {
+            didLoad = false
+            isLoading = false
+            seasons = []
+            currentItemID = nil
         } catch {
             isLoading = false
             errorMessage = error.localizedDescription
@@ -15126,7 +15221,7 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
         } else {
             modeKey = "standard"
         }
-        return "\(seed.showId)|S\(seed.currentSeasonNumber)|E\(seed.currentEpisodeNumber)|anime=\(seed.isAnime)|mode=\(modeKey)|\(contextKey)"
+        return "\(ProfileManager.shared.activeProfileID.uuidString)|\(seed.showId)|S\(seed.currentSeasonNumber)|E\(seed.currentEpisodeNumber)|anime=\(seed.isAnime)|mode=\(modeKey)|\(contextKey)"
     }
 
     private static func cachedLoad(for key: String) -> CachedEpisodeBrowserLoad? {
@@ -15518,20 +15613,12 @@ final class PlayerEpisodeBrowserViewModel: ObservableObject {
         originalTMDBSeasonNumber: Int?,
         originalTMDBEpisodeNumber: Int?
     ) -> PlayerEpisodeBrowserItem {
-        let progress = ProgressManager.shared.getEpisodeProgress(
-            showId: seed.showId,
-            seasonNumber: episode.seasonNumber,
-            episodeNumber: episode.episodeNumber
-        )
+        refreshEpisodeLookups()
+        let progress = progressByCoordinate[EpisodeCoordinate(season: episode.seasonNumber, episode: episode.episodeNumber)] ?? 0
         #if !os(tvOS)
         let download: DownloadItem?
         #if os(iOS)
-        download = DownloadManager.shared.completedEpisodeDownloadItem(
-            tmdbId: seed.showId,
-            seasonNumber: episode.seasonNumber,
-            episodeNumber: episode.episodeNumber,
-            playbackContext: playbackContext
-        )
+        download = completedDownload(for: episode, context: playbackContext)
         #else
         download = DownloadManager.shared.completedDownloadItem(
             tmdbId: seed.showId,

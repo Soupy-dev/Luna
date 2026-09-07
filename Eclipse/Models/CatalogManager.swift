@@ -11,7 +11,23 @@ import Combine
 class CatalogManager: ObservableObject {
     static let shared = CatalogManager()
 
-    @Published var catalogs: [Catalog] = []
+    @Published var catalogs: [Catalog] = [] {
+        didSet { advanceMediaStateRevision() }
+    }
+    private let mediaStateRevisionLock = NSLock()
+    private var mutationRevision: UInt64 = 0
+
+    var mediaStateRevision: UInt64 {
+        mediaStateRevisionLock.lock()
+        defer { mediaStateRevisionLock.unlock() }
+        return mutationRevision
+    }
+
+    private func advanceMediaStateRevision() {
+        mediaStateRevisionLock.lock()
+        mutationRevision &+= 1
+        mediaStateRevisionLock.unlock()
+    }
     @Published var performanceModeEnabled: Bool = PerformanceModeSettings.isEnabled
 
     private let userDefaults = UserDefaults.standard
@@ -111,6 +127,7 @@ class CatalogManager: ObservableObject {
                 return updated
             }
         guard let data = try? JSONEncoder().encode(normalized) else { return }
+        advanceMediaStateRevision()
         userDefaults.set(data, forKey: Self.catalogsKey(for: profileID))
     }
 
@@ -128,6 +145,7 @@ class CatalogManager: ObservableObject {
 
     func discardStore(forProfile profileID: UUID) {
         guard profileID != activeProfileID else { return }
+        advanceMediaStateRevision()
         userDefaults.removeObject(forKey: Self.catalogsKey(for: profileID))
     }
 
@@ -630,7 +648,7 @@ enum PerformanceModeSettings {
     }
 }
 
-struct Catalog: Identifiable, Codable, Equatable {
+struct Catalog: Identifiable, Codable, Equatable, Sendable {
     static let upNextCatalogId = "upNext"
     static let traktContinueWatchingCatalogId = "traktContinueWatching"
 
@@ -660,7 +678,7 @@ struct Catalog: Identifiable, Codable, Equatable {
         case traktListId, traktListUser, traktListSlug, traktListMediaType, traktListSortBy, traktListSortHow
     }
 
-    enum CatalogSource: String, Codable, Equatable {
+    enum CatalogSource: String, Codable, Equatable, Sendable {
         case tmdb = "TMDB"
         case anilist = "AniList"
         case local = "Local"
@@ -668,7 +686,7 @@ struct Catalog: Identifiable, Codable, Equatable {
         case trakt = "Trakt"
     }
 
-    enum CatalogDisplayStyle: String, Codable, Equatable {
+    enum CatalogDisplayStyle: String, Codable, Equatable, Sendable {
         case standard
         case network
         case genre

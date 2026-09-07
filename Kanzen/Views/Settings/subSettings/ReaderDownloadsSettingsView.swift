@@ -5,6 +5,7 @@ import SwiftUI
 struct ReaderDownloadsSettingsView: View {
     @StateObject private var downloadManager = ReaderDownloadManager.shared
     @State private var selectedTab: ReaderDownloadsTab = .queue
+    @State private var storageObservationID = UUID()
     @State private var showingDeleteAll = false
     @State private var showingDeleteFailed = false
     @AppStorage("readerDownloadsBackgroundEnabled") private var backgroundDownloadsEnabled = true
@@ -48,6 +49,8 @@ struct ReaderDownloadsSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .eclipseDarkToolbar()
         .preferredColorScheme(.dark)
+        .onAppear { downloadManager.beginStorageSnapshotObservation(storageObservationID) }
+        .onDisappear { downloadManager.endStorageSnapshotObservation(storageObservationID) }
         .adaptiveConfirmationDialog("Delete All Reader Downloads", isPresented: $showingDeleteAll, titleVisibility: .visible) {
             Button("Delete All", role: .destructive) {
                 guard !ProfileManager.shared.isKidsModeActive else { return }

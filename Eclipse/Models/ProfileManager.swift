@@ -2,7 +2,7 @@ import Combine
 import CryptoKit
 import Foundation
 
-struct Profile: Codable, Identifiable, Equatable, Hashable {
+struct Profile: Codable, Sendable, Identifiable, Equatable, Hashable {
     let id: UUID
     var name: String
 
