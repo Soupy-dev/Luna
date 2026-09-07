@@ -64,8 +64,9 @@ private struct ReaderExtensionChapterProgressSnapshot {
 
     func pageProgressLabel(_ chapterNumber: String) -> String? {
         let key = ChapterIdentityNormalizer.key(for: chapterNumber)
-        guard let position = pagePositions[key], let total = pageCounts[key], total > 0 else { return nil }
-        return "Page \(min(max(position + 1, 1), total)) of \(total)"
+        guard let position = pagePositions[key], let total = pageCounts[key],
+              let page = MangaProgress.displayedPage(position: position, total: total) else { return nil }
+        return "Page \(page) of \(total)"
     }
 }
 

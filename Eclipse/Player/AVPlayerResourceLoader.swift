@@ -399,9 +399,17 @@ final class AVPlayerResourceLoader: NSObject, @unchecked Sendable {
 
     private func respondWithDirectData(_ data: Data, for context: LoadingContext) {
         guard let dataRequest = context.loadingRequest.dataRequest else { return }
-        let chunkStart = context.responseBodyOffset + context.receivedBodyBytes
-        let chunkEnd = chunkStart + Int64(data.count)
-        context.receivedBodyBytes += Int64(data.count)
+        guard let chunkRange = Self.bodyChunkRange(
+            responseOffset: context.responseBodyOffset,
+            receivedBytes: context.receivedBodyBytes,
+            chunkByteCount: data.count
+        ) else {
+            finish(context, error: LoaderError.invalidContentRange)
+            return
+        }
+        let chunkStart = chunkRange.lowerBound
+        let chunkEnd = chunkRange.upperBound
+        context.receivedBodyBytes = chunkEnd - context.responseBodyOffset
 
         let wantedStart = max(context.requestedOffset, dataRequest.currentOffset)
         let wantedEnd = context.requestedEndOffset ?? Int64.max
@@ -437,7 +445,7 @@ final class AVPlayerResourceLoader: NSObject, @unchecked Sendable {
             if dataRequest.requestsAllDataToEndOfResource {
                 end = data.count
             } else {
-                end = min(start + max(dataRequest.requestedLength, 0), data.count)
+                end = start + min(max(dataRequest.requestedLength, 0), data.count - start)
             }
             if start < end {
                 dataRequest.respond(with: data.subdata(in: start..<end))
@@ -470,16 +478,61 @@ final class AVPlayerResourceLoader: NSObject, @unchecked Sendable {
         }
     }
 
-    private static func contentRange(_ response: HTTPURLResponse) -> (start: Int64, total: Int64?)? {
-        guard let value = response.value(forHTTPHeaderField: "Content-Range")?.lowercased(),
-              value.hasPrefix("bytes ") else { return nil }
-        let payload = value.dropFirst("bytes ".count)
-        let components = payload.split(separator: "/", maxSplits: 1).map(String.init)
+    static func responseByteLayout(
+        _ response: HTTPURLResponse,
+        requestedOffset: Int64
+    ) -> (start: Int64, totalLength: Int64)? {
+        guard requestedOffset >= 0 else { return nil }
+        let expectedLength = max(response.expectedContentLength, 0)
+        if let value = response.value(forHTTPHeaderField: "Content-Range") {
+            guard let range = contentRange(value) else { return nil }
+            let (_, overflow) = range.start.addingReportingOverflow(expectedLength)
+            guard !overflow else { return nil }
+            return (range.start, range.total ?? range.endExclusive)
+        }
+        let start = response.statusCode == 206 ? requestedOffset : 0
+        let (totalLength, overflow) = start.addingReportingOverflow(expectedLength)
+        guard !overflow else { return nil }
+        return (start, totalLength)
+    }
+
+    static func bodyChunkRange(
+        responseOffset: Int64,
+        receivedBytes: Int64,
+        chunkByteCount: Int
+    ) -> Range<Int64>? {
+        guard responseOffset >= 0, receivedBytes >= 0, chunkByteCount >= 0 else { return nil }
+        let (start, startOverflow) = responseOffset.addingReportingOverflow(receivedBytes)
+        guard !startOverflow else { return nil }
+        let (end, endOverflow) = start.addingReportingOverflow(Int64(chunkByteCount))
+        guard !endOverflow else { return nil }
+        return start..<end
+    }
+
+    private static func contentRange(_ rawValue: String) -> (start: Int64, endExclusive: Int64, total: Int64?)? {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard value.hasPrefix("bytes ") else { return nil }
+        let payload = value.dropFirst("bytes ".count).trimmingCharacters(in: .whitespaces)
+        let components = payload.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
         guard components.count == 2 else { return nil }
-        let total = components[1] == "*" ? nil : Int64(components[1])
-        let range = components[0].split(separator: "-", maxSplits: 1).map(String.init)
-        guard range.count == 2, let start = Int64(range[0]) else { return nil }
-        return (start, total)
+        let range = components[0].split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        func byteOffset(_ text: Substring) -> Int64? {
+            guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
+            return Int64(text)
+        }
+        guard range.count == 2,
+              let start = byteOffset(range[0]),
+              let end = byteOffset(range[1]),
+              end >= start,
+              end < Int64.max else { return nil }
+        let total: Int64?
+        if components[1] == "*" {
+            total = nil
+        } else {
+            guard let parsedTotal = byteOffset(components[1]), parsedTotal > end else { return nil }
+            total = parsedTotal
+        }
+        return (start, end + 1, total)
     }
 }
 
@@ -532,16 +585,16 @@ extension AVPlayerResourceLoader: URLSessionDataDelegate, URLSessionTaskDelegate
         }
 
         context.isManifest = isManifest
-        let contentRange = Self.contentRange(response)
-        context.responseBodyOffset = contentRange?.start
-            ?? (response.statusCode == 206 ? context.requestedOffset : 0)
-        let expectedLength = max(response.expectedContentLength, 0)
-        let totalLength = contentRange?.total
-            ?? (response.statusCode == 206 ? context.responseBodyOffset + expectedLength : expectedLength)
+        guard let byteLayout = Self.responseByteLayout(response, requestedOffset: context.requestedOffset) else {
+            completionHandler(.cancel)
+            finish(context, error: LoaderError.invalidContentRange)
+            return
+        }
+        context.responseBodyOffset = byteLayout.start
         configureContentInformation(
             for: context,
             response: response,
-            totalLength: totalLength,
+            totalLength: byteLayout.totalLength,
             isManifest: isManifest
         )
         if context.loadingRequest.dataRequest == nil, !isManifest {
@@ -555,7 +608,7 @@ extension AVPlayerResourceLoader: URLSessionDataDelegate, URLSessionTaskDelegate
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard let context = contextsByTask[dataTask.taskIdentifier] else { return }
         if context.isManifest {
-            guard context.manifestData.count + data.count <= Self.maximumManifestBytes else {
+            guard data.count <= Self.maximumManifestBytes - context.manifestData.count else {
                 finish(context, error: LoaderError.manifestTooLarge)
                 return
             }
@@ -628,6 +681,7 @@ private enum LoaderError: LocalizedError {
     case invalidManifest
     case manifestTooLarge
     case invalidRedirect
+    case invalidContentRange
 
     var errorDescription: String? {
         switch self {
@@ -635,6 +689,7 @@ private enum LoaderError: LocalizedError {
         case .invalidManifest: return "The HLS playlist is not valid UTF-8."
         case .manifestTooLarge: return "The HLS playlist exceeded the safe response limit."
         case .invalidRedirect: return "The media server returned an unsafe or excessive redirect."
+        case .invalidContentRange: return "The media server returned an invalid byte range."
         }
     }
 }

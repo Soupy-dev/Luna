@@ -68,8 +68,8 @@ class TMDBService: ObservableObject {
 
     private let detailCache = TMDBDetailCache()
     private let seasonRequestCoordinator = TMDBSeasonRequestCoordinator()
-    private var fastAnimeAdultKeywordIDsCache: [Int]?
-    private var fastAnimeAdultKeywordIDsTask: Task<[Int], Never>?
+    @MainActor private var fastAnimeAdultKeywordIDsCache: (language: String, ids: [Int])?
+    @MainActor private var fastAnimeAdultKeywordIDsTask: (language: String, id: UUID, task: Task<[Int], Never>)?
 
     private struct FastAnimeAdultKeywordCacheRecord: Codable {
         let version: Int
@@ -259,9 +259,10 @@ class TMDBService: ObservableObject {
         return data
     }
 
-    private static func inflateResponseData(_ data: Data, windowBits: Int32) -> Data? {
+    static func inflateResponseData(_ data: Data, windowBits: Int32) -> Data? {
 #if canImport(zlib)
         guard !data.isEmpty else { return data }
+        guard data.count <= maximumJSONResponseBytes else { return nil }
 
         var stream = z_stream()
         let initStatus = inflateInit2_(&stream, windowBits, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
@@ -280,6 +281,7 @@ class TMDBService: ObservableObject {
             stream.avail_in = uInt(data.count)
 
             var status: Int32 = Z_OK
+            var exceededOutputLimit = false
             repeat {
                 var chunk = [UInt8](repeating: 0, count: chunkSize)
                 chunk.withUnsafeMutableBufferPointer { buffer in
@@ -290,10 +292,15 @@ class TMDBService: ObservableObject {
                     if status == Z_OK || status == Z_STREAM_END {
                         let written = chunkSize - Int(stream.avail_out)
                         if let baseAddress = buffer.baseAddress, written > 0 {
+                            guard written <= maximumJSONResponseBytes - output.count else {
+                                exceededOutputLimit = true
+                                return
+                            }
                             output.append(baseAddress, count: written)
                         }
                     }
                 }
+                if exceededOutputLimit { return nil }
             } while status == Z_OK
 
             return status == Z_STREAM_END ? output : nil
@@ -1008,42 +1015,46 @@ class TMDBService: ObservableObject {
         }
     }
 
+    @MainActor
     private func fastAnimeAdultKeywordIDs() async -> [Int] {
-        if let fastAnimeAdultKeywordIDsCache {
-            return fastAnimeAdultKeywordIDsCache
+        let cacheLanguage = currentLanguage
+        if let cached = fastAnimeAdultKeywordIDsCache, cached.language == cacheLanguage {
+            return cached.ids
         }
-        if let persisted = persistedFastAnimeAdultKeywordIDs() {
-            fastAnimeAdultKeywordIDsCache = persisted
+        if let persisted = persistedFastAnimeAdultKeywordIDs(language: cacheLanguage) {
+            fastAnimeAdultKeywordIDsCache = (cacheLanguage, persisted)
             return persisted
         }
-        if let fastAnimeAdultKeywordIDsTask {
-            return await fastAnimeAdultKeywordIDsTask.value
+        if let pending = fastAnimeAdultKeywordIDsTask, pending.language == cacheLanguage {
+            return await pending.task.value
         }
 
-        let cacheLanguage = currentLanguage
+        let requestID = UUID()
         let task = Task { [weak self] () -> [Int] in
             guard let self else { return [] }
-            let result = await self.fetchFastAnimeAdultKeywordIDs()
+            let result = await self.fetchFastAnimeAdultKeywordIDs(language: cacheLanguage)
             if result.completed, self.currentLanguage == cacheLanguage {
                 self.persistFastAnimeAdultKeywordIDs(result.ids, language: cacheLanguage)
             }
             return result.ids
         }
-        fastAnimeAdultKeywordIDsTask = task
+        fastAnimeAdultKeywordIDsTask = (cacheLanguage, requestID, task)
         let ids = await task.value
-        fastAnimeAdultKeywordIDsCache = ids
-        fastAnimeAdultKeywordIDsTask = nil
+        if fastAnimeAdultKeywordIDsTask?.id == requestID {
+            fastAnimeAdultKeywordIDsCache = (cacheLanguage, ids)
+            fastAnimeAdultKeywordIDsTask = nil
+        }
         return ids
     }
 
-    private func fetchFastAnimeAdultKeywordIDs() async -> (ids: [Int], completed: Bool) {
+    private func fetchFastAnimeAdultKeywordIDs(language: String) async -> (ids: [Int], completed: Bool) {
         await withTaskGroup(of: FastAnimeAdultKeywordLookup.self) { group in
             for keyword in Self.fastAnimeAdultKeywordNames {
                 group.addTask { [weak self] in
                     guard let self else {
                         return FastAnimeAdultKeywordLookup(id: nil, completed: false)
                     }
-                    return await self.fetchExactKeywordID(named: keyword)
+                    return await self.fetchExactKeywordID(named: keyword, language: language)
                 }
             }
 
@@ -1061,12 +1072,12 @@ class TMDBService: ObservableObject {
         }
     }
 
-    private func fetchExactKeywordID(named keyword: String) async -> FastAnimeAdultKeywordLookup {
+    private func fetchExactKeywordID(named keyword: String, language: String) async -> FastAnimeAdultKeywordLookup {
         do {
             let url = try tmdbURL(path: "/search/keyword", queryItems: [
                 URLQueryItem(name: "query", value: keyword),
                 URLQueryItem(name: "page", value: "1")
-            ])
+            ], language: language)
             let (data, _) = try await throttledData(from: url)
             let response = try JSONDecoder().decode(TMDBKeywordSearchResponse.self, from: data)
             let normalizedKeyword = Self.normalizedKeyword(keyword)
@@ -1086,11 +1097,11 @@ class TMDBService: ObservableObject {
         }
     }
 
-    private func persistedFastAnimeAdultKeywordIDs() -> [Int]? {
+    private func persistedFastAnimeAdultKeywordIDs(language: String) -> [Int]? {
         guard let data = UserDefaults.standard.data(forKey: Self.fastAnimeAdultKeywordCacheKey),
               let record = try? JSONDecoder().decode(FastAnimeAdultKeywordCacheRecord.self, from: data),
               record.version == Self.fastAnimeAdultKeywordCacheVersion,
-              record.language == currentLanguage,
+              record.language == language,
               record.keywordNames == Self.fastAnimeAdultKeywordNames else {
             return nil
         }
@@ -1122,13 +1133,13 @@ class TMDBService: ObservableObject {
             .joined(separator: " ")
     }
 
-    private func tmdbURL(path: String, queryItems: [URLQueryItem]) throws -> URL {
+    private func tmdbURL(path: String, queryItems: [URLQueryItem], language: String? = nil) throws -> URL {
         guard var components = URLComponents(string: "\(baseURL)\(path)") else {
             throw TMDBError.invalidURL
         }
         components.queryItems = [
             URLQueryItem(name: "api_key", value: apiKey),
-            URLQueryItem(name: "language", value: currentLanguage)
+            URLQueryItem(name: "language", value: language ?? currentLanguage)
         ] + queryItems
         guard let url = components.url else {
             throw TMDBError.invalidURL
@@ -1176,12 +1187,13 @@ class TMDBService: ObservableObject {
     func keywordIDs(for keywordNames: [String]) async -> [String: Int] {
         let uniqueNames = Array(Set(keywordNames.filter { !$0.isEmpty })).sorted()
         guard !uniqueNames.isEmpty else { return [:] }
+        let language = await MainActor.run { currentLanguage }
 
         return await withTaskGroup(of: (String, Int?).self) { group in
             for keywordName in uniqueNames {
                 group.addTask { [weak self] in
                     guard let self else { return (keywordName, nil) }
-                    let lookup = await self.fetchExactKeywordID(named: keywordName)
+                    let lookup = await self.fetchExactKeywordID(named: keywordName, language: language)
                     return (keywordName, lookup.id)
                 }
             }

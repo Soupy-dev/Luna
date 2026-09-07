@@ -630,15 +630,9 @@ struct CollectionCard: View {
                 }
             }
         }
-        .alert("Rename Collection", isPresented: $showingRenameAlert) {
-            TextField("Collection Name", text: $renameText)
-            Button("Cancel", role: .cancel) { }
-            Button("Save") {
-                LibraryManager.shared.renameCollection(collection, name: renameText)
-            }
-        } message: {
-            Text("Enter a new name for this collection.")
-        }
+        .modifier(CollectionRenameAlertModifier(isPresented: $showingRenameAlert, text: $renameText) {
+            LibraryManager.shared.renameCollection(collection, name: renameText)
+        })
 #endif
     }
 
@@ -701,6 +695,96 @@ struct CollectionCard: View {
         }
     }
 }
+
+#if !os(tvOS)
+private struct CollectionRenameAlertModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    @Binding var text: String
+    let onSave: () -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 16.0, *) {
+            content.alert("Rename Collection", isPresented: $isPresented) {
+                TextField("Collection Name", text: $text)
+                Button("Cancel", role: .cancel) { }
+                Button("Save", action: onSave)
+            } message: {
+                Text("Enter a new name for this collection.")
+            }
+        } else {
+            content.background {
+                CollectionRenameAlertPresenter(isPresented: $isPresented, text: $text, onSave: onSave)
+                    .frame(width: 0, height: 0)
+            }
+        }
+    }
+}
+
+private struct CollectionRenameAlertPresenter: UIViewControllerRepresentable {
+    @Binding var isPresented: Bool
+    @Binding var text: String
+    let onSave: () -> Void
+
+    func makeUIViewController(context: Context) -> Controller {
+        Controller()
+    }
+
+    func updateUIViewController(_ controller: Controller, context: Context) {
+        controller.request = self
+        controller.isPresentationRequested = isPresented
+        controller.initialText = text
+        DispatchQueue.main.async { [weak controller] in
+            controller?.updatePresentation()
+        }
+    }
+
+    static func dismantleUIViewController(_ controller: Controller, coordinator: ()) {
+        controller.request = nil
+        controller.alert?.dismiss(animated: false)
+    }
+
+    final class Controller: UIViewController {
+        var request: CollectionRenameAlertPresenter?
+        var isPresentationRequested = false
+        var initialText = ""
+        weak var alert: UIAlertController?
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            updatePresentation()
+        }
+
+        func updatePresentation() {
+            guard request != nil else { return }
+            guard isPresentationRequested else {
+                alert?.dismiss(animated: true)
+                return
+            }
+            guard viewIfLoaded?.window != nil, presentedViewController == nil, alert == nil else { return }
+            let alert = UIAlertController(
+                title: "Rename Collection",
+                message: "Enter a new name for this collection.",
+                preferredStyle: .alert
+            )
+            alert.addTextField { [initialText] in
+                $0.placeholder = "Collection Name"
+                $0.text = initialText
+            }
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+                self?.request?.isPresented = false
+            })
+            alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
+                guard let request = self?.request else { return }
+                request.text = alert?.textFields?.first?.text ?? request.text
+                request.isPresented = false
+                request.onSave()
+            })
+            self.alert = alert
+            present(alert, animated: true)
+        }
+    }
+}
+#endif
 
 #Preview {
     LibraryView()

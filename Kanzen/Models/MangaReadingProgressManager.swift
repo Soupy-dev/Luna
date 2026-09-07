@@ -58,6 +58,11 @@ struct MangaProgress: Codable {
 
     init() {}
 
+    static func displayedPage(position: Int, total: Int) -> Int? {
+        guard total > 0 else { return nil }
+        return min(max(position, 0), total - 1) + 1
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         readChapterNumbers = try container.decodeIfPresent(Set<String>.self, forKey: .readChapterNumbers) ?? []
@@ -186,8 +191,9 @@ final class MangaReadingProgressManager: ObservableObject {
         guard let progress = progressMap[mangaId] else { return nil }
         let zeroBasedPage = storedValue(in: progress.pagePositions, for: chapterNumber)
         let total = storedValue(in: progress.pageCounts, for: chapterNumber)
-        guard let zeroBasedPage, let total, total > 0 else { return nil }
-        return (page: min(max(zeroBasedPage + 1, 1), total), total: total)
+        guard let zeroBasedPage, let total,
+              let page = MangaProgress.displayedPage(position: zeroBasedPage, total: total) else { return nil }
+        return (page: page, total: total)
     }
 
     func pageProgressLabel(mangaId: Int, chapterNumber: String) -> String? {
@@ -294,8 +300,8 @@ final class MangaReadingProgressManager: ObservableObject {
 
         let totalPages = safePageCount ?? storedValue(in: progress.pageCounts, for: chapterNumber) ?? 0
         var didMarkRead = false
-        if totalPages > 0 {
-            let completion = Double(min(safePage + 1, totalPages)) / Double(totalPages)
+        if let displayedPage = MangaProgress.displayedPage(position: safePage, total: totalPages) {
+            let completion = Double(displayedPage) / Double(totalPages)
             if completion >= readThreshold, !containsChapter(chapterNumber, in: progress.readChapterNumbers) {
                 insertChapter(chapterNumber, into: &progress.readChapterNumbers)
                 didMarkRead = true
@@ -483,15 +489,23 @@ final class MangaReadingProgressManager: ObservableObject {
         }
     }
 
-    func bulkMarkChaptersReadForImport(mangaId: Int, throughChapter: Int, mangaTitle: String? = nil, coverURL: String? = nil, totalChapters: Int? = nil) {
-        guard throughChapter >= 1 else { return }
+    @discardableResult
+    func bulkMarkChaptersReadForImport(mangaId: Int, throughChapter: Int, mangaTitle: String? = nil, coverURL: String? = nil, totalChapters: Int? = nil) -> Bool {
+        guard throughChapter >= 1 else { return false }
+        guard TrackerRemoteProgressBoundary.canExpandMangaProgress(throughChapter) else {
+            ReaderLogger.shared.log(
+                "MangaReadingProgressManager: refused bulk import count=\(throughChapter) above the safe expansion limit",
+                type: "Error"
+            )
+            return false
+        }
 
         guard !activeStoreLoadFailed else {
             ReaderLogger.shared.log(
                 "MangaReadingProgressManager: refusing a bulk import mark-read for profile \(activeProfileID): its progress store is unreadable; preserving its bytes",
                 type: "Error"
             )
-            return
+            return false
         }
         var progress = progressMap[mangaId] ?? MangaProgress()
         for chapter in 1...throughChapter {
@@ -507,6 +521,7 @@ final class MangaReadingProgressManager: ObservableObject {
 
         progressMap[mangaId] = progress
         save()
+        return true
     }
 
     func markAllUnread(mangaId: Int) {

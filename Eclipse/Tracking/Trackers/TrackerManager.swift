@@ -587,6 +587,51 @@ enum TrackerRemoteProgressBoundary {
     static let maximumRemoteEntryCount = 100_000
     static let maximumPageCount = 1_000
 
+    enum MALListKind: String {
+        case anime = "animelist"
+        case manga = "mangalist"
+    }
+
+    struct PageSequence {
+        private var pageCount = 0
+        private var seenPageURLs = Set<URL>()
+
+        var canRequestNextPage: Bool {
+            pageCount < TrackerRemoteProgressBoundary.maximumPageCount
+        }
+
+        mutating func beginPage() -> Bool {
+            guard canRequestNextPage else { return false }
+            pageCount += 1
+            return true
+        }
+
+        mutating func beginMALPage(_ url: URL, listKind: MALListKind) -> Bool {
+            guard allowsMALContinuation(url, listKind: listKind), beginPage() else {
+                return false
+            }
+            seenPageURLs.insert(url)
+            return true
+        }
+
+        func allowsMALContinuation(_ url: URL, listKind: MALListKind) -> Bool {
+            canRequestNextPage
+                && TrackerRemoteProgressBoundary.isAllowedMALPageURL(url, listKind: listKind)
+                && !seenPageURLs.contains(url)
+        }
+    }
+
+    static func canExpandMangaProgress(_ count: Int) -> Bool {
+        (0...maximumRemoteEntryCount).contains(count)
+    }
+
+    static func canAppendEntries(_ count: Int, existingCount: Int) -> Bool {
+        guard (0...maximumRemoteEntryCount).contains(existingCount), count >= 0 else {
+            return false
+        }
+        return count <= maximumRemoteEntryCount - existingCount
+    }
+
     static func positiveIdentifier(_ value: Int?) -> Int? {
         guard let value, ProgressPersistencePolicy.validPositiveIdentifier(value) else {
             return nil
@@ -621,14 +666,14 @@ enum TrackerRemoteProgressBoundary {
         return pages <= maximumPageCount ? pages : nil
     }
 
-    static func isAllowedMALPageURL(_ url: URL) -> Bool {
+    static func isAllowedMALPageURL(_ url: URL, listKind: MALListKind = .anime) -> Bool {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return false
         }
         return components.scheme?.lowercased() == "https"
             && components.host?.lowercased() == "api.myanimelist.net"
             && components.port == nil
-            && components.path == "/v2/users/@me/animelist"
+            && components.path == "/v2/users/@me/\(listKind.rawValue)"
     }
 }
 
@@ -11758,11 +11803,15 @@ final class TrackerManager: NSObject, ObservableObject {
             let animePreview = previewForRemoteFill(action: action, entries: animeEntries, sourceName: "AniList")
             let mangaMapped = mangaEntries.filter { $0.anilistId != nil }
             let mangaUnmapped = mangaEntries.count - mangaMapped.count
+            let mangaRejected = mangaMapped.filter { !TrackerRemoteProgressBoundary.canExpandMangaProgress(remoteReadChapters($0)) }.count
             let preview = TrackerSyncPreview(
                 action: action,
                 itemsToAdd: animePreview.itemsToAdd,
-                itemsToAdvance: animePreview.itemsToAdvance + mangaMapped.filter { remoteReadChapters($0) > 0 }.count,
-                skipped: animePreview.skipped + mangaUnmapped,
+                itemsToAdvance: animePreview.itemsToAdvance + mangaMapped.filter {
+                    let read = remoteReadChapters($0)
+                    return read > 0 && TrackerRemoteProgressBoundary.canExpandMangaProgress(read)
+                }.count,
+                skipped: animePreview.skipped + mangaUnmapped + mangaRejected,
                 unmapped: animePreview.unmapped + mangaUnmapped,
                 estimatedAPICalls: estimatedReadCalls(sourceName: "AniList", animeCount: animeEntries.count, mangaCount: mangaEntries.count),
                 notes: ["AniList fill reuses this preview when you run it; local progress is never deleted or downgraded."]
@@ -11789,11 +11838,15 @@ final class TrackerManager: NSObject, ObservableObject {
             let animePreview = previewForRemoteFill(action: action, entries: animeEntries, sourceName: "MAL")
             let mangaMapped = mangaEntries.filter { $0.anilistId != nil }
             let mangaUnmapped = mangaEntries.count - mangaMapped.count
+            let mangaRejected = mangaMapped.filter { !TrackerRemoteProgressBoundary.canExpandMangaProgress(remoteReadChapters($0)) }.count
             let preview = TrackerSyncPreview(
                 action: action,
                 itemsToAdd: animePreview.itemsToAdd,
-                itemsToAdvance: animePreview.itemsToAdvance + mangaMapped.filter { remoteReadChapters($0) > 0 }.count,
-                skipped: animePreview.skipped + mangaUnmapped,
+                itemsToAdvance: animePreview.itemsToAdvance + mangaMapped.filter {
+                    let read = remoteReadChapters($0)
+                    return read > 0 && TrackerRemoteProgressBoundary.canExpandMangaProgress(read)
+                }.count,
+                skipped: animePreview.skipped + mangaUnmapped + mangaRejected,
                 unmapped: animePreview.unmapped + mangaUnmapped,
                 estimatedAPICalls: estimatedReadCalls(sourceName: "MAL", animeCount: animeEntries.count, mangaCount: mangaEntries.count),
                 notes: ["MAL IDs are resolved in batches through AniList, then local progress advances without overwrites."]
@@ -13013,8 +13066,12 @@ final class TrackerManager: NSObject, ObservableObject {
         var orderedMediaIds: [Int] = []
         var chunk = 1
         var hasNextChunk = true
+        var pageSequence = TrackerRemoteProgressBoundary.PageSequence()
 
         while hasNextChunk {
+            guard pageSequence.beginPage() else {
+                throw NSError(domain: "AniList", code: -4, userInfo: [NSLocalizedDescriptionKey: "AniList manga list exceeded the supported page limit."])
+            }
             let query = """
             query($userId: Int!, $chunk: Int!) {
                 MediaListCollection(
@@ -13101,12 +13158,22 @@ final class TrackerManager: NSObject, ObservableObject {
                 throw NSError(domain: "AniList", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: message])
             }
 
+            guard data.count <= 8 * 1_024 * 1_024 else {
+                throw BoundedURLSessionError.responseTooLarge(maximumBytes: 8 * 1_024 * 1_024)
+            }
             let decoded = try JSONDecoder().decode(Response.self, from: data)
             guard let collection = decoded.data?.MediaListCollection else {
                 let message = graphQLErrorMessage(from: data) != nil
                     ? "AniList manga list fetch failed: \(responseBodyPreview(from: data))"
                     : "AniList manga list fetch returned no collection data."
                 throw NSError(domain: "AniList", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: message])
+            }
+
+            guard collection.lists.count <= TrackerRemoteProgressBoundary.maximumRemoteEntryCount,
+                  collection.lists.allSatisfy({
+                      $0.entries.count <= TrackerRemoteProgressBoundary.maximumRemoteEntryCount
+                  }) else {
+                throw NSError(domain: "AniList", code: -4, userInfo: [NSLocalizedDescriptionKey: "AniList manga list exceeded the supported row limit."])
             }
 
             for group in collection.lists {
@@ -13117,6 +13184,9 @@ final class TrackerManager: NSObject, ObservableObject {
                     }
 
                     if entriesByMediaId[media.id] == nil {
+                        guard TrackerRemoteProgressBoundary.canAppendEntries(1, existingCount: orderedMediaIds.count) else {
+                            throw NSError(domain: "AniList", code: -4, userInfo: [NSLocalizedDescriptionKey: "AniList manga list exceeded the supported entry limit."])
+                        }
                         orderedMediaIds.append(media.id)
                     }
 
@@ -13131,6 +13201,9 @@ final class TrackerManager: NSObject, ObservableObject {
                 }
             }
             hasNextChunk = collection.hasNextChunk
+            guard !hasNextChunk || pageSequence.canRequestNextPage else {
+                throw NSError(domain: "AniList", code: -4, userInfo: [NSLocalizedDescriptionKey: "AniList manga list returned an invalid continuation."])
+            }
             chunk += 1
         }
 
@@ -13143,6 +13216,7 @@ final class TrackerManager: NSObject, ObservableObject {
     ) async throws -> [RemoteMangaProgress] {
         var entries: [RemoteMangaProgress] = []
         var nextURL: URL? = URL(string: "https://api.myanimelist.net/v2/users/@me/mangalist?fields=list_status,num_chapters&limit=\(malListPageLimit)&nsfw=true")
+        var pageSequence = TrackerRemoteProgressBoundary.PageSequence()
 
         struct Response: Codable {
             let data: [Entry]
@@ -13181,6 +13255,9 @@ final class TrackerManager: NSObject, ObservableObject {
         }
 
         while let url = nextURL {
+            guard pageSequence.beginMALPage(url, listKind: .manga) else {
+                throw NSError(domain: "MAL", code: -4, userInfo: [NSLocalizedDescriptionKey: "MAL manga list returned an invalid or repeated continuation."])
+            }
             var request = URLRequest(url: url)
             request.setValue("Bearer \(account.accessToken)", forHTTPHeaderField: "Authorization")
 
@@ -13200,7 +13277,13 @@ final class TrackerManager: NSObject, ObservableObject {
                 throw NSError(domain: "MAL", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "MAL manga list fetch failed (\(response.statusCode)): \(diagnostic)"])
             }
 
+            guard data.count <= 8 * 1_024 * 1_024 else {
+                throw BoundedURLSessionError.responseTooLarge(maximumBytes: 8 * 1_024 * 1_024)
+            }
             let decoded = try JSONDecoder().decode(Response.self, from: data)
+            guard TrackerRemoteProgressBoundary.canAppendEntries(decoded.data.count, existingCount: entries.count) else {
+                throw NSError(domain: "MAL", code: -4, userInfo: [NSLocalizedDescriptionKey: "MAL manga list exceeded the supported entry limit."])
+            }
             entries.append(contentsOf: decoded.data.map { item in
                 RemoteMangaProgress(
                     anilistId: nil,
@@ -13211,7 +13294,16 @@ final class TrackerManager: NSObject, ObservableObject {
                     totalChapters: item.node.numChapters
                 )
             })
-            nextURL = decoded.paging?.next.flatMap { URL(string: $0) }
+            if let rawNext = decoded.paging?.next {
+                guard rawNext.utf8.count <= 8 * 1_024,
+                      let parsedNext = URL(string: rawNext),
+                      pageSequence.allowsMALContinuation(parsedNext, listKind: .manga) else {
+                    throw NSError(domain: "MAL", code: -4, userInfo: [NSLocalizedDescriptionKey: "MAL manga list returned an invalid continuation."])
+                }
+                nextURL = parsedNext
+            } else {
+                nextURL = nil
+            }
         }
 
         return entries
@@ -13553,10 +13645,11 @@ final class TrackerManager: NSObject, ObservableObject {
         owner: UUID,
         requiredOperationGeneration: UInt64? = nil
     ) async throws -> TrackerSyncPreview {
-        let counts = try await MainActor.run { () throws -> (advanced: Int, unmapped: Int) in
+        let counts = try await MainActor.run { () throws -> (advanced: Int, unmapped: Int, rejected: Int) in
             try self.requireOwner(owner, operationGeneration: requiredOperationGeneration)
             var advanced = 0
             var unmapped = 0
+            var rejected = 0
 
             for entry in entries {
                 try Task.checkCancellation()
@@ -13567,24 +13660,28 @@ final class TrackerManager: NSObject, ObservableObject {
 
                 let read = remoteReadChapters(entry)
                 if read > 0 {
-                    MangaReadingProgressManager.shared.bulkMarkChaptersReadForImport(
+                    let imported = MangaReadingProgressManager.shared.bulkMarkChaptersReadForImport(
                         mangaId: anilistId,
                         throughChapter: read,
                         mangaTitle: entry.title,
                         totalChapters: entry.totalChapters
                     )
-                    advanced += 1
+                    if imported {
+                        advanced += 1
+                    } else {
+                        rejected += 1
+                    }
                 }
             }
 
-            return (advanced: advanced, unmapped: unmapped)
+            return (advanced: advanced, unmapped: unmapped, rejected: rejected)
         }
 
         return TrackerSyncPreview(
             action: action,
             itemsToAdd: 0,
             itemsToAdvance: counts.advanced,
-            skipped: counts.unmapped,
+            skipped: counts.unmapped + counts.rejected,
             unmapped: counts.unmapped,
             estimatedAPICalls: max(1, entries.count),
             notes: ["\(sourceName) manga fill completed without deleting or downgrading local reader progress."]

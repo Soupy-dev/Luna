@@ -2202,12 +2202,13 @@ extension KanzenWebtoonReaderViewController: ASCollectionDataSource, ASCollectio
         let targetWidth = max(collectionNode.bounds.width * max(layout.zoomScale, 1), UIScreen.main.bounds.width)
         let targetSize = CGSize(width: targetWidth, height: targetWidth * 2)
         let scale = collectionNode.view.window?.screen.scale ?? UIScreen.main.scale
+        let estimatedRatio = estimatedRatio()
         return { [weak self] in
             let node = KanzenWebtoonPageNode(
                 page: page,
                 targetSize: targetSize,
                 scale: scale,
-                estimatedRatio: self?.estimatedRatio() ?? KanzenWebtoonPageNode.defaultRatio
+                estimatedRatio: estimatedRatio
             )
             node.onHeightChanged = { [weak self] page, size, index in
                 self?.updateHeight(page: page, size: size, index: index)

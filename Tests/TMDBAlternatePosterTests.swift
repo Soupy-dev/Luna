@@ -1,5 +1,8 @@
 import XCTest
 @testable import Eclipse
+#if canImport(zlib)
+import zlib
+#endif
 
 #if os(iOS)
 final class TMDBAlternatePosterTests: XCTestCase {
@@ -161,6 +164,174 @@ final class TMDBAlternatePosterTests: XCTestCase {
             iso6391: language,
             voteAverage: average,
             voteCount: votes
+        )
+    }
+}
+
+#if canImport(zlib)
+final class TMDBResponseDecompressionTests: XCTestCase {
+    func testGzipResponseRetainsItsOriginalJSONBytes() {
+        let compressed = Data([
+            31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 171, 86, 42, 74, 45, 46, 205,
+            41, 41, 86, 178, 138, 142, 173, 5, 0, 10, 39, 124, 158, 14, 0, 0, 0
+        ])
+        XCTAssertEqual(
+            TMDBService.inflateResponseData(compressed, windowBits: 15 + 16),
+            Data(#"{"results":[]}"#.utf8)
+        )
+    }
+
+    func testZlibResponseAtExistingEightMiBLimitIsAccepted() throws {
+        let original = Data(repeating: 32, count: 8 * 1_024 * 1_024)
+        let compressed = try compress(original)
+        XCTAssertLessThan(compressed.count, original.count)
+        XCTAssertEqual(TMDBService.inflateResponseData(compressed, windowBits: 15), original)
+    }
+
+    func testCompressedResponseExceedingExistingLimitByOneByteIsRejected() throws {
+        let original = Data(repeating: 32, count: 8 * 1_024 * 1_024 + 1)
+        let compressed = try compress(original)
+        XCTAssertLessThan(compressed.count, 16 * 1_024)
+        XCTAssertNil(TMDBService.inflateResponseData(compressed, windowBits: 15))
+    }
+
+    func testTruncatedCompressedResponseDoesNotReturnPartialJSON() throws {
+        let compressed = try compress(Data(#"{"results":[]}"#.utf8))
+        XCTAssertNil(TMDBService.inflateResponseData(Data(compressed.dropLast()), windowBits: 15))
+    }
+
+    private func compress(_ data: Data) throws -> Data {
+        let sourceCount = uLong(data.count)
+        var outputCount = compressBound(sourceCount)
+        var output = Data(count: Int(outputCount))
+        let status = data.withUnsafeBytes { source in
+            output.withUnsafeMutableBytes { destination -> Int32 in
+                guard let input = source.bindMemory(to: Bytef.self).baseAddress,
+                      let buffer = destination.bindMemory(to: Bytef.self).baseAddress else {
+                    return Z_BUF_ERROR
+                }
+                return compress2(buffer, &outputCount, input, sourceCount, Z_BEST_COMPRESSION)
+            }
+        }
+        guard status == Z_OK else {
+            throw NSError(domain: "TMDBResponseDecompressionTests", code: Int(status))
+        }
+        output.count = Int(outputCount)
+        return output
+    }
+}
+#endif
+
+final class RecommendationCacheOwnershipTests: XCTestCase {
+    func testLateResultPersistsForInactiveOwnerWithoutChangingActiveCache() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ownerID = UUID()
+        let engine = RecommendationEngine(profileID: ownerID, cacheDirectory: directory)
+        let owner = engine.captureCacheOwner()
+        engine.switchProfile(to: UUID())
+
+        engine.storeGeneratedRecommendations([result(id: 1)], for: owner)
+        engine.storeGeneratedBecauseYouWatched(title: "Owner's title", results: [result(id: 2)], for: owner)
+
+        XCTAssertTrue(engine.getRecommendationCache().isEmpty)
+        let reloadedOwner = RecommendationEngine(profileID: ownerID, cacheDirectory: directory)
+        XCTAssertEqual(reloadedOwner.getRecommendationCache().map(\.id), [1])
+        let becauseYouWatched = await reloadedOwner.generateBecauseYouWatched(tmdbService: .shared)
+        XCTAssertEqual(becauseYouWatched.title, "Owner's title")
+        XCTAssertEqual(becauseYouWatched.results.map(\.id), [2])
+    }
+
+    func testReturningToOwnerRejectsPriorActivationResult() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ownerID = UUID()
+        let engine = RecommendationEngine(profileID: ownerID, cacheDirectory: directory)
+        let oldOwner = engine.captureCacheOwner()
+        engine.switchProfile(to: UUID())
+        engine.switchProfile(to: ownerID)
+        let currentOwner = engine.captureCacheOwner()
+        engine.storeGeneratedRecommendations([result(id: 2)], for: currentOwner)
+        engine.storeGeneratedBecauseYouWatched(title: "Current", results: [result(id: 2)], for: currentOwner)
+
+        engine.storeGeneratedRecommendations([result(id: 1)], for: oldOwner)
+        engine.storeGeneratedBecauseYouWatched(title: "Stale", results: [result(id: 1)], for: oldOwner)
+
+        XCTAssertEqual(engine.getRecommendationCache().map(\.id), [2])
+        let reloaded = RecommendationEngine(profileID: ownerID, cacheDirectory: directory)
+        XCTAssertEqual(reloaded.getRecommendationCache().map(\.id), [2])
+        let becauseYouWatched = await reloaded.generateBecauseYouWatched(tmdbService: .shared)
+        XCTAssertEqual(becauseYouWatched.title, "Current")
+        XCTAssertEqual(becauseYouWatched.results.map(\.id), [2])
+    }
+
+    func testInvalidationRejectsPendingResultsAndKeepsDiskEmpty() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ownerID = UUID()
+        let engine = RecommendationEngine(profileID: ownerID, cacheDirectory: directory)
+        let owner = engine.captureCacheOwner()
+        engine.invalidateCache()
+
+        engine.storeGeneratedRecommendations([result(id: 1)], for: owner)
+        engine.storeGeneratedBecauseYouWatched(title: "Stale", results: [result(id: 1)], for: owner)
+
+        XCTAssertTrue(engine.getRecommendationCache().isEmpty)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
+    func testDiscardedOwnerCannotRecreateCacheFromPendingResults() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ownerID = UUID()
+        let engine = RecommendationEngine(profileID: ownerID, cacheDirectory: directory)
+        let owner = engine.captureCacheOwner()
+        engine.switchProfile(to: UUID())
+        engine.discardCaches(forProfile: ownerID)
+
+        engine.storeGeneratedRecommendations([result(id: 1)], for: owner)
+        engine.storeGeneratedBecauseYouWatched(title: "Deleted", results: [result(id: 1)], for: owner)
+
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
+    func testRestoredCacheCannotBeOverwrittenByPendingResult() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ownerID = UUID()
+        let engine = RecommendationEngine(profileID: ownerID, cacheDirectory: directory)
+        let owner = engine.captureCacheOwner()
+        engine.restoreRecommendationCache([result(id: 2)])
+
+        engine.storeGeneratedRecommendations([result(id: 1)], for: owner)
+
+        XCTAssertEqual(engine.getRecommendationCache().map(\.id), [2])
+        let reloaded = RecommendationEngine(profileID: ownerID, cacheDirectory: directory)
+        XCTAssertEqual(reloaded.getRecommendationCache().map(\.id), [2])
+    }
+
+    private func makeDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecommendationCacheTests-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    private func result(id: Int) -> TMDBSearchResult {
+        TMDBSearchResult(
+            id: id,
+            mediaType: "movie",
+            title: "Movie \(id)",
+            name: nil,
+            overview: nil,
+            posterPath: nil,
+            backdropPath: nil,
+            releaseDate: nil,
+            firstAirDate: nil,
+            voteAverage: nil,
+            popularity: 1,
+            adult: false,
+            genreIds: [12]
         )
     }
 }

@@ -1,42 +1,79 @@
 import Foundation
 
+struct RecommendationCacheOwner: Equatable {
+    let profileID: UUID
+    let generation: UUID
+}
+
 final class RecommendationEngine {
     static let shared = RecommendationEngine()
     static let maximumPersistedCacheBytes = 4 * 1_024 * 1_024
     static let maximumCachedResults = 100
-    private init() {
-        activeProfileID = ProfileManager.shared.activeProfileID
+    private convenience init() {
         Self.migrateLegacyCachesIfNeeded()
-        let forYou = Self.loadFromDisk(fileURL: Self.fileURL(for: activeProfileID))
+        self.init(
+            profileID: ProfileManager.shared.activeProfileID,
+            cacheDirectory: Self.documentsDirectory
+        )
+    }
+
+    init(profileID: UUID, cacheDirectory: URL) {
+        activeProfileID = profileID
+        self.cacheDirectory = cacheDirectory
+        cacheGenerations[profileID] = UUID()
+        let forYou = Self.loadFromDisk(fileURL: fileURL(for: activeProfileID))
         cachedRecommendations = forYou.results
         cacheDate = forYou.date
 
-        let byw = Self.loadBYWFromDisk(fileURL: Self.bywFileURL(for: activeProfileID))
+        let byw = Self.loadBYWFromDisk(fileURL: bywFileURL(for: activeProfileID))
         becauseYouWatchedTitle = byw.title
         becauseYouWatchedResults = byw.results
         becauseYouWatchedCacheDate = byw.date
     }
 
     private var activeProfileID: UUID
+    private let cacheDirectory: URL
+    private let stateLock = NSRecursiveLock()
+    private var cacheGenerations: [UUID: UUID] = [:]
+
+    private func withStateLock<T>(_ operation: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return operation()
+    }
+
+    func captureCacheOwner() -> RecommendationCacheOwner {
+        withStateLock {
+            let generation = cacheGenerations[activeProfileID] ?? UUID()
+            cacheGenerations[activeProfileID] = generation
+            return RecommendationCacheOwner(profileID: activeProfileID, generation: generation)
+        }
+    }
 
     func switchProfile(to profileID: UUID) {
-        guard profileID != activeProfileID else { return }
-        flushPendingWrites(forProfile: activeProfileID)
-        activeProfileID = profileID
+        withStateLock {
+            guard profileID != activeProfileID else { return }
+            flushPendingWrites(forProfile: activeProfileID)
+            activeProfileID = profileID
+            cacheGenerations[profileID] = UUID()
 
-        let forYou = Self.loadFromDisk(fileURL: Self.fileURL(for: profileID))
-        cachedRecommendations = forYou.results
-        cacheDate = forYou.date
+            let forYou = Self.loadFromDisk(fileURL: fileURL(for: profileID))
+            cachedRecommendations = forYou.results
+            cacheDate = forYou.date
 
-        let byw = Self.loadBYWFromDisk(fileURL: Self.bywFileURL(for: profileID))
-        becauseYouWatchedTitle = byw.title
-        becauseYouWatchedResults = byw.results
-        becauseYouWatchedCacheDate = byw.date
+            let byw = Self.loadBYWFromDisk(fileURL: bywFileURL(for: profileID))
+            becauseYouWatchedTitle = byw.title
+            becauseYouWatchedResults = byw.results
+            becauseYouWatchedCacheDate = byw.date
+        }
     }
 
     func flushPendingWrites(forProfile outgoing: UUID) {
-        saveToDisk(forProfile: outgoing)
-        saveBYWToDisk(forProfile: outgoing)
+        withStateLock {
+            guard outgoing == activeProfileID else { return }
+            saveToDisk(forProfile: outgoing)
+            saveBYWToDisk(forProfile: outgoing)
+        }
     }
 
     func discardStore(forProfile profileID: UUID) {
@@ -44,10 +81,13 @@ final class RecommendationEngine {
     }
 
     func discardCaches(forProfile profileID: UUID) {
-        try? FileManager.default.removeItem(at: Self.fileURL(for: profileID))
-        try? FileManager.default.removeItem(at: Self.bywFileURL(for: profileID))
-        if profileID == activeProfileID {
-            invalidateCache()
+        withStateLock {
+            cacheGenerations.removeValue(forKey: profileID)
+            try? FileManager.default.removeItem(at: fileURL(for: profileID))
+            try? FileManager.default.removeItem(at: bywFileURL(for: profileID))
+            if profileID == activeProfileID {
+                invalidateCache()
+            }
         }
     }
 
@@ -74,8 +114,8 @@ final class RecommendationEngine {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 
-    private static func fileURL(for profileID: UUID) -> URL {
-        documentsDirectory.appendingPathComponent(
+    private func fileURL(for profileID: UUID) -> URL {
+        cacheDirectory.appendingPathComponent(
             ProfileScopedStorage.documentFileName(
                 base: "RecommendationCache",
                 fileExtension: "json",
@@ -93,8 +133,8 @@ final class RecommendationEngine {
         }
     }
 
-    private static func bywFileURL(for profileID: UUID) -> URL {
-        documentsDirectory.appendingPathComponent(
+    private func bywFileURL(for profileID: UUID) -> URL {
+        cacheDirectory.appendingPathComponent(
             ProfileScopedStorage.documentFileName(
                 base: "BecauseYouWatchedCache",
                 fileExtension: "json",
@@ -108,13 +148,17 @@ final class RecommendationEngine {
         tmdbService: TMDBService
     ) async -> [TMDBSearchResult] {
 
-        if let cacheDate, Date().timeIntervalSince(cacheDate) < cacheTTL, !cachedRecommendations.isEmpty {
-            return cachedRecommendations
+        let capture = await MainActor.run {
+            withStateLock { () -> (owner: RecommendationCacheOwner, cached: [TMDBSearchResult]?, profile: TasteProfile?) in
+                let owner = captureCacheOwner()
+                if let cacheDate, Date().timeIntervalSince(cacheDate) < cacheTTL, !cachedRecommendations.isEmpty {
+                    return (owner, cachedRecommendations, nil)
+                }
+                return (owner, nil, buildTasteProfile())
+            }
         }
-
-        let owner = activeProfileID
-
-        let profile = buildTasteProfile()
+        if let cached = capture.cached { return cached }
+        guard let profile = capture.profile else { return [] }
 
         guard !profile.genreWeights.isEmpty else { return [] }
 
@@ -153,36 +197,40 @@ final class RecommendationEngine {
             .map { $0.result }
 
         let results = Array(ranked)
-        guard owner == activeProfileID else { return results }
-
-        cachedRecommendations = results
-        cacheDate = Date()
-        saveToDisk(forProfile: owner)
-        return cachedRecommendations
+        storeGeneratedRecommendations(results, for: capture.owner)
+        return results
     }
 
     func invalidateCache() {
-        cachedRecommendations = []
-        cacheDate = nil
-        becauseYouWatchedResults = []
-        becauseYouWatchedTitle = ""
-        becauseYouWatchedCacheDate = nil
-        try? FileManager.default.removeItem(at: Self.fileURL(for: activeProfileID))
-        try? FileManager.default.removeItem(at: Self.bywFileURL(for: activeProfileID))
+        withStateLock {
+            cacheGenerations[activeProfileID] = UUID()
+            cachedRecommendations = []
+            cacheDate = nil
+            becauseYouWatchedResults = []
+            becauseYouWatchedTitle = ""
+            becauseYouWatchedCacheDate = nil
+            try? FileManager.default.removeItem(at: fileURL(for: activeProfileID))
+            try? FileManager.default.removeItem(at: bywFileURL(for: activeProfileID))
+        }
     }
 
     func generateBecauseYouWatched(
         tmdbService: TMDBService
     ) async -> (title: String, results: [TMDBSearchResult]) {
 
-        if let cacheDate = becauseYouWatchedCacheDate,
-           Date().timeIntervalSince(cacheDate) < cacheTTL,
-           !becauseYouWatchedResults.isEmpty {
-            return (becauseYouWatchedTitle, becauseYouWatchedResults)
+        let capture = await MainActor.run {
+            withStateLock { () -> (owner: RecommendationCacheOwner, cached: (String, [TMDBSearchResult])?, progress: ProgressData?) in
+                let owner = captureCacheOwner()
+                if let cacheDate = becauseYouWatchedCacheDate,
+                   Date().timeIntervalSince(cacheDate) < cacheTTL,
+                   !becauseYouWatchedResults.isEmpty {
+                    return (owner, (becauseYouWatchedTitle, becauseYouWatchedResults), nil)
+                }
+                return (owner, nil, ProgressManager.shared.getProgressData())
+            }
         }
-
-        let owner = activeProfileID
-        let progressData = ProgressManager.shared.getProgressData()
+        if let cached = capture.cached { return cached }
+        guard let progressData = capture.progress else { return ("", []) }
 
         let movieCandidates = progressData.movieProgress
             .filter { $0.progress >= 0.3 }
@@ -249,13 +297,39 @@ final class RecommendationEngine {
                             Array(showLastWatched.keys))
         recs = recs.filter { !watchedIds.contains($0.id) }
 
-        guard owner == activeProfileID else { return (pick.title, recs) }
-
-        becauseYouWatchedTitle = pick.title
-        becauseYouWatchedResults = recs
-        becauseYouWatchedCacheDate = Date()
-        saveBYWToDisk(forProfile: owner)
+        storeGeneratedBecauseYouWatched(title: pick.title, results: recs, for: capture.owner)
         return (pick.title, recs)
+    }
+
+    func storeGeneratedRecommendations(_ results: [TMDBSearchResult], for owner: RecommendationCacheOwner) {
+        withStateLock {
+            guard cacheGenerations[owner.profileID] == owner.generation else { return }
+            let cache = ForYouCache(results: Self.sanitizedResults(results), date: Date())
+            if owner.profileID == activeProfileID {
+                cachedRecommendations = cache.results
+                cacheDate = cache.date
+            }
+            guard !cache.results.isEmpty,
+                  let data = try? JSONEncoder().encode(cache),
+                  data.count <= Self.maximumPersistedCacheBytes else { return }
+            try? data.write(to: fileURL(for: owner.profileID), options: .atomic)
+        }
+    }
+
+    func storeGeneratedBecauseYouWatched(title: String, results: [TMDBSearchResult], for owner: RecommendationCacheOwner) {
+        withStateLock {
+            guard cacheGenerations[owner.profileID] == owner.generation else { return }
+            let cache = BecauseYouWatchedDiskCache(title: title, results: Self.sanitizedResults(results), date: Date())
+            if owner.profileID == activeProfileID {
+                becauseYouWatchedTitle = cache.title
+                becauseYouWatchedResults = cache.results
+                becauseYouWatchedCacheDate = cache.date
+            }
+            guard !cache.results.isEmpty,
+                  let data = try? JSONEncoder().encode(cache),
+                  data.count <= Self.maximumPersistedCacheBytes else { return }
+            try? data.write(to: bywFileURL(for: owner.profileID), options: .atomic)
+        }
     }
 
     private func saveToDisk(forProfile profileID: UUID) {
@@ -267,7 +341,7 @@ final class RecommendationEngine {
             )
             let data = try JSONEncoder().encode(cache)
             guard data.count <= Self.maximumPersistedCacheBytes else { return }
-            try data.write(to: Self.fileURL(for: profileID), options: .atomic)
+            try data.write(to: fileURL(for: profileID), options: .atomic)
         } catch { }
     }
 
@@ -293,7 +367,7 @@ final class RecommendationEngine {
             )
             let data = try JSONEncoder().encode(cache)
             guard data.count <= Self.maximumPersistedCacheBytes else { return }
-            try data.write(to: Self.bywFileURL(for: profileID), options: .atomic)
+            try data.write(to: bywFileURL(for: profileID), options: .atomic)
         } catch { }
     }
 
@@ -310,13 +384,16 @@ final class RecommendationEngine {
     }
 
     func getRecommendationCache() -> [TMDBSearchResult] {
-        Self.sanitizedResults(cachedRecommendations)
+        withStateLock { Self.sanitizedResults(cachedRecommendations) }
     }
 
     func restoreRecommendationCache(_ items: [TMDBSearchResult]) {
-        cachedRecommendations = Self.sanitizedResults(items)
-        cacheDate = Date()
-        saveToDisk(forProfile: activeProfileID)
+        withStateLock {
+            cacheGenerations[activeProfileID] = UUID()
+            cachedRecommendations = Self.sanitizedResults(items)
+            cacheDate = Date()
+            saveToDisk(forProfile: activeProfileID)
+        }
     }
 
     private static func sanitizedResults(_ results: [TMDBSearchResult]) -> [TMDBSearchResult] {

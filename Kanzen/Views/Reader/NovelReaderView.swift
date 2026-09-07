@@ -138,7 +138,7 @@ struct NovelReaderView: View {
         _fontSize = State(initialValue: fontSize)
         _selectedFont = State(initialValue: defaults.string(forKey: "readerFontFamily") ?? "-apple-system")
         _fontWeight = State(initialValue: defaults.string(forKey: "readerFontWeight") ?? "normal")
-        _selectedColorPreset = State(initialValue: defaults.integer(forKey: "readerColorPreset"))
+        _selectedColorPreset = State(initialValue: BackupData.sanitizedReaderColorPreset(defaults.integer(forKey: "readerColorPreset")))
         _textAlignment = State(initialValue: defaults.string(forKey: "readerTextAlignment") ?? "left")
         _lineSpacing = State(initialValue: lineSpacing)
         _margin = State(initialValue: margin)
@@ -542,7 +542,8 @@ struct NovelReaderView: View {
                         }
                     }
                 }
-            } label: { settingsIcon("textformat.characters") }
+            } label: { settingsIcon(fontMenuSymbolName) }
+            .accessibilityLabel("Font")
 
             Menu {
                 ForEach(weightOptions, id: \.0) { weight in
@@ -580,7 +581,8 @@ struct NovelReaderView: View {
                     Slider(value: Binding(get: { lineSpacing }, set: { lineSpacing = $0; ProfileSettingsStore.active.setNovelCGFloat($0, forKey: "readerLineSpacing") }), in: 1.0...3.0, step: 0.1)
                 }
                 .padding()
-            } label: { settingsIcon("arrow.left.and.right.text.vertical") }
+            } label: { settingsIcon(lineSpacingMenuSymbolName) }
+            .accessibilityLabel("Line Spacing")
 
             Menu {
                 VStack {
@@ -607,6 +609,20 @@ struct NovelReaderView: View {
             } label: { settingsIcon("text.alignleft") }
         }
         .frame(width: 60, alignment: .trailing)
+    }
+
+    private var fontMenuSymbolName: String {
+        if #available(iOS 18.0, *) {
+            return "textformat.characters"
+        }
+        return "textformat"
+    }
+
+    private var lineSpacingMenuSymbolName: String {
+        if #available(iOS 16.0, *) {
+            return "arrow.left.and.right.text.vertical"
+        }
+        return "arrow.up.and.down"
     }
 
     private func settingsIcon(_ name: String) -> some View {

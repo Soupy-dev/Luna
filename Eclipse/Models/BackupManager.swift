@@ -2012,7 +2012,7 @@ struct BackupData: Codable {
         )
         readerFontFamily = try container.decodeIfPresent(String.self, forKey: .readerFontFamily) ?? "-apple-system"
         readerFontWeight = try container.decodeIfPresent(String.self, forKey: .readerFontWeight) ?? "normal"
-        readerColorPreset = try container.decodeIfPresent(Int.self, forKey: .readerColorPreset) ?? 0
+        readerColorPreset = Self.sanitizedReaderColorPreset(try container.decodeIfPresent(Int.self, forKey: .readerColorPreset))
         readerTextAlignment = try container.decodeIfPresent(String.self, forKey: .readerTextAlignment) ?? "left"
         readerLineSpacing = Self.sanitizedReaderLineSpacing(
             try container.decodeIfPresent(Double.self, forKey: .readerLineSpacing)
@@ -2444,7 +2444,7 @@ struct BackupData: Codable {
         try container.encode(Self.sanitizedReaderFontSize(readerFontSize), forKey: .readerFontSize)
         try container.encode(readerFontFamily, forKey: .readerFontFamily)
         try container.encode(readerFontWeight, forKey: .readerFontWeight)
-        try container.encode(readerColorPreset, forKey: .readerColorPreset)
+        try container.encode(Self.sanitizedReaderColorPreset(readerColorPreset), forKey: .readerColorPreset)
         try container.encode(readerTextAlignment, forKey: .readerTextAlignment)
         try container.encode(Self.sanitizedReaderLineSpacing(readerLineSpacing), forKey: .readerLineSpacing)
         try container.encode(Self.sanitizedReaderMargin(readerMargin), forKey: .readerMargin)
@@ -2985,7 +2985,7 @@ struct BackupData: Codable {
         self.readerFontSize = Self.sanitizedReaderFontSize(readerFontSize)
         self.readerFontFamily = readerFontFamily
         self.readerFontWeight = readerFontWeight
-        self.readerColorPreset = readerColorPreset
+        self.readerColorPreset = Self.sanitizedReaderColorPreset(readerColorPreset)
         self.readerTextAlignment = readerTextAlignment
         self.readerLineSpacing = Self.sanitizedReaderLineSpacing(readerLineSpacing)
         self.readerMargin = Self.sanitizedReaderMargin(readerMargin)
@@ -3317,6 +3317,11 @@ struct BackupData: Codable {
             range: 12...32,
             defaultsWhenNonPositive: true
         )
+    }
+
+    static func sanitizedReaderColorPreset(_ value: Int?) -> Int {
+        guard let value, (0...4).contains(value) else { return 0 }
+        return value
     }
 
     static func sanitizedReaderLineSpacing(_ value: Double?) -> Double {
@@ -11389,7 +11394,7 @@ private struct ScopedSettingsDefaults {
         )
         let readerFontFamily = userDefaults.string(forKey: "readerFontFamily") ?? "-apple-system"
         let readerFontWeight = userDefaults.string(forKey: "readerFontWeight") ?? "normal"
-        let readerColorPreset = userDefaults.integer(forKey: "readerColorPreset")
+        let readerColorPreset = BackupData.sanitizedReaderColorPreset(userDefaults.integer(forKey: "readerColorPreset"))
         let readerTextAlignment = userDefaults.string(forKey: "readerTextAlignment") ?? "left"
         let readerLineSpacing = BackupData.sanitizedReaderLineSpacing(
             userDefaults.double(forKey: "readerLineSpacing")
@@ -13669,7 +13674,7 @@ private struct ScopedSettingsDefaults {
         )
         let readerFontFamily = json["readerFontFamily"] as? String ?? "-apple-system"
         let readerFontWeight = json["readerFontWeight"] as? String ?? "normal"
-        let readerColorPreset = json["readerColorPreset"] as? Int ?? 0
+        let readerColorPreset = BackupData.sanitizedReaderColorPreset(json["readerColorPreset"] as? Int)
         let readerTextAlignment = json["readerTextAlignment"] as? String ?? "left"
         let readerLineSpacing = BackupData.sanitizedReaderLineSpacing(
             json["readerLineSpacing"] as? Double
@@ -15195,7 +15200,7 @@ private struct ScopedSettingsDefaults {
         )
         userDefaults.set(backup.readerFontFamily, forKey: "readerFontFamily")
         userDefaults.set(backup.readerFontWeight, forKey: "readerFontWeight")
-        userDefaults.set(backup.readerColorPreset, forKey: "readerColorPreset")
+        userDefaults.set(BackupData.sanitizedReaderColorPreset(backup.readerColorPreset), forKey: "readerColorPreset")
         userDefaults.set(backup.readerTextAlignment, forKey: "readerTextAlignment")
         userDefaults.set(
             BackupData.sanitizedReaderLineSpacing(backup.readerLineSpacing),

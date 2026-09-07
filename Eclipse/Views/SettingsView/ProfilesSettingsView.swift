@@ -1,6 +1,7 @@
 import SwiftUI
 #if canImport(PhotosUI)
 import PhotosUI
+import UniformTypeIdentifiers
 #endif
 #if canImport(LocalAuthentication) && !os(tvOS)
 import LocalAuthentication
@@ -945,28 +946,34 @@ struct ProfileEditorView: View {
         }
 #elseif canImport(PhotosUI)
 
-        if #available(iOS 16.0, macCatalyst 16.0, *) {
-            GlassSection(header: "Photo") {
-                VStack(spacing: 0) {
+        GlassSection(header: "Photo") {
+            VStack(spacing: 0) {
+                if #available(iOS 16.0, macCatalyst 16.0, *) {
                     ProfilePhotoPickerRow(
                         accent: accent,
                         hasPhoto: avatarPhotoData != nil,
                         onPicked: { data in avatarPhotoData = data }
                     )
+                } else {
+                    LegacyProfilePhotoPickerRow(
+                        accent: accent,
+                        hasPhoto: avatarPhotoData != nil,
+                        onPicked: { data in avatarPhotoData = data }
+                    )
+                }
 
-                    if avatarPhotoData != nil {
-                        GlassDivider()
-                        Button {
-                            avatarPhotoData = nil
-                        } label: {
-                            GlassSettingsRow(
-                                icon: "arrow.uturn.backward",
-                                iconColor: .orange,
-                                title: "Use Symbol Instead"
-                            )
-                        }
-                        .buttonStyle(.plain)
+                if avatarPhotoData != nil {
+                    GlassDivider()
+                    Button {
+                        avatarPhotoData = nil
+                    } label: {
+                        GlassSettingsRow(
+                            icon: "arrow.uturn.backward",
+                            iconColor: .orange,
+                            title: "Use Symbol Instead"
+                        )
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1128,6 +1135,83 @@ struct ProfileEditorView: View {
 }
 
 #if canImport(PhotosUI) && !os(tvOS)
+private struct LegacyProfilePhotoPickerRow: View {
+    let accent: Color
+    let hasPhoto: Bool
+    let onPicked: (Data?) -> Void
+
+    @State private var isPresented = false
+
+    var body: some View {
+        Button {
+            isPresented = true
+        } label: {
+            GlassSettingsRow(
+                icon: "photo.fill",
+                iconColor: accent,
+                title: hasPhoto ? "Change Photo" : "Choose Photo"
+            )
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $isPresented) {
+            LegacyProfilePhotoPicker(onPicked: onPicked, onDismiss: { isPresented = false })
+        }
+    }
+}
+
+private struct LegacyProfilePhotoPicker: UIViewControllerRepresentable {
+    let onPicked: (Data?) -> Void
+    let onDismiss: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var configuration = PHPickerConfiguration(photoLibrary: .shared())
+        configuration.filter = .images
+        configuration.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: PHPickerViewController, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    static func dismantleUIViewController(_ controller: PHPickerViewController, coordinator: Coordinator) {
+        coordinator.isActive = false
+    }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        var parent: LegacyProfilePhotoPicker
+        var isActive = true
+        private var selectionID = UUID()
+
+        init(parent: LegacyProfilePhotoPicker) {
+            self.parent = parent
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            let selectionID = UUID()
+            self.selectionID = selectionID
+            guard let provider = results.first?.itemProvider else {
+                parent.onDismiss()
+                return
+            }
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { [weak self] data, _ in
+                let encoded = data.flatMap(ProfileAvatarPhotoEncoder.encode)
+                DispatchQueue.main.async {
+                    guard let self, self.isActive, self.selectionID == selectionID else { return }
+                    if let encoded { self.parent.onPicked(encoded) }
+                    self.parent.onDismiss()
+                }
+            }
+        }
+    }
+}
+
 @available(iOS 16.0, macCatalyst 16.0, *)
 private struct ProfilePhotoPickerRow: View {
     let accent: Color

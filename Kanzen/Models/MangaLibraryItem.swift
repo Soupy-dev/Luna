@@ -31,25 +31,24 @@ struct MangaLibraryItem: Codable, Identifiable, Equatable {
 
     var contentRating: Int? = nil
 
-    var knownChapterNumbers: [String] {
-        if let latestChapterNumbers, !latestChapterNumbers.isEmpty {
-            return ChapterIdentityNormalizer.deduplicatedNumbers(latestChapterNumbers)
-        }
-        if let totalChapters, totalChapters > 0 {
-            return (1...totalChapters).map(String.init)
-        }
-        return []
-    }
-
     func unreadCount(readChapters: Set<String>) -> Int {
-        let known = knownChapterNumbers
-        guard !known.isEmpty else { return 0 }
         let readKeys = Set(readChapters.map { ChapterIdentityNormalizer.key(for: $0) })
-        return known.reduce(into: 0) { count, chapter in
-            if !readKeys.contains(ChapterIdentityNormalizer.key(for: chapter)) {
-                count += 1
+        if let latestChapterNumbers, !latestChapterNumbers.isEmpty {
+            return ChapterIdentityNormalizer.deduplicatedNumbers(latestChapterNumbers).reduce(into: 0) { count, chapter in
+                if !readKeys.contains(ChapterIdentityNormalizer.key(for: chapter)) {
+                    count += 1
+                }
             }
         }
+        guard let totalChapters, totalChapters > 0 else { return 0 }
+        let readCount = readKeys.reduce(into: 0) { count, key in
+            guard let number = ChapterIdentityNormalizer.numericValue(in: key),
+                  let chapter = Int(exactly: number),
+                  chapter > 0, chapter <= totalChapters,
+                  ChapterIdentityNormalizer.key(for: String(chapter)) == key else { return }
+            count += 1
+        }
+        return totalChapters - readCount
     }
 
     static func fromModule(
