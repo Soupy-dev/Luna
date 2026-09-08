@@ -1,5 +1,49 @@
 import Foundation
 
+enum PlaybackSubtitlePrefetchPolicy {
+    enum Source: Hashable {
+        case addon
+        case openSubtitles
+    }
+
+    struct Candidate {
+        let url: String
+        let source: Source
+        let matchesPreferredLanguage: Bool
+    }
+
+    static func urls(
+        candidates: [Candidate],
+        enabledSources: Set<Source>,
+        subtitlesEnabled: Bool,
+        automaticFallbackEnabled: Bool,
+        warmupEnabled: Bool,
+        menuIsOpen: Bool,
+        resourceConstrained: Bool
+    ) -> [String] {
+        guard !resourceConstrained,
+              menuIsOpen || (subtitlesEnabled && automaticFallbackEnabled && warmupEnabled) else {
+            return []
+        }
+        var seen = Set<String>()
+        var sourceCounts: [Source: Int] = [:]
+        var result: [String] = []
+        for candidate in candidates {
+            guard enabledSources.contains(candidate.source),
+                  menuIsOpen || candidate.matchesPreferredLanguage,
+                  sourceCounts[candidate.source, default: 0] < 2,
+                  let url = URL(string: candidate.url),
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  url.host?.isEmpty == false,
+                  seen.insert(candidate.url).inserted else { continue }
+            result.append(candidate.url)
+            sourceCounts[candidate.source, default: 0] += 1
+            if result.count == 4 { break }
+        }
+        return result
+    }
+}
+
 struct PlaybackMediaSelectionIntent: Equatable {
     let preferredAudioLanguage: String?
     let preferredSubtitleLanguage: String?

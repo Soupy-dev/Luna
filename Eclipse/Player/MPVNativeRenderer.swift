@@ -95,6 +95,9 @@ protocol PlayerRenderer: AnyObject {
     func disableSubtitles()
     func refreshSubtitleOverlay()
     func loadExternalSubtitles(urls: [String], names: [String]?, enforce: Bool)
+    func loadExternalSubtitles(urls: [String], names: [String]?, enforce: Bool, headersByURL: [String: [String: String]])
+    func prefetchExternalSubtitles(urls: [String], headersByURL: [String: [String: String]], allowsCellularAccess: Bool)
+    func isExternalSubtitleSelected(url: String) -> Bool?
     func applySubtitleStyle(_ style: SubtitleStyle)
 
     func applyAudioFilterChain(_ chain: String)
@@ -121,6 +124,14 @@ protocol PlayerRenderer: AnyObject {
 }
 
 extension PlayerRenderer {
+
+    func loadExternalSubtitles(urls: [String], names: [String]?, enforce: Bool, headersByURL: [String: [String: String]]) {
+        loadExternalSubtitles(urls: urls, names: names, enforce: enforce)
+    }
+
+    func prefetchExternalSubtitles(urls: [String], headersByURL: [String: [String: String]], allowsCellularAccess: Bool) {}
+
+    func isExternalSubtitleSelected(url: String) -> Bool? { nil }
 
     func applyAudioFilterChain(_ chain: String) {}
 
@@ -3834,6 +3845,19 @@ final class MPVGPUPlayerBridge: PlayerRenderer {
         delegate?.rendererDidChangeTracks(self)
     }
 
+    func loadExternalSubtitles(urls: [String], names: [String]?, enforce: Bool, headersByURL: [String: [String: String]]) {
+        gpuRenderer.loadExternalSubtitles(urls: urls, names: names, selectFirst: enforce, headersByURL: headersByURL)
+        delegate?.rendererDidChangeTracks(self)
+    }
+
+    func prefetchExternalSubtitles(urls: [String], headersByURL: [String: [String: String]], allowsCellularAccess: Bool) {
+        gpuRenderer.prefetchExternalSubtitles(urls: urls, headersByURL: headersByURL, allowsCellularAccess: allowsCellularAccess)
+    }
+
+    func isExternalSubtitleSelected(url: String) -> Bool? {
+        gpuRenderer.currentExternalSubtitleURL() == url
+    }
+
     func applySubtitleStyle(_ style: SubtitleStyle) {
         lastAppliedSubtitleStyle = style
         gpuRenderer.applySubtitleStyle(
@@ -5577,6 +5601,19 @@ final class MPVSampleBufferPiPBridge: PlayerRenderer {
     func loadExternalSubtitles(urls: [String], names: [String]?, enforce: Bool) {
         sampleRenderer.loadExternalSubtitles(urls: urls, names: names, selectFirst: enforce)
         delegate?.rendererDidChangeTracks(self)
+    }
+
+    func loadExternalSubtitles(urls: [String], names: [String]?, enforce: Bool, headersByURL: [String: [String: String]]) {
+        sampleRenderer.loadExternalSubtitles(urls: urls, names: names, selectFirst: enforce, headersByURL: headersByURL)
+        delegate?.rendererDidChangeTracks(self)
+    }
+
+    func prefetchExternalSubtitles(urls: [String], headersByURL: [String: [String: String]], allowsCellularAccess: Bool) {
+        sampleRenderer.prefetchExternalSubtitles(urls: urls, headersByURL: headersByURL, allowsCellularAccess: allowsCellularAccess)
+    }
+
+    func isExternalSubtitleSelected(url: String) -> Bool? {
+        sampleRenderer.currentExternalSubtitleURL() == url
     }
 
     func applySubtitleStyle(_ style: SubtitleStyle) {

@@ -112,6 +112,20 @@ final class PlayerPerformanceOverlayLabel: UILabel {
 }
 
 
+private final class PlayerSubtitleMenuButton: UIButton {
+    var onMenuPresentationChanged: ((Bool) -> Void)?
+
+    override func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willDisplayMenuFor configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
+        super.contextMenuInteraction(interaction, willDisplayMenuFor: configuration, animator: animator)
+        onMenuPresentationChanged?(true)
+    }
+
+    override func contextMenuInteraction(_ interaction: UIContextMenuInteraction, willEndFor configuration: UIContextMenuConfiguration, animator: UIContextMenuInteractionAnimating?) {
+        super.contextMenuInteraction(interaction, willEndFor: configuration, animator: animator)
+        onMenuPresentationChanged?(false)
+    }
+}
+
 #if !os(tvOS)
 private final class NextEpisodePreviewButton: UIButton {
     private let posterImageView = UIImageView()
@@ -273,6 +287,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private var overlayMenuHandlers: [Int: () -> Void] = [:]
     private var nextOverlayMenuHandlerID = 1
     private var overlayMenuKind: String?
+    private var isNativeSubtitleMenuPresented = false
     private lazy var usesOverlayPlayerMenusForSession = false
     private var nativePlayerMenuRebuildSuppressionUntil: CFTimeInterval = 0
     private var nativePlayerMenuRefreshWorkItem: DispatchWorkItem?
@@ -615,8 +630,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         return label
     }()
 
-    private let subtitleButton: UIButton = {
-        let b = UIButton(type: .system)
+    private let subtitleButton: PlayerSubtitleMenuButton = {
+        let b = PlayerSubtitleMenuButton(type: .system)
         b.translatesAutoresizingMaskIntoConstraints = false
         let cfg = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
         let img = UIImage(systemName: "captions.bubble", withConfiguration: cfg)
@@ -2178,7 +2193,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         } else {
             logMPV("rendererLoadExternalSubtitles count=\(urls.count) names=\(names?.count ?? 0) enforce=\(enforce)")
         }
-        renderer.loadExternalSubtitles(urls: urls, names: names, enforce: enforce)
+        let headersByURL = urls.reduce(into: [String: [String: String]]()) { result, url in
+            if let headers = initialSubtitleHeadersByURL?[url] {
+                result[url] = headers
+            } else if onlineSubtitleLoadedURLs.contains(normalizedSubtitleURLKey(url)) {
+                result[url] = [:]
+            }
+        }
+        renderer.loadExternalSubtitles(urls: urls, names: names, enforce: enforce, headersByURL: headersByURL)
         subtitleTrackCacheValid = false
     }
 
@@ -3903,6 +3925,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         NotificationCenter.default.addObserver(self, selector: #selector(appWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(appDidReceiveMemoryWarning), name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+        subtitleButton.onMenuPresentationChanged = { [weak self] isPresented in
+            guard let self else { return }
+            self.isNativeSubtitleMenuPresented = isPresented
+            let generation = self.playbackLoadGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.playbackLoadGeneration == generation else { return }
+                self.refreshOnlineSubtitlePrefetch()
+            }
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(subtitlePreparationConditionsDidChange), name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(subtitlePreparationConditionsDidChange), name: .NSProcessInfoPowerStateDidChange, object: nil)
 #if os(iOS) && ECLIPSE_MPVKIT_MOLTENVK_INLINE_RENDERER && ECLIPSE_MPVKIT_SAMPLE_BUFFER_PIP_BRIDGE && ECLIPSE_MPVKIT_METAL_LIVE_QUALITY_RECONFIGURE
         NotificationCenter.default.addObserver(self, selector: #selector(metalThermalStateDidChange), name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
 #endif
@@ -4475,6 +4508,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         lastSkippedMPVBitmapSubtitleSummary = ""
         vlcExternalSubtitlePriorityDeadline = nil
         nativePlayerMenuRebuildSuppressionUntil = 0
+        isNativeSubtitleMenuPresented = false
         pendingNativePlayerMenuRefreshKinds.removeAll()
         nativePlayerMenuRefreshWorkItem?.cancel()
         nativePlayerMenuRefreshWorkItem = nil
@@ -7500,6 +7534,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     }
 
     @objc private func playerMenuButtonTouchDown(_ sender: UIButton) {
+        if sender === subtitleButton {
+            refreshOnlineSubtitlePrefetch(menuIsOpen: true)
+        }
         let reason: String
         if sender === speedButton {
             reason = "speed-menu"
@@ -7628,6 +7665,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func showOverlayMenu(title: String, kind: String, sections: [PlayerOverlayMenuSection]) {
         guard usesOverlayPlayerMenus else { return }
         overlayMenuKind = kind
+        refreshOnlineSubtitlePrefetch()
         overlayMenuHandlers.removeAll()
         overlayMenuStackView.arrangedSubviews.forEach { view in
             overlayMenuStackView.removeArrangedSubview(view)
@@ -7692,6 +7730,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     private func hideOverlayMenu(animated: Bool = true) {
         guard !overlayMenuPanelView.isHidden else { return }
         overlayMenuKind = nil
+        refreshOnlineSubtitlePrefetch()
         let finish = {
             self.overlayMenuDismissView.isHidden = true
             self.overlayMenuPanelView.isHidden = true
@@ -12325,6 +12364,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                       self.playbackProfileIsStillActive("a subtitle search") else { return }
                 self.stremioSubtitleFetchInProgress = false
                 self.stremioSubtitleResults = self.sortedStremioSubtitleResults(results)
+                self.refreshOnlineSubtitlePrefetch()
                 Logger.shared.log("[PlayerVC.StremioSubtitles] fetch complete reason=\(reason) count=\(results.count)", type: "Player")
                 if autoSelect,
                    self.canAutoApplyStremioSubtitleFallback(),
@@ -12370,6 +12410,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                       self.playbackProfileIsStillActive("a subtitle search") else { return }
                 self.openSubtitlesFetchInProgress = false
                 self.openSubtitlesResults = results
+                self.refreshOnlineSubtitlePrefetch()
                 Logger.shared.log("[PlayerVC.OpenSubtitles] fetch complete reason=\(reason) count=\(results.count)", type: "Player")
                 if autoSelect,
                    self.canAutoApplyOpenSubtitlesFallback(),
@@ -12382,6 +12423,52 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 }
             }
         }
+    }
+
+    @objc private func subtitlePreparationConditionsDidChange() {
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshOnlineSubtitlePrefetch()
+        }
+    }
+
+    private func refreshOnlineSubtitlePrefetch(menuIsOpen: Bool? = nil) {
+        guard isMPVRenderer else { return }
+        guard !isClosing, playbackProfileIsStillActive("subtitle preparation") else {
+            renderer.prefetchExternalSubtitles(urls: [], headersByURL: [:], allowsCellularAccess: false)
+            return
+        }
+        let activeAddonIDs = Set(StremioAddonManager.shared.activeSubtitleAddons.map(\.id))
+        let preferredLanguage = automaticSubtitleSelectionLanguage
+        let addonCandidates = sortedStremioSubtitleResults(stremioSubtitleResults)
+            .filter { activeAddonIDs.contains($0.addon.id) }
+            .compactMap { result -> PlaybackSubtitlePrefetchPolicy.Candidate? in
+                guard let url = result.subtitle.url else { return nil }
+                return .init(url: url, source: .addon, matchesPreferredLanguage: openSubtitleMatchesPreferredLanguage(result.subtitle, preferredLang: preferredLanguage))
+            }
+        let openCandidates = dedupeOpenSubtitles(openSubtitlesResults)
+            .compactMap { subtitle -> PlaybackSubtitlePrefetchPolicy.Candidate? in
+                guard let url = subtitle.url else { return nil }
+                return .init(url: url, source: .openSubtitles, matchesPreferredLanguage: openSubtitleMatchesPreferredLanguage(subtitle, preferredLang: preferredLanguage))
+            }
+        var enabledSources = Set<PlaybackSubtitlePrefetchPolicy.Source>()
+        if hasStremioSubtitleAddons { enabledSources.insert(.addon) }
+        if isVLCOpenSubtitlesEnabled { enabledSources.insert(.openSubtitles) }
+        let process = ProcessInfo.processInfo
+        let urls = PlaybackSubtitlePrefetchPolicy.urls(
+            candidates: addonCandidates + openCandidates,
+            enabledSources: enabledSources,
+            subtitlesEnabled: automaticSubtitlesEnabled,
+            automaticFallbackEnabled: Settings.shared.playerOpenSubtitlesAutoFallbackEnabled,
+            warmupEnabled: ProfileSettingsStore.active.bool(forKey: ExperimentalFeatureState.mpvPreloadEnabledKey),
+            menuIsOpen: menuIsOpen ?? (isNativeSubtitleMenuPresented || overlayMenuKind == "subtitles"),
+            resourceConstrained: process.isLowPowerModeEnabled || process.thermalState == .serious || process.thermalState == .critical
+        )
+        let headersByURL = Dictionary(uniqueKeysWithValues: urls.map { ($0, [String: String]()) })
+        renderer.prefetchExternalSubtitles(
+            urls: urls,
+            headersByURL: headersByURL,
+            allowsCellularAccess: ProfileSettingsStore.active.bool(forKey: ExperimentalFeatureState.mpvPreloadCellularEnabledKey)
+        )
     }
 
     private func prefetchOpenSubtitlesIfEnabled(reason: String) {
@@ -12558,6 +12645,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
     private func isOnlineSubtitleSelected(_ url: String?) -> Bool {
         guard let url else { return false }
+        if let selected = renderer.isExternalSubtitleSelected(url: url) {
+            return selected && subtitleModel.isVisible
+        }
         let key = normalizedSubtitleURLKey(url)
         guard onlineSubtitleLoadedURLs.contains(key),
               lastRequestedEmbeddedSubtitleTrackId == nil,
@@ -12725,6 +12815,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         scheduleSubtitleMenuRefresh()
         prefetchOpenSubtitlesIfEnabled(reason: "settings")
         prefetchStremioSubtitlesIfAvailable(reason: "settings")
+        refreshOnlineSubtitlePrefetch()
 #if !os(tvOS)
         updateBrightnessControlVisibility()
         updateVolumeControlVisibility()
@@ -13782,6 +13873,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 #endif
         if isClosing { return }
         isClosing = true
+        renderer.prefetchExternalSubtitles(urls: [], headersByURL: [:], allowsCellularAccess: false)
         releaseEphemeralProxyOwnership()
         releaseMPVAppExitPictureInPictureOwnership(
             reason: "close-tapped",

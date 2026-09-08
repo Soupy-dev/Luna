@@ -318,3 +318,76 @@ final class PlaybackInputSafetyTests: XCTestCase {
         return try XCTUnwrap(HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers))
     }
 }
+
+final class PlaybackSubtitlePrefetchPolicyTests: XCTestCase {
+    private typealias Policy = PlaybackSubtitlePrefetchPolicy
+
+    private func resolve(
+        _ candidates: [Policy.Candidate],
+        sources: Set<Policy.Source> = [.addon, .openSubtitles],
+        subtitles: Bool = true,
+        fallback: Bool = true,
+        warmup: Bool = true,
+        menu: Bool = false,
+        constrained: Bool = false
+    ) -> [String] {
+        Policy.urls(
+            candidates: candidates,
+            enabledSources: sources,
+            subtitlesEnabled: subtitles,
+            automaticFallbackEnabled: fallback,
+            warmupEnabled: warmup,
+            menuIsOpen: menu,
+            resourceConstrained: constrained
+        )
+    }
+
+    func testAutomaticPreparationRespectsEachExistingSetting() {
+        let candidates = [Policy.Candidate(url: "https://example.invalid/en.srt", source: .addon, matchesPreferredLanguage: true)]
+        XCTAssertEqual(resolve(candidates), [candidates[0].url])
+        XCTAssertTrue(resolve(candidates, subtitles: false).isEmpty)
+        XCTAssertTrue(resolve(candidates, fallback: false).isEmpty)
+        XCTAssertTrue(resolve(candidates, warmup: false).isEmpty)
+    }
+
+    func testOpeningMenuCanPrepareOtherLanguagesWithoutEnablingSubtitles() {
+        let candidates = [Policy.Candidate(url: "https://example.invalid/fr.srt", source: .addon, matchesPreferredLanguage: false)]
+        XCTAssertTrue(resolve(candidates).isEmpty)
+        XCTAssertEqual(resolve(candidates, subtitles: false, fallback: false, warmup: false, menu: true), [candidates[0].url])
+    }
+
+    func testDisabledSourcesStayDisabledEvenWithMenuOpen() {
+        let candidates = [
+            Policy.Candidate(url: "https://example.invalid/addon.srt", source: .addon, matchesPreferredLanguage: true),
+            Policy.Candidate(url: "https://example.invalid/open.srt", source: .openSubtitles, matchesPreferredLanguage: true)
+        ]
+        XCTAssertEqual(resolve(candidates, sources: [.openSubtitles], menu: true), [candidates[1].url])
+        XCTAssertEqual(resolve(candidates, sources: [.addon], menu: true), [candidates[0].url])
+        XCTAssertTrue(resolve(candidates, sources: [], menu: true).isEmpty)
+    }
+
+    func testPreparationIsBoundedPerSourceAndUsesExactURLIdentity() {
+        let candidates = [
+            Policy.Candidate(url: "https://example.invalid/Sub.srt?token=A", source: .addon, matchesPreferredLanguage: true),
+            Policy.Candidate(url: "https://example.invalid/Sub.srt?token=A", source: .addon, matchesPreferredLanguage: true),
+            Policy.Candidate(url: "https://example.invalid/sub.srt?token=A", source: .addon, matchesPreferredLanguage: true),
+            Policy.Candidate(url: "https://example.invalid/third.srt", source: .addon, matchesPreferredLanguage: true),
+            Policy.Candidate(url: "https://example.invalid/Sub.srt?token=B", source: .openSubtitles, matchesPreferredLanguage: true),
+            Policy.Candidate(url: "https://example.invalid/fourth.srt", source: .openSubtitles, matchesPreferredLanguage: true),
+            Policy.Candidate(url: "https://example.invalid/fifth.srt", source: .openSubtitles, matchesPreferredLanguage: true)
+        ]
+        XCTAssertEqual(resolve(candidates), [candidates[0].url, candidates[2].url, candidates[4].url, candidates[5].url])
+    }
+
+    func testInvalidAndLocalURLsDoNotConsumePreparationSlots() {
+        let candidates = ["file:///tmp/a.srt", "magnet:?xt=anything", "https:///", "https://example.invalid/a.srt"]
+            .map { Policy.Candidate(url: $0, source: .addon, matchesPreferredLanguage: true) }
+        XCTAssertEqual(resolve(candidates), ["https://example.invalid/a.srt"])
+    }
+
+    func testResourcePressureSuppressesAutomaticAndMenuPreparation() {
+        let candidates = [Policy.Candidate(url: "https://example.invalid/en.srt", source: .addon, matchesPreferredLanguage: true)]
+        XCTAssertTrue(resolve(candidates, constrained: true).isEmpty)
+        XCTAssertTrue(resolve(candidates, menu: true, constrained: true).isEmpty)
+    }
+}
