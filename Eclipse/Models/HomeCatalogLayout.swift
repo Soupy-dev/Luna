@@ -41,7 +41,9 @@ struct CatalogLayoutOverride: Codable, Equatable {
 
     var sizeScale: Double? = nil
 
-    var isEmpty: Bool { orientation == .global && sizeScale == nil }
+    var cardInfoDisplay: HomeCardInfoDisplay? = nil
+
+    var isEmpty: Bool { orientation == .global && sizeScale == nil && cardInfoDisplay == nil }
 
     static let empty = CatalogLayoutOverride()
 }
@@ -87,6 +89,12 @@ final class HomeCatalogLayoutStore: ObservableObject {
         } else {
             value.sizeScale = nil
         }
+        store(value, for: id)
+    }
+
+    func setCardInfoDisplay(_ display: HomeCardInfoDisplay?, for id: String) {
+        var value = override(for: id)
+        value.cardInfoDisplay = display
         store(value, for: id)
     }
 

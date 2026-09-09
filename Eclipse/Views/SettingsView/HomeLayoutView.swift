@@ -21,8 +21,6 @@ private enum TVCardDensity: String, CaseIterable, Identifiable {
 
 struct HomeLayoutView: View {
 
-    @AppStorage(ExperimentalHomeCardShape.storageKey) private var globalCardShape = ExperimentalHomeCardShape.defaultValue.rawValue
-    @AppStorage(ExperimentalVisualTuning.mediaCardScaleKey) private var globalCardScale = ExperimentalVisualTuning.defaultMediaCardScale
     @AppStorage(ExperimentalMediaDesignPreset.storageKey) private var designPreset = ExperimentalMediaDesignPreset.defaultValue.rawValue
     @AppStorage(ExperimentalVisualTuning.cardRadiusScaleKey) private var cardRadiusScale = ExperimentalVisualTuning.defaultCardRadiusScale
     @AppStorage(ExperimentalVisualTuning.sectionSpacingScaleKey) private var sectionSpacingScale = ExperimentalVisualTuning.defaultSectionSpacingScale
@@ -38,7 +36,6 @@ struct HomeLayoutView: View {
     @AppStorage("heroBannerBehavior") private var heroBannerBehavior = HeroBannerBehavior.defaultValue.rawValue
 
     @StateObject private var catalogManager = CatalogManager.shared
-    @StateObject private var layoutStore = HomeCatalogLayoutStore.shared
     @StateObject private var accentColorManager = AccentColorManager.shared
 
     private var accent: Color { accentColorManager.currentAccentColor }
@@ -52,8 +49,6 @@ struct HomeLayoutView: View {
             globalSection
                 .eclipseExperimentalSettingsRows()
             heroSection
-                .eclipseExperimentalSettingsRows()
-            perCatalogSection
                 .eclipseExperimentalSettingsRows()
         }
         .eclipsePageTitle("Home Layout")
@@ -69,13 +64,6 @@ struct HomeLayoutView: View {
 
     private var globalSection: some View {
         Section {
-            pickerRow(
-                title: "Orientation",
-                description: "Whether shelves prefer poster (tall) or landscape (wide) artwork.",
-                selection: $globalCardShape,
-                values: ExperimentalHomeCardShape.allCases.map { ($0.rawValue, $0.displayName) }
-            )
-
 #if os(tvOS)
             pickerRow(
                 title: "Card Density",
@@ -88,15 +76,6 @@ struct HomeLayoutView: View {
                     }
                 ),
                 values: TVCardDensity.allCases.map { ($0.rawValue, $0.displayName) }
-            )
-#else
-            sliderRow(
-                title: "Size",
-                description: "Scale every home row's cards and widgets.",
-                value: $globalCardScale,
-                range: HomeCatalogLayoutStore.sizeRange,
-                step: 0.05,
-                format: "%.2fx"
             )
 #endif
 
@@ -152,7 +131,7 @@ struct HomeLayoutView: View {
         } header: {
             Text("Global")
         } footer: {
-            Text("These apply to every home row. Override individual rows below.")
+            Text("Orientation, card size and card info (title, year, rating) moved to Settings > Catalogs, where they can also be customized per catalog.")
         }
     }
 
@@ -184,54 +163,6 @@ struct HomeLayoutView: View {
         } header: {
             Text("Hero")
         }
-    }
-
-    private var perCatalogSection: some View {
-        Section {
-            ForEach(sortedCatalogs) { catalog in
-                NavigationLink {
-                    CatalogLayoutEditorView(catalog: catalog)
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(catalog.name)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                            Text(summary(for: catalog))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                    }
-                }
-            }
-
-            Button(role: .destructive) {
-                layoutStore.resetAll()
-            } label: {
-                HStack {
-                    Text("Reset All Catalogs")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Spacer()
-                    Image(systemName: "arrow.counterclockwise")
-                        .foregroundColor(accent)
-                }
-            }
-        } header: {
-            Text("Per Catalog")
-        } footer: {
-            Text("Rows set to Global follow the settings above. Orientation applies to standard poster rows; widget rows support size only.")
-        }
-    }
-
-    private func summary(for catalog: Catalog) -> String {
-        let override = layoutStore.override(for: catalog.id)
-        guard !override.isEmpty else { return "Global" }
-        var parts: [String] = []
-        if override.orientation != .global { parts.append(override.orientation.displayName) }
-        if let scale = override.sizeScale { parts.append(String(format: "%.2fx", scale)) }
-        return parts.isEmpty ? "Global" : parts.joined(separator: " · ")
     }
 
     private var heroBehaviorBinding: Binding<String> {
@@ -323,136 +254,5 @@ struct HomeLayoutView: View {
 #endif
         }
         .padding(.vertical, 2)
-    }
-}
-
-private struct CatalogLayoutEditorView: View {
-    let catalog: Catalog
-
-    @StateObject private var layoutStore = HomeCatalogLayoutStore.shared
-    @StateObject private var accentColorManager = AccentColorManager.shared
-    @AppStorage(ExperimentalVisualTuning.mediaCardScaleKey) private var globalCardScale = ExperimentalVisualTuning.defaultMediaCardScale
-
-    private var accent: Color { accentColorManager.currentAccentColor }
-    private var supportsOrientation: Bool { catalog.displayStyle == .standard }
-    private var effectiveGlobalCardScale: Double {
-#if os(tvOS)
-        ExperimentalVisualTuning.current.mediaCardScale
-#else
-        globalCardScale
-#endif
-    }
-
-    var body: some View {
-        List {
-            if supportsOrientation {
-                Section {
-                    Picker("Orientation", selection: orientationBinding) {
-                        ForEach(CatalogOrientationOverride.allCases) { option in
-                            Text(option.displayName).tag(option)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                } header: {
-                    Text("Orientation")
-                } footer: {
-#if os(tvOS)
-                    Text("Global follows the Home Layout orientation. Automatic chooses one orientation per shelf, using posters for anime or missing backdrop artwork.")
-#else
-                    Text("Global follows the Home Layout orientation. Automatic picks poster or landscape per item.")
-#endif
-                }
-                .eclipseExperimentalSettingsRows()
-            }
-
-            Section {
-                Toggle("Custom size", isOn: customSizeBinding)
-                    .tint(accent)
-
-                if let _ = layoutStore.override(for: catalog.id).sizeScale {
-                    HStack {
-                        Text("Size")
-                            .font(.subheadline)
-                        Spacer()
-                        Text(String(format: "%.2fx", sizeValueBinding.wrappedValue))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .monospacedDigit()
-                    }
-#if os(tvOS)
-                    HStack(spacing: 18) {
-                        Button {
-                            sizeValueBinding.wrappedValue = max(
-                                HomeCatalogLayoutStore.sizeRange.lowerBound,
-                                sizeValueBinding.wrappedValue - 0.05
-                            )
-                        } label: {
-                            Label("Decrease Size", systemImage: "minus")
-                        }
-                        .disabled(sizeValueBinding.wrappedValue <= HomeCatalogLayoutStore.sizeRange.lowerBound)
-
-                        Button {
-                            sizeValueBinding.wrappedValue = min(
-                                HomeCatalogLayoutStore.sizeRange.upperBound,
-                                sizeValueBinding.wrappedValue + 0.05
-                            )
-                        } label: {
-                            Label("Increase Size", systemImage: "plus")
-                        }
-                        .disabled(sizeValueBinding.wrappedValue >= HomeCatalogLayoutStore.sizeRange.upperBound)
-                    }
-#else
-                    Slider(value: sizeValueBinding, in: HomeCatalogLayoutStore.sizeRange, step: 0.05)
-                        .tint(accent)
-#endif
-                }
-            } header: {
-                Text("Size")
-            } footer: {
-                Text("Off follows the global size. Widget rows support size only.")
-            }
-            .eclipseExperimentalSettingsRows()
-
-            Section {
-                Button(role: .destructive) {
-                    layoutStore.reset(id: catalog.id)
-                } label: {
-                    HStack {
-                        Text("Reset to Global")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        Spacer()
-                        Image(systemName: "arrow.counterclockwise")
-                            .foregroundColor(accent)
-                    }
-                }
-            }
-            .eclipseExperimentalSettingsRows()
-        }
-        .eclipsePageTitle(catalog.name)
-        .eclipseSettingsStyle()
-    }
-
-    private var orientationBinding: Binding<CatalogOrientationOverride> {
-        Binding(
-            get: { layoutStore.override(for: catalog.id).orientation },
-            set: { layoutStore.setOrientation($0, for: catalog.id) }
-        )
-    }
-
-    private var customSizeBinding: Binding<Bool> {
-        Binding(
-            get: { layoutStore.override(for: catalog.id).sizeScale != nil },
-            set: { isOn in
-                layoutStore.setSizeScale(isOn ? effectiveGlobalCardScale : nil, for: catalog.id)
-            }
-        )
-    }
-
-    private var sizeValueBinding: Binding<Double> {
-        Binding(
-            get: { layoutStore.override(for: catalog.id).sizeScale ?? effectiveGlobalCardScale },
-            set: { layoutStore.setSizeScale($0, for: catalog.id) }
-        )
     }
 }
