@@ -93,6 +93,40 @@ enum ExperimentalHomeCardShape: String, CaseIterable, Identifiable {
     }
 }
 
+enum HomeCardInfoDisplay: String, Codable, CaseIterable, Identifiable {
+    static let storageKey = "homeCardInfoDisplay"
+
+    case full
+    case titleOnly
+    case titleAndYear
+    case titleAndRating
+    case posterOnly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .full: return "Title, Year & Rating"
+        case .titleOnly: return "Title Only"
+        case .titleAndYear: return "Title & Year"
+        case .titleAndRating: return "Title & Rating"
+        case .posterOnly: return "Poster Only"
+        }
+    }
+
+    var showsTitle: Bool { self != .posterOnly }
+    var showsYear: Bool { self == .full || self == .titleAndYear }
+    var showsRating: Bool { self == .full || self == .titleAndRating }
+    var showsAnyText: Bool { self != .posterOnly }
+
+    static var defaultValue: HomeCardInfoDisplay { .full }
+
+    static var current: HomeCardInfoDisplay {
+        let rawValue = ProfileSettingsStore.active.string(forKey: storageKey)
+        return HomeCardInfoDisplay(rawValue: rawValue ?? "") ?? defaultValue
+    }
+}
+
 enum ExperimentalMultiGradientPalette: String, CaseIterable, Identifiable {
     static let storageKey = "experimentalMultiGradientPalette"
 

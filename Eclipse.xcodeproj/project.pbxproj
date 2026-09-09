@@ -280,6 +280,8 @@
 		AA1111112F10000000AA1111 /* TrackerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1111102F10000000AA1110 /* TrackerManager.swift */; };
 		AA2222222F10000000AA2222 /* TrackerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2222202F10000000AA2220 /* TrackerModels.swift */; };
 		AA3333332F10000000AA3333 /* TrackersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3333302F10000000AA3330 /* TrackersSettingsView.swift */; };
+		AA9999912F10000000AA9991 /* LanguageSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA9999902F10000000AA9990 /* LanguageSettingsView.swift */; };
+		AA9999922F10000000AA9992 /* LanguageSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA9999902F10000000AA9990 /* LanguageSettingsView.swift */; };
 		AA4444442F10000000AA4444 /* ScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA4444402F10000000AA4440 /* ScheduleView.swift */; };
 		AA5555552F10000000AA5555 /* CatalogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5555502F10000000AA5550 /* CatalogManager.swift */; };
 		PROBF0100000000000000001 /* ProfileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROFR0100000000000000001 /* ProfileManager.swift */; };
@@ -595,6 +597,7 @@
 		AA1111102F10000000AA1110 /* TrackerManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackerManager.swift; sourceTree = "<group>"; };
 		AA2222202F10000000AA2220 /* TrackerModels.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackerModels.swift; sourceTree = "<group>"; };
 		AA3333302F10000000AA3330 /* TrackersSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackersSettingsView.swift; sourceTree = "<group>"; };
+		AA9999902F10000000AA9990 /* LanguageSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LanguageSettingsView.swift; sourceTree = "<group>"; };
 		AA4444402F10000000AA4440 /* ScheduleView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ScheduleView.swift; sourceTree = "<group>"; };
 		AA5555502F10000000AA5550 /* CatalogManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CatalogManager.swift; sourceTree = "<group>"; };
 		PROFR0100000000000000001 /* ProfileManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ProfileManager.swift; sourceTree = "<group>"; };
@@ -1417,6 +1420,7 @@
 				14BBB0043FFF111100AAAAAA /* BackupManagementView.swift */,
 				AA3333302F10000000AA3330 /* TrackersSettingsView.swift */,
 				AA6666602F10000000AA6660 /* CatalogsSettingsView.swift */,
+				AA9999902F10000000AA9990 /* LanguageSettingsView.swift */,
 			);
 			path = SettingsView;
 			sourceTree = "<group>";
@@ -1630,6 +1634,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				es,
 				Base,
 			);
 			mainGroup = 13F072522E4B2D3300EF90EB;
@@ -1857,6 +1862,7 @@
 				AA1111112F10000000AA1111 /* TrackerManager.swift in Sources */,
 				AA2222222F10000000AA2222 /* TrackerModels.swift in Sources */,
 				AA3333332F10000000AA3333 /* TrackersSettingsView.swift in Sources */,
+				AA9999912F10000000AA9991 /* LanguageSettingsView.swift in Sources */,
 				AA4444442F10000000AA4444 /* ScheduleView.swift in Sources */,
 				AA5555552F10000000AA5555 /* CatalogManager.swift in Sources */,
 				PROBF0200000000000000002 /* ProfileManager.swift in Sources */,
@@ -2058,6 +2064,7 @@
 				AA1111112F10000000AA1111 /* TrackerManager.swift in Sources */,
 				AA2222222F10000000AA2222 /* TrackerModels.swift in Sources */,
 				AA3333332F10000000AA3333 /* TrackersSettingsView.swift in Sources */,
+				AA9999922F10000000AA9992 /* LanguageSettingsView.swift in Sources */,
 				AA4444442F10000000AA4444 /* ScheduleView.swift in Sources */,
 				AA5555552F10000000AA5555 /* CatalogManager.swift in Sources */,
 				PROBF0100000000000000001 /* ProfileManager.swift in Sources */,

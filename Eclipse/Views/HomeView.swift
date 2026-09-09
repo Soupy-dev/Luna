@@ -131,13 +131,26 @@ private func homeTMDBRatingText(_ voteAverage: Double?) -> String? {
 
 private struct HomeCardSubtitle: View {
     let result: TMDBSearchResult
+    var catalogId: String? = nil
+
+    @AppStorage(HomeCardInfoDisplay.storageKey) private var globalCardInfoDisplayRaw = HomeCardInfoDisplay.defaultValue.rawValue
+    @ObservedObject private var layoutStore = HomeCatalogLayoutStore.shared
+
+    private var cardInfoDisplay: HomeCardInfoDisplay {
+        if let catalogId, let override = layoutStore.override(for: catalogId).cardInfoDisplay {
+            return override
+        }
+        return HomeCardInfoDisplay(rawValue: globalCardInfoDisplayRaw) ?? .defaultValue
+    }
 
     private var year: String? {
-        result.displayDate.isEmpty ? nil : String(result.displayDate.prefix(4))
+        guard cardInfoDisplay.showsYear else { return nil }
+        return result.displayDate.isEmpty ? nil : String(result.displayDate.prefix(4))
     }
 
     private var rating: String? {
-        homeTMDBRatingText(result.voteAverage)
+        guard cardInfoDisplay.showsRating else { return nil }
+        return homeTMDBRatingText(result.voteAverage)
     }
 
     var body: some View {
@@ -1669,7 +1682,8 @@ struct HomeView: View {
                                 title: displayTitle,
                                 initialItems: detailItems
                             ),
-                            metrics: catalogMetrics
+                            metrics: catalogMetrics,
+                            catalogId: catalog.id
                         )
                     }
 
@@ -2720,6 +2734,7 @@ struct MediaSection: View {
     let items: [TMDBSearchResult]
     var destination: DiscoverDetailView?
     var metrics: ExperimentalMediaDesignMetrics = .current
+    var catalogId: String? = nil
 
     var gap: Double { isTvOS ? 50.0 : (isIPad ? 28.0 : 20.0) }
 
@@ -2738,7 +2753,8 @@ struct MediaSection: View {
                 items: items,
                 destination: destination,
                 preferredStyle: title.localizedCaseInsensitiveContains("anime") ? .poster : .automatic,
-                metrics: metrics
+                metrics: metrics,
+                catalogId: catalogId
             )
         } else {
             legacySection
@@ -2775,7 +2791,8 @@ struct MediaSection: View {
                             result: item,
                             heroID: "home-\(title)-\(index)-\(item.stableIdentity)",
                             metrics: metrics,
-                            preferredStyle: shelfStyle
+                            preferredStyle: shelfStyle,
+                            catalogId: catalogId
                         )
                     }
 #if os(tvOS)
@@ -2887,6 +2904,7 @@ struct ExperimentalMediaShelf: View {
     var destination: DiscoverDetailView?
     let preferredStyle: ExperimentalMediaShelfStyle
     let metrics: ExperimentalMediaDesignMetrics
+    var catalogId: String? = nil
 
     private var gap: CGFloat { isIPad ? 22 : 20 }
     private var resolvedStyle: ExperimentalMediaShelfStyle {
@@ -2928,7 +2946,8 @@ struct ExperimentalMediaShelf: View {
                             result: item,
                             heroID: "experimental-home-\(title)-\(index)-\(item.stableIdentity)",
                             preferredStyle: shelfStyle,
-                            metrics: metrics
+                            metrics: metrics,
+                            catalogId: catalogId
                         )
                     }
                 }
@@ -2947,8 +2966,19 @@ struct ExperimentalMediaCard: View {
     let heroID: String
     let preferredStyle: ExperimentalMediaShelfStyle
     let metrics: ExperimentalMediaDesignMetrics
+    var catalogId: String? = nil
 
     @Environment(\.heroNamespace) private var heroNamespace
+    @AppStorage(HomeCardInfoDisplay.storageKey) private var globalCardInfoDisplayRaw = HomeCardInfoDisplay.defaultValue.rawValue
+    @ObservedObject private var layoutStore = HomeCatalogLayoutStore.shared
+    @State private var betterPosterURL: String? = nil
+
+    private var cardInfoDisplay: HomeCardInfoDisplay {
+        if let catalogId, let override = layoutStore.override(for: catalogId).cardInfoDisplay {
+            return override
+        }
+        return HomeCardInfoDisplay(rawValue: globalCardInfoDisplayRaw) ?? .defaultValue
+    }
 
     private var resolvedStyle: ExperimentalMediaShelfStyle {
         switch preferredStyle {
@@ -2984,8 +3014,16 @@ struct ExperimentalMediaCard: View {
         case .landscape, .automatic:
             return result.fullBackdropURL ?? result.fullPosterURL ?? ""
         case .poster:
-            return result.fullPosterURL ?? result.fullBackdropURL ?? ""
+            return betterPosterURL ?? result.fullPosterURL ?? result.fullBackdropURL ?? ""
         }
+    }
+
+    private func resolveBetterPosterIfNeeded() async {
+        guard resolvedStyle == .poster,
+              BetterPostersSettings.isEnabled,
+              BetterPostersSettings.applyToHomeScreen else { return }
+        let imdbId = await IMDbIDCache.shared.imdbId(tmdbId: result.id, isMovie: result.isMovie, tmdbService: .shared)
+        betterPosterURL = BetterPostersSettings.posterURL(imdbId: imdbId)
     }
 
     var body: some View {
@@ -2995,23 +3033,32 @@ struct ExperimentalMediaCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 mediaImage
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(result.displayTitle)
-                        .font(.system(size: resolvedStyle == .poster ? (isIPad ? 19 : 17) : (isIPad ? 21 : 20), weight: .medium))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
+                if cardInfoDisplay.showsAnyText {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if cardInfoDisplay.showsTitle {
+                            Text(result.displayTitle)
+                                .font(.system(size: resolvedStyle == .poster ? (isIPad ? 19 : 17) : (isIPad ? 21 : 20), weight: .medium))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.82)
+                        }
 
-                    HomeCardSubtitle(result: result)
-                        .font(.system(size: isIPad ? 16 : 15, weight: .regular))
-                        .foregroundColor(.white.opacity(0.56))
-                        .lineLimit(1)
+                        if cardInfoDisplay.showsYear || cardInfoDisplay.showsRating {
+                            HomeCardSubtitle(result: result, catalogId: catalogId)
+                                .font(.system(size: isIPad ? 16 : 15, weight: .regular))
+                                .foregroundColor(.white.opacity(0.56))
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(width: cardSize.width, alignment: .leading)
                 }
-                .frame(width: cardSize.width, alignment: .leading)
             }
             .frame(width: cardSize.width, alignment: .leading)
         }
         .buttonStyle(PlainButtonStyle())
+        .task(id: result.id) {
+            await resolveBetterPosterIfNeeded()
+        }
     }
 
     private var mediaImage: some View {
@@ -3078,7 +3125,18 @@ struct MediaCard: View {
     let heroID: String
     var metrics: ExperimentalMediaDesignMetrics = .current
     var preferredStyle: ExperimentalMediaShelfStyle = .poster
+    var catalogId: String? = nil
     @Environment(\.heroNamespace) private var heroNamespace
+    @AppStorage(HomeCardInfoDisplay.storageKey) private var globalCardInfoDisplayRaw = HomeCardInfoDisplay.defaultValue.rawValue
+    @ObservedObject private var layoutStore = HomeCatalogLayoutStore.shared
+    @State private var betterPosterURL: String? = nil
+
+    private var cardInfoDisplay: HomeCardInfoDisplay {
+        if let catalogId, let override = layoutStore.override(for: catalogId).cardInfoDisplay {
+            return override
+        }
+        return HomeCardInfoDisplay(rawValue: globalCardInfoDisplayRaw) ?? .defaultValue
+    }
 
     private var posterWidth: CGFloat { isTvOS ? 280 * metrics.mediaCardScale : 120 * iPadScale }
     private var posterHeight: CGFloat { isTvOS ? 380 * metrics.mediaCardScale : 180 * iPadScale }
@@ -3110,11 +3168,22 @@ struct MediaCard: View {
 #else
         .buttonStyle(PlainButtonStyle())
 #endif
+        .task(id: result.id) {
+            await resolveBetterPosterIfNeeded()
+        }
+    }
+
+    private func resolveBetterPosterIfNeeded() async {
+        guard !usesBackdropCard,
+              BetterPostersSettings.isEnabled,
+              BetterPostersSettings.applyToHomeScreen else { return }
+        let imdbId = await IMDbIDCache.shared.imdbId(tmdbId: result.id, isMovie: result.isMovie, tmdbService: .shared)
+        betterPosterURL = BetterPostersSettings.posterURL(imdbId: imdbId)
     }
 
     private var posterCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            KFImage(URL(string: result.fullPosterURL ?? ""))
+            KFImage(URL(string: betterPosterURL ?? result.fullPosterURL ?? ""))
                 .setProcessor(DownsamplingImageProcessor(size: homeImageDecodeSize(width: posterWidth, height: posterHeight)))
                 .placeholder {
                     FallbackImageView(
@@ -3136,51 +3205,57 @@ struct MediaCard: View {
                 })
                 .heroSource(id: heroID, namespace: heroNamespace)
 
-            VStack(alignment: .leading, spacing: isTvOS ? 10 : 3) {
-                Text(result.displayTitle)
-                    .tvos({ view in
-                        view
-                            .foregroundColor(.white.opacity(0.88))
-                            .font(.system(size: 27, weight: .semibold))
-                    }, else: { view in
-                        view
-                            .foregroundColor(.white)
-                            .fontWeight(.medium)
-                            .font(.caption)
-                    })
-                    .lineLimit(1)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, alignment: .center)
-
-                HStack(alignment: .center, spacing: isTvOS ? 18 : 8) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Image(systemName: "star.fill")
-                            .font(.caption2)
-                            .foregroundColor(.yellow)
-
-                        Text(String(format: "%.1f", result.voteAverage ?? 0.0))
-                            .font(.caption2)
-                            .foregroundColor(.white)
+            if cardInfoDisplay.showsAnyText {
+                VStack(alignment: .leading, spacing: isTvOS ? 10 : 3) {
+                    if cardInfoDisplay.showsTitle {
+                        Text(result.displayTitle)
+                            .tvos({ view in
+                                view
+                                    .foregroundColor(.white.opacity(0.88))
+                                    .font(.system(size: 27, weight: .semibold))
+                            }, else: { view in
+                                view
+                                    .foregroundColor(.white)
+                                    .fontWeight(.medium)
+                                    .font(.caption)
+                            })
                             .lineLimit(1)
-                            .fixedSize()
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, alignment: .center)
                     }
-                    .padding(.horizontal, isTvOS ? 16 : 8)
-                    .padding(.vertical, isTvOS ? 10 : 4)
-                    .applyLiquidGlassBackground(cornerRadius: 12)
 
-                    Spacer()
+                    if cardInfoDisplay.showsRating {
+                        HStack(alignment: .center, spacing: isTvOS ? 18 : 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Image(systemName: "star.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.yellow)
 
-                    Text(result.isMovie ? "Movie" : "TV")
-                        .font(.caption2)
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .padding(.horizontal, isTvOS ? 16 : 8)
-                        .padding(.vertical, isTvOS ? 10 : 4)
-                        .applyLiquidGlassBackground(cornerRadius: 12)
+                                Text(String(format: "%.1f", result.voteAverage ?? 0.0))
+                                    .font(.caption2)
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                            }
+                            .padding(.horizontal, isTvOS ? 16 : 8)
+                            .padding(.vertical, isTvOS ? 10 : 4)
+                            .applyLiquidGlassBackground(cornerRadius: 12)
+
+                            Spacer()
+
+                            Text(result.isMovie ? "Movie" : "TV")
+                                .font(.caption2)
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, isTvOS ? 16 : 8)
+                                .padding(.vertical, isTvOS ? 10 : 4)
+                                .applyLiquidGlassBackground(cornerRadius: 12)
+                        }
+                    }
                 }
+                .frame(width: posterWidth, alignment: .leading)
             }
-            .frame(width: posterWidth, alignment: .leading)
         }
     }
 
@@ -3205,18 +3280,24 @@ struct MediaCard: View {
                 .shadow(color: .black.opacity(0.22), radius: 10, x: 0, y: 5)
                 .heroSource(id: heroID, namespace: heroNamespace)
 
-            VStack(alignment: .leading, spacing: isTvOS ? 8 : 2) {
-                Text(result.displayTitle)
-                    .font(.system(size: isTvOS ? 27 : (isIPad ? 19 : 18), weight: isTvOS ? .semibold : .medium))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .frame(width: backdropWidth, alignment: .leading)
+            if cardInfoDisplay.showsAnyText {
+                VStack(alignment: .leading, spacing: isTvOS ? 8 : 2) {
+                    if cardInfoDisplay.showsTitle {
+                        Text(result.displayTitle)
+                            .font(.system(size: isTvOS ? 27 : (isIPad ? 19 : 18), weight: isTvOS ? .semibold : .medium))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .frame(width: backdropWidth, alignment: .leading)
+                    }
 
-                HomeCardSubtitle(result: result)
-                    .font(.system(size: isTvOS ? 23 : (isIPad ? 15 : 14), weight: .regular))
-                    .foregroundColor(.white.opacity(0.58))
-                    .lineLimit(1)
-                    .frame(width: backdropWidth, alignment: .leading)
+                    if cardInfoDisplay.showsYear || cardInfoDisplay.showsRating {
+                        HomeCardSubtitle(result: result, catalogId: catalogId)
+                            .font(.system(size: isTvOS ? 23 : (isIPad ? 15 : 14), weight: .regular))
+                            .foregroundColor(.white.opacity(0.58))
+                            .lineLimit(1)
+                            .frame(width: backdropWidth, alignment: .leading)
+                    }
+                }
             }
         }
         .frame(width: backdropWidth, alignment: .leading)

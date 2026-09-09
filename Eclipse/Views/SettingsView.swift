@@ -112,6 +112,7 @@ struct SettingsView: View {
 
     private static let baseSettingsSearchEntries: [SettingsSearchEntry] = {
         var entries: [SettingsSearchEntry] = [
+            .init(id: "language", title: "Language", location: "Basic", icon: "globe", color: .blue, keywords: ["interface language", "translation", "español", "spanish", "locale"], action: .destination(.language)),
             .init(id: "performance-mode", title: "Performance Mode", location: "Basic", icon: "bolt.fill", color: .yellow, keywords: ["fast", "AniList", "catalog"], action: .destination(.performance)),
             .init(id: "media-player", title: "Media Player", location: "Basic", icon: "play.fill", color: .white, keywords: ["MPV", "VLC", "AVPlayer", "default player"], action: .destination(.player)),
             .init(id: "playback-speed", title: "Default Playback Speed", location: "Media Player > Default Player", icon: "gauge.with.dots.needle.50percent", color: .orange, keywords: ["playback speed", "rate", "speed"], action: .destination(.playerTarget(.defaultPlaybackSpeed))),
@@ -512,6 +513,22 @@ struct SettingsView: View {
 
                 GlassSection(header: "Basic") {
                     VStack(spacing: 0) {
+                        NavigationLink(destination: settingsSearchableContent(LanguageSettingsView())) {
+                            GlassSettingsRow(icon: "globe", iconColor: .blue, title: "Language") {
+                                HStack(spacing: 4) {
+                                    Text(AppLanguageOption.current.displayName)
+                                        .font(.subheadline)
+                                        .foregroundColor(.white.opacity(0.5))
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.3))
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        GlassDivider()
+
                         NavigationLink(destination: settingsSearchableContent(PerformanceModeSettingsView())) {
                             GlassSettingsRow(icon: "bolt.fill", iconColor: .yellow, title: "Performance Mode") {
                                 HStack(spacing: 4) {
@@ -921,6 +938,8 @@ struct SettingsView: View {
 
     private func settingsSearchDestination(_ destination: SettingsSearchDestination) -> AnyView {
         switch destination {
+        case .language:
+            return AnyView(settingsSearchableContent(LanguageSettingsView()))
         case .performance:
             return AnyView(settingsSearchableContent(PerformanceModeSettingsView()))
         case .player:
@@ -1177,6 +1196,7 @@ struct SettingsSearchContainer<Content: View>: View {
 }
 
 private enum SettingsSearchDestination: Hashable {
+    case language
     case performance
     case player
     case playerTarget(PlayerSettingsSearchTarget)

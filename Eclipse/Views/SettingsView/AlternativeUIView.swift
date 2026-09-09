@@ -204,7 +204,7 @@ struct AlternativeUIView: View {
             } label: {
                 appearanceCategoryLabel(
                     title: "Home Layout",
-                    description: "Size and orientation of home rows, globally or per catalog.",
+                    description: "Layout density, roundness, spacing, and the animated background.",
                     systemImage: "rectangle.grid.1x2"
                 )
             }

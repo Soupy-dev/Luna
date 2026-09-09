@@ -478,6 +478,26 @@ class TMDBService: ObservableObject {
         }
     }
 
+    func fetchExternalImdbId(tmdbId: Int, isMovie: Bool) async -> String? {
+        guard RemoteMediaNumericBoundary.positiveIdentifier(tmdbId) != nil else { return nil }
+        let path = isMovie ? "movie" : "tv"
+        let urlString = "\(baseURL)/\(path)/\(tmdbId)/external_ids?api_key=\(apiKey)"
+        guard let url = URL(string: urlString) else { return nil }
+
+        struct ExternalIdsResponse: Decodable {
+            let imdb_id: String?
+        }
+
+        do {
+            let (data, _) = try await throttledData(from: url)
+            let decoded = try JSONDecoder().decode(ExternalIdsResponse.self, from: data)
+            let imdbId = decoded.imdb_id
+            return (imdbId?.isEmpty ?? true) ? nil : imdbId
+        } catch {
+            return nil
+        }
+    }
+
     func getTVShowWithSeasons(id: Int) async throws -> TMDBTVShowWithSeasons {
         guard RemoteMediaNumericBoundary.positiveIdentifier(id) != nil else {
             throw TMDBError.invalidURL
