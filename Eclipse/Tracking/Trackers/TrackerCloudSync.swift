@@ -296,17 +296,29 @@ enum TrackerCloudSyncError: Error {
 final class TrackerCloudKitTransport: TrackerCloudSyncTransport {
     static let zoneName = "EclipseTrackerAccountsV1"
     static let recordType = "EclipseMediaState"
-    private let database: CKDatabase
+    private var database: CKDatabase?
     private let zoneID = CKRecordZone.ID(
         zoneName: zoneName,
         ownerName: CKCurrentUserDefaultName
     )
 
-    init(database: CKDatabase = CKContainer(identifier: "iCloud.Eclipse.Soupy").privateCloudDatabase) {
+    init(database: CKDatabase? = nil) {
         self.database = database
     }
 
+    private func availableDatabase() throws -> CKDatabase {
+        guard MediaStateSyncBootstrap.hasCloudKitEntitlement else {
+            throw TrackerCloudSyncError.unavailable
+        }
+        if let database { return database }
+        let database = CKContainer(identifier: "iCloud.Eclipse.Soupy").privateCloudDatabase
+        self.database = database
+        return database
+    }
+
     func fetchAll() async throws -> [String: TrackerCloudRemoteRecord] {
+        try Task.checkCancellation()
+        let database = try availableDatabase()
         var records: [String: TrackerCloudRemoteRecord] = [:]
         var token: CKServerChangeToken?
         var receivedCount = 0
@@ -359,6 +371,7 @@ final class TrackerCloudKitTransport: TrackerCloudSyncTransport {
         expected: TrackerCloudRemoteRecord?
     ) async throws -> TrackerCloudSaveResult {
         try Task.checkCancellation()
+        let database = try availableDatabase()
         let id = CKRecord.ID(recordName: record.recordName, zoneID: zoneID)
         let cloudRecord = try encode(record, expected: expected)
         do {
@@ -411,6 +424,8 @@ final class TrackerCloudKitTransport: TrackerCloudSyncTransport {
     }
 
     func deleteZone() async throws {
+        try Task.checkCancellation()
+        let database = try availableDatabase()
         do {
             _ = try await database.deleteRecordZone(withID: zoneID)
         } catch let error as CKError where error.code == .zoneNotFound || error.code == .unknownItem {

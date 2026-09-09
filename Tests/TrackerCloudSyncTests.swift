@@ -885,6 +885,52 @@ final class TrackerCloudSyncTests: XCTestCase {
     }
 
     @MainActor
+    func testTrackerCloudStatusCanLoadWithoutCloudKitEntitlements() throws {
+        try XCTSkipIf(MediaStateSyncBootstrap.hasCloudKitEntitlement)
+
+        let manager = TrackerCloudSyncManager.shared
+
+        XCTAssertFalse(manager.isSyncing)
+    }
+
+    @MainActor
+    func testCloudKitFetchFailsWithoutEntitlements() async throws {
+        try XCTSkipIf(MediaStateSyncBootstrap.hasCloudKitEntitlement)
+        let transport = TrackerCloudKitTransport()
+
+        do {
+            _ = try await transport.fetchAll()
+            XCTFail("A build without CloudKit entitlements must refuse fetching.")
+        } catch TrackerCloudSyncError.unavailable {
+        }
+    }
+
+    @MainActor
+    func testCloudKitSaveFailsWithoutEntitlements() async throws {
+        try XCTSkipIf(MediaStateSyncBootstrap.hasCloudKitEntitlement)
+        let transport = TrackerCloudKitTransport()
+        let record = try authorizedRecord()
+
+        do {
+            _ = try await transport.save(record: record, expected: nil)
+            XCTFail("A build without CloudKit entitlements must refuse saving.")
+        } catch TrackerCloudSyncError.unavailable {
+        }
+    }
+
+    @MainActor
+    func testCloudKitDeletionFailsWithoutEntitlements() async throws {
+        try XCTSkipIf(MediaStateSyncBootstrap.hasCloudKitEntitlement)
+        let transport = TrackerCloudKitTransport()
+
+        do {
+            try await transport.deleteZone()
+            XCTFail("A build without CloudKit entitlements must refuse deletion.")
+        } catch TrackerCloudSyncError.unavailable {
+        }
+    }
+
+    @MainActor
     func testCloudKitCodecReusesDeployedFieldsAndKeepsCredentialsInPayload() throws {
         let value = try authorizedRecord()
         let transport = TrackerCloudKitTransport()

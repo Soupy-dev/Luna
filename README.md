@@ -109,6 +109,7 @@ To add a service/addon, click the top right settings icon in the homescreen and 
 Eclipse is built on the work of many projects and services:
 
 - [Luna](https://github.com/cranci1/Luna) is the original upstream project from which Eclipse was derived.
+- [Mangayomi](https://github.com/kodjodevf/mangayomi/tree/4eec7aca6f1c8bd563d0bc79bcf895f46bb30b74) and [Mangayomi Extensions](https://github.com/kodjodevf/mangayomi-extensions/tree/6004f1f8d1a56f882dadb734ce26f50c626a3850) (Apache 2.0) provide the interface and runtime behavior and five generic parser families adapted by Eclipse's substantially modified Swift Reader extension implementation. Eclipse bundles no provider catalog, provider scripts, provider logos, or site-specific parser configuration.
 - [SkyStream](https://github.com/akashdh11/skystream), created by Akash, defined the plugin format and behavior supported by Eclipse's SkyStream compatibility layer. SkyStream plugins are independent projects and are not bundled with Eclipse.
 - [SkyStream Tools](https://github.com/akashdh11/skystream-tools) (GPLv3) provides the reference SDK and extractor behavior adapted by Eclipse's local compatibility layer.
 - [Nuvio](https://github.com/NuvioMedia/NuvioMobile) defined the plugin format and behavior supported by Eclipse's Nuvio compatibility layer. Nuvio plugins are independent projects and are not bundled with Eclipse.

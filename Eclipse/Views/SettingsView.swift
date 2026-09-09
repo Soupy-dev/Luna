@@ -3777,7 +3777,8 @@ private struct ThirdPartyAcknowledgementsView: View {
     private static let iOSOnlyLineage: [ThirdPartyAcknowledgement] = []
 #else
     private static let iOSOnlyLineage: [ThirdPartyAcknowledgement] = [
-        .init("Eclipse Reader Extensions", detail: "Eclipse's substantially modified Swift implementation adapts Apache-2.0 interface and runtime behavior from Mangayomi revision 4eec7aca and five generic parser families from the archived official Mangayomi Extensions revision 6004f1f8. Eclipse bundles no provider catalog, provider scripts, provider logos, or site-specific parser configuration.", project: "https://github.com/kodjodevf/mangayomi/tree/4eec7aca6f1c8bd563d0bc79bcf895f46bb30b74", licenseName: "Apache 2.0", license: "https://github.com/kodjodevf/mangayomi/blob/4eec7aca6f1c8bd563d0bc79bcf895f46bb30b74/LICENSE", source: "https://github.com/kodjodevf/mangayomi-extensions/tree/6004f1f8d1a56f882dadb734ce26f50c626a3850")
+        .init("Nuvio", detail: "Defined the plugin format and behavior supported by Eclipse's Nuvio compatibility layer. Nuvio plugins are independent projects and are not bundled with Eclipse.", project: "https://github.com/NuvioMedia/NuvioMobile"),
+        .init("Mangayomi & Mangayomi Extensions", detail: "Eclipse's substantially modified Swift implementation adapts Apache-2.0 interface and runtime behavior from Mangayomi revision 4eec7aca and five generic parser families from the archived official Mangayomi Extensions revision 6004f1f8. Eclipse bundles no provider catalog, provider scripts, provider logos, or site-specific parser configuration.", project: "https://github.com/kodjodevf/mangayomi/tree/4eec7aca6f1c8bd563d0bc79bcf895f46bb30b74", licenseName: "Apache 2.0", license: "https://github.com/kodjodevf/mangayomi/blob/4eec7aca6f1c8bd563d0bc79bcf895f46bb30b74/LICENSE", source: "https://github.com/kodjodevf/mangayomi-extensions/tree/6004f1f8d1a56f882dadb734ce26f50c626a3850")
     ]
 #endif
 
